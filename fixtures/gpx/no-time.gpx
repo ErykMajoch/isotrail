@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1" creator="isotrail test fixture">
+  <metadata>
+    <name>Synthetic Untimed Walk</name>
+  </metadata>
+  <trk>
+    <name>Synthetic Untimed Walk</name>
+    <trkseg>
+      <trkpt lat="46.52000" lon="10.02000">
+        <ele>1700.00</ele>
+      </trkpt>
+      <trkpt lat="46.52020" lon="10.02010">
+        <ele>1701.00</ele>
+      </trkpt>
+      <trkpt lat="46.52040" lon="10.02020">
+        <ele>1702.50</ele>
+      </trkpt>
+      <trkpt lat="46.52060" lon="10.02030">
+        <ele>1703.00</ele>
+      </trkpt>
+    </trkseg>
+  </trk>
+</gpx>

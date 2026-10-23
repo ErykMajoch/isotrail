@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1" creator="isotrail test fixture">
+  <metadata>
+    <desc>A planned route with no recording. Two points carry planner timestamps.</desc>
+  </metadata>
+  <rte>
+    <name>Synthetic Planned Traverse</name>
+    <rtept lat="46.54000" lon="10.04000">
+      <ele>2100.00</ele>
+      <time>2025-07-04T06:00:00Z</time>
+    </rtept>
+    <rtept lat="46.54100" lon="10.04100">
+      <ele>2150.00</ele>
+      <time>2025-07-04T06:20:00Z</time>
+    </rtept>
+    <rtept lat="46.54200" lon="10.04150">
+      <ele>2210.00</ele>
+    </rtept>
+    <rtept lat="46.54300" lon="10.04250">
+      <ele>2180.00</ele>
+    </rtept>
+    <rtept lat="46.54400" lon="10.04300">
+      <ele>2120.00</ele>
+    </rtept>
+  </rte>
+</gpx>

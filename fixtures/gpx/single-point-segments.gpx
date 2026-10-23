@@ -1,0 +1,51 @@
+<?xml version="1.0"?>
+<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1" creator="isotrail test fixture">
+  <metadata>
+    <name><![CDATA[Synthetic Stop and Go]]></name>
+  </metadata>
+  <trk>
+    <name><![CDATA[Synthetic Stop and Go]]></name>
+    <trkseg>
+      <trkpt lat="46.51000" lon="10.01000">
+        <ele>1850.00</ele>
+        <time>2025-07-02T07:00:00Z</time>
+      </trkpt>
+    </trkseg>
+    <trkseg>
+      <trkpt lat="46.51010" lon="10.01010">
+        <ele>1850.50</ele>
+        <time>2025-07-02T07:01:00Z</time>
+      </trkpt>
+      <trkpt lat="46.51030" lon="10.01020">
+        <ele>1851.00</ele>
+        <time>2025-07-02T07:01:03Z</time>
+      </trkpt>
+      <trkpt lat="46.51050" lon="10.01030">
+        <ele>1852.25</ele>
+        <time>2025-07-02T07:01:06Z</time>
+      </trkpt>
+    </trkseg>
+    <trkseg>
+      <trkpt lat="46.51060" lon="10.01040">
+        <ele>1852.75</ele>
+        <time>2025-07-02T07:30:06Z</time>
+      </trkpt>
+    </trkseg>
+    <trkseg>
+      <trkpt lat="46.51070" lon="10.01050">
+        <ele>1853.00</ele>
+        <time>2025-07-02T07:31:00Z</time>
+      </trkpt>
+      <trkpt lat="46.51090" lon="10.01060">
+        <ele>1854.50</ele>
+        <time>2025-07-02T07:31:03Z</time>
+      </trkpt>
+      <trkpt lat="46.51110" lon="10.01070">
+        <ele>1855.00</ele>
+        <time>2025-07-02T07:31:06Z</time>
+      </trkpt>
+    </trkseg>
+    <trkseg>
+    </trkseg>
+  </trk>
+</gpx>

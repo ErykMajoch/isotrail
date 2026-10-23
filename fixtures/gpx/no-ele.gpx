@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1" creator="isotrail test fixture">
+  <metadata>
+    <name>Synthetic Flat Stroll</name>
+  </metadata>
+  <trk>
+    <name>Synthetic Flat Stroll</name>
+    <trkseg>
+      <trkpt lat="46.53000" lon="10.03000">
+        <time>2025-07-03T16:00:00Z</time>
+      </trkpt>
+      <trkpt lat="46.53020" lon="10.03010">
+        <time>2025-07-03T16:00:03Z</time>
+      </trkpt>
+      <trkpt lat="46.53040" lon="10.03020">
+        <time>2025-07-03T16:00:06Z</time>
+      </trkpt>
+      <trkpt lat="46.53060" lon="10.03030">
+        <time>2025-07-03T16:00:09Z</time>
+      </trkpt>
+    </trkseg>
+  </trk>
+</gpx>

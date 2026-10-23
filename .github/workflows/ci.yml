@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Installs the toolchain, components and targets pinned in rust-toolchain.toml.
+      # Installs the toolchain, components and targets pinned in rust-toolchain.toml
       - name: Install Rust toolchain
         run: rustup toolchain install
 

@@ -1,0 +1,66 @@
+<?xml version="1.0"?>
+<gpx xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="1.1" creator="isotrail test fixture" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
+  <metadata>
+    <name><![CDATA[Synthetic Ridge Loop]]></name>
+    <desc><![CDATA[Three recording segments separated by two pauses.]]></desc>
+    <bounds minlat="46.50000" minlon="10.00000" maxlat="46.50220" maxlon="10.00300"/>
+  </metadata>
+  <trk>
+    <name><![CDATA[Synthetic Ridge Loop]]></name>
+    <src>isotrail</src>
+    <trkseg>
+      <trkpt lat="46.50000" lon="10.00000">
+        <ele>2000.00</ele>
+        <time>2025-07-01T08:00:00Z</time>
+      </trkpt>
+      <trkpt lat="46.50020" lon="10.00010">
+        <ele>2001.50</ele>
+        <time>2025-07-01T08:00:03Z</time>
+      </trkpt>
+      <trkpt lat="46.50040" lon="10.00025">
+        <ele>2003.25</ele>
+        <time>2025-07-01T08:00:06Z</time>
+      </trkpt>
+      <trkpt lat="46.50060" lon="10.00040">
+        <ele>2004.00</ele>
+        <time>2025-07-01T08:00:09Z</time>
+      </trkpt>
+    </trkseg>
+    <trkseg>
+      <trkpt lat="46.50080" lon="10.00060">
+        <ele>2006.75</ele>
+        <time>2025-07-01T08:12:09Z</time>
+      </trkpt>
+      <trkpt lat="46.50100" lon="10.00080">
+        <ele>2008.00</ele>
+        <time>2025-07-01T08:12:12Z</time>
+      </trkpt>
+      <trkpt lat="46.50120" lon="10.00100">
+        <ele>2010.50</ele>
+        <time>2025-07-01T08:12:15Z</time>
+      </trkpt>
+    </trkseg>
+    <trkseg>
+      <trkpt lat="46.50140" lon="10.00140">
+        <ele>2012.00</ele>
+        <time>2025-07-01T09:05:15Z</time>
+      </trkpt>
+      <trkpt lat="46.50160" lon="10.00180">
+        <ele>2011.25</ele>
+        <time>2025-07-01T09:05:18Z</time>
+      </trkpt>
+      <trkpt lat="46.50180" lon="10.00220">
+        <ele>2009.00</ele>
+        <time>2025-07-01T09:05:21Z</time>
+      </trkpt>
+      <trkpt lat="46.50200" lon="10.00260">
+        <ele>2007.50</ele>
+        <time>2025-07-01T09:05:24Z</time>
+      </trkpt>
+      <trkpt lat="46.50220" lon="10.00300">
+        <ele>2005.00</ele>
+        <time>2025-07-01T09:05:27Z</time>
+      </trkpt>
+    </trkseg>
+  </trk>
+</gpx>

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1" creator="isotrail test fixture">
+  <metadata>
+    <name><![CDATA[Dzień 1 | Grań nad łąką & żlebem (1)]]></name>
+    <desc>Śnieg, mgła &amp; wiatr &#8212; widok &lt;3 🏔</desc>
+  </metadata>
+  <trk>
+    <name>Zażółć gęślą jaźń | track</name>
+    <trkseg>
+      <trkpt lat="46.55000" lon="10.05000">
+        <ele>1950.00</ele>
+        <time>2025-07-05T10:00:00Z</time>
+      </trkpt>
+      <trkpt lat="46.55020" lon="10.05010">
+        <ele>1951.00</ele>
+        <time>2025-07-05T10:00:03Z</time>
+      </trkpt>
+      <trkpt lat="46.55040" lon="10.05020">
+        <ele>1952.00</ele>
+        <time>2025-07-05T10:00:06Z</time>
+      </trkpt>
+    </trkseg>
+  </trk>
+</gpx>
