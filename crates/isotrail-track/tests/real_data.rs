@@ -95,3 +95,98 @@ fn real_recordings_parse_and_match_expectations() {
 
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+fn number(table: &toml::Table, key: &str) -> Option<f64> {
+    match table.get(key)? {
+        toml::Value::Integer(i) => Some(*i as f64),
+        toml::Value::Float(f) => Some(*f),
+        _ => panic!("`{key}` must be a number"),
+    }
+}
+
+fn within(actual: f64, want: f64, tolerance: f64) -> bool {
+    (actual - want).abs() <= want.abs() * tolerance
+}
+
+#[test]
+#[ignore = "reads local recordings from input/"]
+fn real_recordings_stats_match_expectations() {
+    let dir = input_dir();
+    let files = gpx_files(&dir);
+    if files.is_empty() {
+        eprintln!("skipped: no .gpx files in {}", dir.display());
+        return;
+    }
+    let expected = expectations(&dir);
+    let mut failures = Vec::new();
+
+    for path in &files {
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let mut file = File::open(path).unwrap();
+        let stats = GpxReader
+            .read(&mut file)
+            .and_then(|track| track.clean())
+            .and_then(|track| track.stats())
+            .unwrap_or_else(|err| panic!("{name}: {err}"));
+        let distance_km = stats.distance_m / 1000.0;
+        let gain = stats.gain_m.unwrap_or(f64::NAN);
+        let moving_min = stats
+            .moving
+            .map_or(f64::NAN, |d| d.num_seconds() as f64 / 60.0);
+        eprintln!(
+            "{name}\n  {distance_km:.2} km, gain {gain:.0} m, loss {:.0} m, \
+             elevation {:?}..{:?} m\n  elapsed {:?}, moving {moving_min:.0} min, zone {:?}",
+            stats.loss_m.unwrap_or(f64::NAN),
+            stats.min_ele_m,
+            stats.max_ele_m,
+            stats.elapsed.map(|d| d.num_minutes()),
+            stats.timezone.map(|tz| tz.name()),
+        );
+
+        let Some(expected) = expected.get(&name).and_then(|v| v.as_table()) else {
+            eprintln!("  no expectations for this file");
+            continue;
+        };
+        let mut check = |what: &str, actual: f64, want: Option<f64>, tolerance: f64| {
+            if let Some(want) = want
+                && !within(actual, want, tolerance)
+            {
+                failures.push(format!(
+                    "{name}: {what} is {actual:.2}, expected {want} ±{:.0}%",
+                    tolerance * 100.0
+                ));
+            }
+        };
+        check(
+            "distance_km",
+            distance_km,
+            number(expected, "distance_km"),
+            0.01,
+        );
+        check(
+            "distance_km (AllTrails)",
+            distance_km,
+            number(expected, "alltrails_distance_km"),
+            0.02,
+        );
+        check(
+            "moving_min (AllTrails)",
+            moving_min,
+            number(expected, "alltrails_moving_min"),
+            0.10,
+        );
+        if let Some(want) = number(expected, "alltrails_gain_m") {
+            check("gain_m (AllTrails)", gain, Some(want), 0.10);
+        } else if let (Some(low), Some(high)) = (
+            number(expected, "gain_ma9_m"),
+            number(expected, "gain_raw_m"),
+        ) && !(low..=high).contains(&gain)
+        {
+            failures.push(format!(
+                "{name}: gain_m is {gain:.0}, expected between {low} and {high}"
+            ));
+        }
+    }
+
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

@@ -11,7 +11,17 @@ name = "isotrail"
 path = "src/main.rs"
 
 [dependencies]
+anyhow.workspace = true
+chrono.workspace = true
 clap.workspace = true
+isotrail-track = { path = "../isotrail-track" }
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [lints]
 workspace = true

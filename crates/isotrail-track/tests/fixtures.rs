@@ -1,6 +1,6 @@
 //! Reads the synthetic GPX files in `fixtures/gpx/`
 
-use chrono::{TimeZone, Utc};
+use chrono::{TimeDelta, TimeZone, Utc};
 use isotrail_track::{GpxReader, Track, TrackError, TrackReader};
 
 macro_rules! fixture {
@@ -126,4 +126,99 @@ fn non_ascii_name_survives() {
 fn empty_file_is_an_error() {
     let err = GpxReader.parse(fixture!("empty.gpx")).unwrap_err();
     assert!(matches!(err, TrackError::EmptyInput), "{err:?}");
+}
+
+#[test]
+fn multi_segment_stats() {
+    let stats = GpxReader
+        .parse(fixture!("multi-segment.gpx"))
+        .unwrap()
+        .clean()
+        .unwrap()
+        .stats()
+        .unwrap();
+    assert_eq!((stats.points, stats.segments), (12, 3));
+    assert!(
+        (stats.distance_m - 343.772).abs() < 0.01,
+        "{}",
+        stats.distance_m
+    );
+    let (gain, loss) = (stats.gain_m.unwrap(), stats.loss_m.unwrap());
+    assert!((gain - 10.042).abs() < 0.01, "{gain}");
+    assert!((loss - 4.458).abs() < 0.01, "{loss}");
+    assert_eq!(
+        (stats.min_ele_m, stats.max_ele_m),
+        (Some(2000.0), Some(2012.0))
+    );
+    assert_eq!(
+        stats.elapsed,
+        Some(TimeDelta::hours(1) + TimeDelta::minutes(5) + TimeDelta::seconds(27))
+    );
+    assert_eq!(stats.moving, Some(TimeDelta::seconds(27)));
+    assert_eq!(
+        stats.start,
+        Some(Utc.with_ymd_and_hms(2025, 7, 1, 8, 0, 0).unwrap())
+    );
+    assert_eq!(
+        stats.end,
+        Some(Utc.with_ymd_and_hms(2025, 7, 1, 9, 5, 27).unwrap())
+    );
+    assert_eq!(
+        (
+            stats.bounds.min_lat,
+            stats.bounds.min_lon,
+            stats.bounds.max_lat,
+            stats.bounds.max_lon
+        ),
+        (46.5, 10.0, 46.5022, 10.003)
+    );
+    let local = stats.start_local().unwrap();
+    assert_eq!(
+        local.format("%H:%M %Z").to_string(),
+        "10:00 CEST",
+        "{:?}",
+        stats.timezone
+    );
+}
+
+#[test]
+fn stats_without_time_or_elevation() {
+    let no_time = GpxReader
+        .parse(fixture!("no-time.gpx"))
+        .unwrap()
+        .clean()
+        .unwrap()
+        .stats()
+        .unwrap();
+    assert_eq!(
+        (no_time.elapsed, no_time.moving, no_time.start),
+        (None, None, None)
+    );
+    assert!(no_time.gain_m.is_some());
+
+    let no_ele = GpxReader
+        .parse(fixture!("no-ele.gpx"))
+        .unwrap()
+        .clean()
+        .unwrap()
+        .stats()
+        .unwrap();
+    assert_eq!((no_ele.gain_m, no_ele.min_ele_m), (None, None));
+    assert!(no_ele.moving.is_some());
+}
+
+#[test]
+fn simplified_track_keeps_its_ends() {
+    let track = GpxReader
+        .parse(fixture!("multi-segment.gpx"))
+        .unwrap()
+        .clean()
+        .unwrap();
+    let simple = track.simplified(5.0);
+    assert_eq!(simple.segments.len(), track.segments.len());
+    assert!(simple.point_count() < track.point_count());
+    for (a, b) in simple.segments.iter().zip(&track.segments) {
+        assert_eq!(a.points.first(), b.points.first());
+        assert_eq!(a.points.last(), b.points.last());
+    }
 }

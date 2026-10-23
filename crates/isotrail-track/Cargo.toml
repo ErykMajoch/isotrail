@@ -8,9 +8,12 @@ repository.workspace = true
 
 [dependencies]
 chrono.workspace = true
+chrono-tz.workspace = true
+geo.workspace = true
 quick-xml.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+tzf-rs.workspace = true
 
 [dev-dependencies]
 toml.workspace = true
