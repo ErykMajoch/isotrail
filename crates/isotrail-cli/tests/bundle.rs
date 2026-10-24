@@ -292,3 +292,34 @@ fn stats_of_a_damaged_bundle_explains_why() {
         assert!(stderr.contains(reason), "{stderr}");
     }
 }
+
+#[test]
+fn exaggeration_can_be_set_by_hand() {
+    let temp = tempfile::tempdir().unwrap();
+    let cache_dir = temp.path().join("cache");
+    warm(&cache_dir, true);
+    let itb = temp.path().join("snowdon.itb");
+    let args = [
+        "bundle",
+        &gpx(),
+        "-o",
+        itb.to_str().unwrap(),
+        "--detail",
+        "32",
+        "--offline",
+        "--exaggeration",
+        "7.5",
+    ];
+    let output = isotrail(&cache_dir, &args);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert!(text(&output.stdout).contains(" m, drawn 7.5× taller\n"));
+    let bundle = SceneBundle::from_bytes(&std::fs::read(&itb).unwrap()).unwrap();
+    assert_eq!(bundle.grid.exaggeration, 7.5);
+
+    let output = isotrail(
+        &cache_dir,
+        &["bundle", &gpx(), "-o", "x.itb", "--exaggeration", "0"],
+    );
+    assert!(!output.status.success());
+    assert!(text(&output.stderr).contains("must be between 0.1 and 100"));
+}

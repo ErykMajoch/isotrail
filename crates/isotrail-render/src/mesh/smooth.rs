@@ -1,9 +1,9 @@
 use isotrail_bundle::{Landcover, SceneBundle};
 
-use super::{Mesher, TerrainMesh, landcover_rgba, slab_position};
+use super::{Columns, Mesher, TerrainMesh, landcover_rgba, slab_position, strata};
 
 /// A height at every cell corner and two flat-shaded triangles per cell,
-/// coloured by the cell's landcover
+/// coloured by the cell's landcover, over layered slab sides
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SmoothMesher;
 
@@ -28,6 +28,16 @@ impl Mesher for SmoothMesher {
                 mesh.push_triangle([bottom_left, top_right, top_left], colour);
             }
         }
+        let block = grid.cell_size_m as f32;
+        let columns = Columns::new(grid, bundle.terrain.landcover.clone());
+        strata::cut_faces(
+            &columns,
+            bundle.prop_seed,
+            block,
+            strata::base(block),
+            &mut mesh,
+            |_, (col, row)| corners[row * (cols + 1) + col],
+        );
         mesh
     }
 }
@@ -74,21 +84,27 @@ mod tests {
     use isotrail_testkit::{bundle, grid};
 
     use super::*;
+    use crate::mesh::strata::base;
 
     fn mesh(grid: GridInfo, heights: &[f32], classes: &[Landcover]) -> TerrainMesh {
         SmoothMesher.mesh(&bundle(grid, heights, classes))
     }
 
+    /// The terrain's own triangles, without the slab sides
+    fn surface(mesh: &TerrainMesh) -> impl Iterator<Item = &[crate::Vertex; 3]> {
+        mesh.triangles().filter(|t| t[0].normal[2] > 0.1)
+    }
+
     #[test]
-    fn two_triangles_per_cell_cover_the_slab() {
+    fn two_triangles_per_cell_cover_the_slab_over_its_base() {
         let mesh = mesh(grid(3, 2, 10.0), &[100.0; 6], &[Landcover::Grassland; 6]);
-        assert_eq!(mesh.triangles().count(), 12);
+        assert_eq!(surface(&mesh).count(), 12);
         let (min, max) = mesh
             .positions()
             .fold((Vec3::INFINITY, Vec3::NEG_INFINITY), |(min, max), p| {
                 (min.min(p), max.max(p))
             });
-        assert_eq!(min, Vec3::new(-15.0, -10.0, 0.0));
+        assert_eq!(min, Vec3::new(-15.0, -10.0, base(10.0)));
         assert_eq!(max, Vec3::new(15.0, 10.0, 0.0));
     }
 
@@ -101,14 +117,15 @@ mod tests {
             Landcover::Snow,
         ];
         let mesh = mesh(grid(2, 2, 5.0), &[40.0; 4], &classes);
-        for triangle in mesh.triangles() {
+        assert_eq!(surface(&mesh).count(), 8);
+        for triangle in surface(&mesh) {
             for vertex in triangle {
                 assert_eq!(vertex.normal, [0.0, 0.0, 1.0]);
             }
         }
         // Cells in row-major order, rows from the +y edge
         let cell_colour = |x: f32, y: f32| {
-            mesh.triangles()
+            surface(&mesh)
                 .find(|t| {
                     let c = t.iter().map(|v| Vec3::from(v.position)).sum::<Vec3>() / 3.0;
                     (c.x < 0.0) == (x < 0.0) && (c.y < 0.0) == (y < 0.0)
@@ -134,7 +151,8 @@ mod tests {
         let mesh = mesh(grid, &heights, &[Landcover::Grassland; 6]);
         let top = mesh.positions().map(|p| p.z).fold(0.0, f32::max);
         assert!((top - 40.0).abs() < 1e-3, "{top}");
-        for triangle in mesh.triangles() {
+        assert_eq!(surface(&mesh).count(), 12);
+        for triangle in surface(&mesh) {
             let n = Vec3::from(triangle[0].normal);
             assert!(n.z > 0.0 && n.x <= 0.0, "{n}");
             assert!((n.length() - 1.0).abs() < 1e-5);
@@ -155,7 +173,7 @@ mod tests {
         classes[6] = Landcover::Water;
         let mesh = mesh(grid(4, 3, 10.0), &heights, &classes);
         let water = landcover_rgba(u8::from(Landcover::Water));
-        let lake: Vec<_> = mesh.triangles().filter(|t| t[0].colour == water).collect();
+        let lake: Vec<_> = surface(&mesh).filter(|t| t[0].colour == water).collect();
         assert_eq!(lake.len(), 4);
         for vertex in lake.into_iter().flatten() {
             assert!(vertex.position[2].abs() < 1e-3, "{vertex:?}");

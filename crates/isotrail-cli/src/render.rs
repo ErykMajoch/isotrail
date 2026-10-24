@@ -1,10 +1,11 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
-use clap::Args;
+use clap::{Args, ValueEnum};
 use isotrail_bundle::SceneBundle;
 use isotrail_export::{DEFAULT_SCALE, render_still, upscale, write_png};
-use isotrail_render::{Aspect, DEFAULT_YAW_OFFSET_DEG, Gpu, SmoothMesher};
+use isotrail_render::{Aspect, DEFAULT_YAW_OFFSET_DEG, Gpu, Mesher, SmoothMesher, VoxelMesher};
+use tracing::info;
 
 use crate::bundle::DataArgs;
 
@@ -18,13 +19,64 @@ pub struct RenderArgs {
     #[arg(short, long, value_name = "IMAGE")]
     output: Option<PathBuf>,
 
+    /// How to build the terrain: stepped blocks or a smooth low-poly surface
+    #[arg(long, value_enum, default_value_t = MesherArg::Voxel)]
+    mesher: MesherArg,
+
+    /// Height of a voxel block as a share of its width (default 1)
+    #[arg(long, value_name = "F", value_parser = parse_block_height)]
+    block_height: Option<f32>,
+
+    /// How many times taller than life to draw the terrain; chosen from the
+    /// slab's size and relief by default
+    #[arg(long, value_name = "X", value_parser = crate::bundle::parse_exaggeration)]
+    exaggeration: Option<f64>,
+
     #[command(flatten)]
     data: DataArgs,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum MesherArg {
+    Voxel,
+    Smooth,
+}
+
+impl RenderArgs {
+    fn mesher(&self) -> anyhow::Result<Box<dyn Mesher>> {
+        Ok(match self.mesher {
+            MesherArg::Voxel => Box::new(VoxelMesher {
+                block_height: self
+                    .block_height
+                    .unwrap_or(VoxelMesher::default().block_height),
+            }),
+            MesherArg::Smooth => {
+                if self.block_height.is_some() {
+                    bail!("--block-height only applies to --mesher voxel");
+                }
+                Box::new(SmoothMesher)
+            }
+        })
+    }
+}
+
+fn parse_block_height(value: &str) -> Result<f32, String> {
+    let height: f32 = value.parse().map_err(|e| format!("{e}"))?;
+    if (0.25..=4.0).contains(&height) {
+        Ok(height)
+    } else {
+        Err("must be between 0.25 and 4".into())
+    }
+}
+
 pub fn run(args: &RenderArgs) -> anyhow::Result<()> {
     let output = output_path(&args.file, args.output.as_deref())?;
-    let bundle = read_scene(&args.file, &args.data)?;
+    let mesher = args.mesher()?;
+    let mut bundle = read_scene(&args.file, &args.data)?;
+    if let Some(exaggeration) = args.exaggeration {
+        bundle.grid.exaggeration = exaggeration;
+    }
+    info!(exaggeration = bundle.grid.exaggeration, "terrain");
 
     let gpu = Gpu::headless()?;
     let aspect = Aspect::Story;
@@ -34,7 +86,7 @@ pub fn run(args: &RenderArgs) -> anyhow::Result<()> {
     let frame = render_still(
         &gpu,
         &bundle,
-        &SmoothMesher,
+        mesher.as_ref(),
         &framing,
         DEFAULT_YAW_OFFSET_DEG,
     )?;

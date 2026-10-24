@@ -19,7 +19,7 @@ pub use camera::{
 pub use error::RenderError;
 pub use frame::Frame;
 pub use gpu::{ADAPTER_ENV, AdapterMode, Gpu};
-pub use mesh::{Mesher, SmoothMesher, TerrainMesh, Vertex};
+pub use mesh::{Mesher, SmoothMesher, TerrainMesh, Vertex, VoxelMesher};
 pub use target::{OffscreenTarget, TARGET_FORMAT};
 pub use terrain::{
     AMBIENT, BACKGROUND, GpuMesh, Lighting, SUN_AZIMUTH_DEG, SUN_ELEVATION_DEG, TerrainRenderer,

@@ -118,3 +118,69 @@ fn other_image_formats_are_refused_before_any_work() {
     assert!(stderr.contains("only .png output is supported"), "{stderr}");
     assert!(!temp.path().join("hike.gif").exists());
 }
+
+#[test]
+fn both_meshers_render_and_unknown_ones_are_refused() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("hill.itb"), diorama_bundle().to_bytes()).unwrap();
+    let cache = temp.path().join("cache");
+    for mesher in ["voxel", "smooth"] {
+        let image = format!("{mesher}.png");
+        let output = isotrail(
+            &cache,
+            temp.path(),
+            &["render", "hill.itb", "-o", &image, "--mesher", mesher],
+        );
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        assert_eq!(png_size(&temp.path().join(&image)), (1080, 1920));
+    }
+    let voxel = fs::read(temp.path().join("voxel.png")).unwrap();
+    assert_ne!(voxel, fs::read(temp.path().join("smooth.png")).unwrap());
+
+    let output = isotrail(
+        &cache,
+        temp.path(),
+        &["render", "hill.itb", "--mesher", "marching-cubes"],
+    );
+    assert!(!output.status.success());
+    let stderr = text(&output.stderr);
+    assert!(
+        stderr.contains("invalid value 'marching-cubes'"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn block_height_and_exaggeration_change_the_image() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("hill.itb"), diorama_bundle().to_bytes()).unwrap();
+    let cache = temp.path().join("cache");
+    let render = |image: &str, extra: &[&str]| {
+        let mut args = vec!["render", "hill.itb", "-o", image];
+        args.extend_from_slice(extra);
+        isotrail(&cache, temp.path(), &args)
+    };
+    let mut images = Vec::new();
+    for (image, extra) in [
+        ("plain.png", &[][..]),
+        ("flat.png", &["--block-height", "0.5"][..]),
+        ("tall.png", &["--exaggeration", "4"][..]),
+    ] {
+        let output = render(image, extra);
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        images.push(fs::read(temp.path().join(image)).unwrap());
+    }
+    for (i, a) in images.iter().enumerate() {
+        for b in &images[i + 1..] {
+            assert_ne!(a, b);
+        }
+    }
+
+    let output = render("x.png", &["--mesher", "smooth", "--block-height", "2"]);
+    assert!(!output.status.success());
+    let stderr = text(&output.stderr);
+    assert!(
+        stderr.contains("only applies to --mesher voxel"),
+        "{stderr}"
+    );
+}

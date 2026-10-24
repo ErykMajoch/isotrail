@@ -33,8 +33,22 @@ pub struct BundleArgs {
     #[arg(long, value_name = "DIR")]
     debug_dir: Option<PathBuf>,
 
+    /// How many times taller than life to draw the terrain; chosen from the
+    /// slab's size and relief by default
+    #[arg(long, value_name = "X", value_parser = parse_exaggeration)]
+    exaggeration: Option<f64>,
+
     #[command(flatten)]
     data: DataArgs,
+}
+
+pub fn parse_exaggeration(value: &str) -> Result<f64, String> {
+    let exaggeration: f64 = value.parse().map_err(|e| format!("{e}"))?;
+    if (0.1..=100.0).contains(&exaggeration) {
+        Ok(exaggeration)
+    } else {
+        Err("must be between 0.1 and 100".into())
+    }
 }
 
 /// How terrain and map data are fetched for a GPX file
@@ -119,7 +133,7 @@ pub fn prepare(file: &Path, data: &DataArgs) -> anyhow::Result<Prepared> {
 
 pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
     let Prepared {
-        bundle,
+        mut bundle,
         grid,
         heightmap,
         landcover,
@@ -127,6 +141,9 @@ pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
         tiles,
         elevation_range: (min, max),
     } = prepare(&args.file, &args.data)?;
+    if let Some(exaggeration) = args.exaggeration {
+        bundle.grid.exaggeration = exaggeration;
+    }
     let bytes = bundle.to_bytes();
     let output = &args.output;
     fs::write(output, &bytes).with_context(|| format!("could not write {}", output.display()))?;
@@ -144,7 +161,10 @@ pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
         if tiles == 1 { "" } else { "s" },
         grid.dem_zoom()
     );
-    println!("Elevation {min:.0} – {max:.0} m");
+    println!(
+        "Elevation {min:.0} – {max:.0} m, drawn {:.1}× taller",
+        bundle.grid.exaggeration
+    );
     println!(
         "Map data: {} areas and {} lines from OpenStreetMap",
         features.areas.len(),

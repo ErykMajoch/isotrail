@@ -13,7 +13,7 @@ isotrail stats hike.gpx|hike.itb [--json] [--units metric|imperial]
 Prints distance, elevation gain and loss, elapsed and moving time, start and end times in the local time zone, and the bounding box, for a GPX file or a scene bundle made from one. `--json` always reports metres and seconds.
 
 ```bash
-isotrail bundle hike.gpx -o hike.itb [--debug-dir DIR] [--detail N] [--offline] [--overpass-url URL]
+isotrail bundle hike.gpx -o hike.itb [--debug-dir DIR] [--exaggeration X] [--detail N] [--offline] [--overpass-url URL]
 ```
 
 Downloads the elevation and OpenStreetMap data around the route, reports how many map features it found (`-v` lists them by type) and works out what covers every grid cell from the map data where it has any and from the slope and height of the ground elsewhere. Lakes and reservoirs are given a level surface. The result is saved with the route, its elevation profile and the hike's statistics as a scene bundle (`.itb`): one compact file that holds everything needed to render the hike, with no further downloads. With `--debug-dir`, it also writes these images to `DIR`, to check the terrain before rendering:
@@ -27,10 +27,10 @@ Downloads the elevation and OpenStreetMap data around the route, reports how man
 The terrain slab is turned to follow the route, so the images are not north-up. `--detail` sets the number of grid cells along the slab's long side (default 256). `--offline` uses only data already in the cache. Map data comes from the public [Overpass API](https://overpass-api.de/). To use another instance, pass `--overpass-url` or set `ISOTRAIL_OVERPASS_URL`. On long routes, where a grid cell is wider than 100 m, footpaths, streams and minor roads are left out because they would be too small to show.
 
 ```bash
-isotrail render hike.gpx|hike.itb [-o hike.png] [--detail N] [--offline] [--overpass-url URL]
+isotrail render hike.gpx|hike.itb [-o hike.png] [--mesher voxel|smooth] [--block-height F] [--exaggeration X] [--detail N] [--offline] [--overpass-url URL]
 ```
 
-Renders the terrain as a 1080 × 1920 PNG. The slab is seen from above at an angle, looking the way the hike goes, so the start is in front; for loops and out-and-backs, that means towards the halfway point. It is drawn at a third of the final size and enlarged so every pixel stays crisp. For now, each kind of ground has a flat colour, with simple shading from a fixed sun. A GPX file is first prepared the same way as `isotrail bundle`, with the same options; a scene bundle is rendered as is. Without `-o`, the image is named after the input and written to the current directory.
+Renders the terrain as a 1080 × 1920 PNG. The slab is seen from above at an angle, looking the way the hike goes, so the start is in front; for loops and out-and-backs, that means towards the halfway point. It is drawn at a third of the final size and enlarged so every pixel stays crisp. `--mesher voxel` (the default) builds the terrain from stepped blocks one grid cell tall; `--block-height` changes their height as a share of the cell size, from 0.25 for fine terraces to 4 for chunky steps. `--mesher smooth` draws a smooth low-poly surface. Heights are exaggerated so the relief reads at diorama scale: by default about 15% of the slab's length, between 1× and 5×. `--exaggeration` sets it by hand, here or when making a bundle. Both meshers cut the slab out of the ground with layered sides: topsoil, dirt, stone and a band of deep stone at the base, with lakes showing in cross-section where they reach the edge. For now, each kind of ground has a flat colour, with simple shading from a fixed sun. A GPX file is first prepared the same way as `isotrail bundle`, with the same options; a scene bundle is rendered as is. Without `-o`, the image is named after the input and written to the current directory.
 
 ```bash
 isotrail cache path
