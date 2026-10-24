@@ -1,86 +1,130 @@
 use glam::Vec3;
-use isotrail_bundle::GridInfo;
 use wgpu::util::DeviceExt;
 
-use crate::camera::slab_angle;
-use crate::{Camera, Gpu, OffscreenTarget, TARGET_FORMAT, TerrainMesh, Vertex};
+use crate::lighting::{BANDS, FILL};
+use crate::{Camera, Gpu, OffscreenTarget, SunState, TARGET_FORMAT, TerrainMesh, Vertex};
 
 pub const BACKGROUND: [u8; 4] = [196, 214, 228, 255];
-/// A late-morning sun, until lighting follows the hike's real time
-pub const SUN_AZIMUTH_DEG: f64 = 150.0;
-pub const SUN_ELEVATION_DEG: f64 = 40.0;
-pub const AMBIENT: f32 = 0.35;
+/// Texels along each side of the square shadow map, the most WebGL2 allows
+pub const SHADOW_MAP_SIZE: u32 = 2048;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Lighting {
-    /// Unit vector towards the sun, in the slab frame
-    pub sun: Vec3,
-    pub ambient: f32,
-}
-
-impl Lighting {
-    pub fn fixed(grid: &GridInfo) -> Lighting {
-        let azimuth = slab_angle(grid, SUN_AZIMUTH_DEG);
-        let elevation = SUN_ELEVATION_DEG.to_radians() as f32;
-        Lighting {
-            sun: Vec3::new(
-                azimuth.cos() * elevation.cos(),
-                azimuth.sin() * elevation.cos(),
-                elevation.sin(),
-            ),
-            ambient: AMBIENT,
-        }
-    }
-}
 
 /// A terrain mesh uploaded to the GPU
 pub struct GpuMesh {
     vertices: wgpu::Buffer,
     count: u32,
+    corners: [Vec3; 8],
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Uniforms {
     view_proj: [f32; 16],
+    light_view_proj: [f32; 16],
     sun: [f32; 4],
+    sun_colour: [f32; 4],
+    fill: [f32; 4],
+    shadow: [f32; 4],
 }
 
-/// Draws terrain meshes with flat-shaded Lambert lighting
+/// Draws terrain meshes with banded Lambert lighting and sun shadows
 pub struct TerrainRenderer {
     pipeline: wgpu::RenderPipeline,
+    shadow_pipeline: wgpu::RenderPipeline,
+    layout: wgpu::BindGroupLayout,
+    shadow_layout: wgpu::BindGroupLayout,
+    shadow_view: wgpu::TextureView,
+    shadow_sampler: wgpu::Sampler,
 }
 
 impl TerrainRenderer {
     pub fn new(gpu: &Gpu) -> TerrainRenderer {
         let device = gpu.device();
         let module = device.create_shader_module(wgpu::include_wgsl!("terrain.wgsl"));
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("terrain"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                    count: None,
+                },
+            ],
+        });
+        // The shadow pass writes the shadow map, so it can't also bind it
+        let shadow_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("terrain shadow"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("terrain"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+        let shadow_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("terrain shadow"),
+                bind_group_layouts: &[Some(&shadow_layout)],
+                immediate_size: 0,
+            });
+        let vertex_buffers = [Some(wgpu::VertexBufferLayout {
+            array_stride: size_of::<Vertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &wgpu::vertex_attr_array![
+                0 => Float32x3,
+                1 => Float32x3,
+                2 => Unorm8x4,
+            ],
+        })];
+        let depth_state = |bias| wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::Less),
+            stencil: wgpu::StencilState::default(),
+            bias,
+        };
+
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("terrain"),
-            layout: None,
+            layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &module,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
-                buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: size_of::<Vertex>() as wgpu::BufferAddress,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![
-                        0 => Float32x3,
-                        1 => Float32x3,
-                        2 => Unorm8x4,
-                    ],
-                })],
+                buffers: &vertex_buffers,
             },
             primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Less),
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
+            depth_stencil: Some(depth_state(wgpu::DepthBiasState::default())),
             multisample: wgpu::MultisampleState::default(),
             fragment: Some(wgpu::FragmentState {
                 module: &module,
@@ -91,7 +135,59 @@ impl TerrainRenderer {
             multiview_mask: None,
             cache: None,
         });
-        TerrainRenderer { pipeline }
+        let shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("terrain shadow"),
+            layout: Some(&shadow_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_shadow"),
+                compilation_options: Default::default(),
+                buffers: &vertex_buffers,
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: Some(depth_state(wgpu::DepthBiasState {
+                constant: 2,
+                slope_scale: 2.0,
+                clamp: 0.0,
+            })),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: None,
+            multiview_mask: None,
+            cache: None,
+        });
+
+        let shadow_view = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("shadow map"),
+                size: wgpu::Extent3d {
+                    width: SHADOW_MAP_SIZE,
+                    height: SHADOW_MAP_SIZE,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: DEPTH_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("shadow"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            ..Default::default()
+        });
+        TerrainRenderer {
+            pipeline,
+            shadow_pipeline,
+            layout,
+            shadow_layout,
+            shadow_view,
+            shadow_sampler,
+        }
     }
 
     pub fn upload(&self, gpu: &Gpu, mesh: &TerrainMesh) -> GpuMesh {
@@ -102,25 +198,52 @@ impl TerrainRenderer {
                 contents: bytemuck::cast_slice(&mesh.vertices),
                 usage: wgpu::BufferUsages::VERTEX,
             });
+        let (min, max) = mesh
+            .positions()
+            .fold((Vec3::INFINITY, Vec3::NEG_INFINITY), |(min, max), p| {
+                (min.min(p), max.max(p))
+            });
         GpuMesh {
             vertices,
             count: mesh.vertices.len() as u32,
+            corners: std::array::from_fn(|i| {
+                Vec3::select(
+                    glam::BVec3::new(i & 1 != 0, i & 2 != 0, i & 4 != 0),
+                    max,
+                    min,
+                )
+            }),
         }
     }
 
-    /// Clears `target` to [`BACKGROUND`] and draws the mesh over it
+    /// Clears `target` to [`BACKGROUND`] and draws the mesh over it, lit and
+    /// shadowed by `sun`
     pub fn draw(
         &self,
         gpu: &Gpu,
         target: &OffscreenTarget,
         mesh: &GpuMesh,
         camera: &Camera,
-        lighting: &Lighting,
+        sun: &SunState,
     ) {
         let device = gpu.device();
+        let light_view_proj = if mesh.count == 0 {
+            sun.shadow_view_proj([])
+        } else {
+            sun.shadow_view_proj(mesh.corners)
+        };
+        // Lookups move one shadow texel off the surface, so lit faces don't
+        // shadow themselves
+        let row_scale = |row: usize| light_view_proj.row(row).truncate().length();
+        let texel_m = 2.0 / (row_scale(0).min(row_scale(1)) * SHADOW_MAP_SIZE as f32);
+        let towards_camera = (-camera.forward * Vec3::new(1.0, 1.0, 0.0)).normalize_or_zero();
         let uniforms = Uniforms {
             view_proj: camera.view_proj.to_cols_array(),
-            sun: lighting.sun.normalize().extend(lighting.ambient).to_array(),
+            light_view_proj: light_view_proj.to_cols_array(),
+            sun: sun.direction.normalize().extend(sun.ambient).to_array(),
+            sun_colour: (sun.colour * sun.intensity).extend(BANDS as f32).to_array(),
+            fill: towards_camera.extend(FILL).to_array(),
+            shadow: [texel_m, 0.0, 0.0, 0.0],
         };
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("terrain uniforms"),
@@ -129,7 +252,25 @@ impl TerrainRenderer {
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("terrain"),
-            layout: &self.pipeline.get_bind_group_layout(0),
+            layout: &self.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&self.shadow_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.shadow_sampler),
+                },
+            ],
+        });
+        let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("terrain shadow"),
+            layout: &self.shadow_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: uniform_buffer.as_entire_binding(),
@@ -154,6 +295,24 @@ impl TerrainRenderer {
         let [r, g, b, a] = BACKGROUND.map(|c| f64::from(c) / 255.0);
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("terrain shadow"),
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.shadow_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+            pass.set_pipeline(&self.shadow_pipeline);
+            pass.set_bind_group(0, &shadow_bind_group, &[]);
+            pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+            pass.draw(0..mesh.count, 0..1);
+        }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("terrain"),

@@ -1,6 +1,6 @@
 use isotrail_bundle::SceneBundle;
 use isotrail_render::{
-    Camera, Frame, Framing, Gpu, Lighting, Mesher, OffscreenTarget, TerrainRenderer, view_heading,
+    Camera, Frame, Framing, Gpu, Mesher, OffscreenTarget, SunState, TerrainRenderer, view_heading,
 };
 
 use crate::ExportError;
@@ -28,7 +28,7 @@ pub fn render_still(
         &target,
         &renderer.upload(gpu, &mesh),
         &camera,
-        &Lighting::fixed(grid),
+        &SunState::late_morning(grid),
     );
     Ok(target.read_back(gpu)?)
 }

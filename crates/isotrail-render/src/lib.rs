@@ -7,6 +7,7 @@ mod camera;
 mod error;
 mod frame;
 mod gpu;
+mod lighting;
 mod mesh;
 mod target;
 mod terrain;
@@ -19,9 +20,10 @@ pub use camera::{
 pub use error::RenderError;
 pub use frame::Frame;
 pub use gpu::{ADAPTER_ENV, AdapterMode, Gpu};
+pub use lighting::{
+    AMBIENT, BANDS, FILL, SUN_AZIMUTH_DEG, SUN_COLOUR, SUN_ELEVATION_DEG, SunState,
+};
 pub use mesh::{Mesher, SmoothMesher, TerrainMesh, Vertex, VoxelMesher};
 pub use target::{OffscreenTarget, TARGET_FORMAT};
-pub use terrain::{
-    AMBIENT, BACKGROUND, GpuMesh, Lighting, SUN_AZIMUTH_DEG, SUN_ELEVATION_DEG, TerrainRenderer,
-};
+pub use terrain::{BACKGROUND, GpuMesh, SHADOW_MAP_SIZE, TerrainRenderer};
 pub use test_scene::draw_test_scene;
