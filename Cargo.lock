@@ -326,6 +326,10 @@ version = "0.1.0"
 [[package]]
 name = "isotrail-geo"
 version = "0.1.0"
+dependencies = [
+ "isotrail-track",
+ "thiserror",
+]
 
 [[package]]
 name = "isotrail-render"
