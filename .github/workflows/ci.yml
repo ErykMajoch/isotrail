@@ -9,6 +9,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  ISOTRAIL_GPU: software
 
 jobs:
   check:
@@ -33,9 +34,21 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      - name: Install software Vulkan driver
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
+
       - name: Test
         run: cargo test --workspace
 
+      - name: Upload golden-image failures
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: golden-failures-${{ matrix.os }}
+          path: target/golden-failures/
+          if-no-files-found: ignore
+
       - name: Check wasm32 build of wasm-safe crates
         if: runner.os == 'Linux'
-        run: cargo check --target wasm32-unknown-unknown -p isotrail-track -p isotrail-bundle
+        run: cargo check --target wasm32-unknown-unknown -p isotrail-track -p isotrail-bundle -p isotrail-render

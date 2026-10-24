@@ -33,6 +33,12 @@ isotrail cache clear [--yes]
 
 Downloaded elevation and map data is cached on disk, so repeat renders of the same area work offline. The cache lives in `%LOCALAPPDATA%\isotrail\cache` on Windows, `~/.cache/isotrail` on Linux and `~/Library/Caches/isotrail` on macOS. Set `ISOTRAIL_CACHE_DIR` to use another directory.
 
+## Development
+
+Rendering runs on the GPU without a window. It uses a real GPU when there is one and falls back to a software renderer otherwise. Set `ISOTRAIL_GPU` to `hardware` or `software` to choose (CI uses `software`: WARP on Windows, Mesa lavapipe on Linux via `mesa-vulkan-drivers`).
+
+Render tests compare their output with golden images in `fixtures/golden/`, allowing up to 0.5% of pixels to differ. After an intended change to the look, regenerate them with `UPDATE_GOLDENS=1 cargo test` and review the new images. A failing comparison writes the actual image and a diff to `target/golden-failures/`.
+
 ## Credits
 
 Time zones are looked up offline with [tzf-rs](https://github.com/ringsaturn/tzf-rs), using boundary data from [timezone-boundary-builder](https://github.com/evansiroky/timezone-boundary-builder), © OpenStreetMap contributors, available under the [ODbL](https://opendatacommons.org/licenses/odbl/).

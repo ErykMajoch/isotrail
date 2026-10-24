@@ -17,6 +17,7 @@ directories = "6.0.0"
 geo = { version = "0.33.1", default-features = false }
 miniz_oxide = "0.9.1"
 png = "0.18.1"
+pollster = "1.0.1"
 postcard = { version = "1.1.3", default-features = false, features = ["alloc"] }
 quick-xml = "0.42.0"
 reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "gzip", "rustls"] }
@@ -29,6 +30,7 @@ toml = "1.1.6"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["ansi", "fmt", "std"] }
 tzf-rs = { version = "2.1.3", default-features = false, features = ["bundled"] }
+wgpu = "30.0.1"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
