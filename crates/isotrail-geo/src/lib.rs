@@ -24,6 +24,7 @@ mod error;
 mod fetch;
 mod footprint;
 mod grid;
+mod osm;
 mod projection;
 mod relief;
 
@@ -38,5 +39,9 @@ pub use fetch::{
 };
 pub use footprint::{Footprint, MAX_ASPECT, MIN_PADDING_M, PADDING_FRACTION};
 pub use grid::{DEFAULT_DETAIL, Grid, MAX_DEM_ZOOM, dem_zoom, ground_resolution_m};
+pub use osm::{
+    Area, BoundingBox, FEATURE_KEYS, FeatureSource, Line, MINOR_WAY_MAX_CELL_M, OVERPASS_URL,
+    OsmError, OsmFeatures, OsmId, OsmKind, OverpassSource, Polygon, Ring, Tags, overpass_query,
+};
 pub use projection::LocalProjection;
 pub use relief::{EXAGGERATION_FACTOR, MAX_EXAGGERATION, MIN_EXAGGERATION, vertical_exaggeration};

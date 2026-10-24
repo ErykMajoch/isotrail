@@ -16,7 +16,8 @@ pub const USER_AGENT: &str = concat!(
     ")"
 );
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
-const TIMEOUT: Duration = Duration::from_secs(120);
+// Longer than the Overpass query timeout, so the server gives up first and says why
+const TIMEOUT: Duration = Duration::from_secs(300);
 
 /// How often and how patiently to retry rate-limited or failing requests
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

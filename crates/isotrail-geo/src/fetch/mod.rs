@@ -14,6 +14,12 @@ pub use recorded::RecordedFetcher;
 pub trait Fetcher {
     fn get(&self, url: &str) -> Result<Vec<u8>, FetchError>;
     fn post(&self, url: &str, body: &[u8]) -> Result<Vec<u8>, FetchError>;
+
+    /// Drops a stored response that turned out to be unusable, so the next
+    /// request fetches it again. `body: None` means a GET
+    fn forget(&self, _url: &str, _body: Option<&[u8]>) -> Result<(), FetchError> {
+        Ok(())
+    }
 }
 
 impl<F: Fetcher + ?Sized> Fetcher for &F {
@@ -24,6 +30,10 @@ impl<F: Fetcher + ?Sized> Fetcher for &F {
     fn post(&self, url: &str, body: &[u8]) -> Result<Vec<u8>, FetchError> {
         (**self).post(url, body)
     }
+
+    fn forget(&self, url: &str, body: Option<&[u8]>) -> Result<(), FetchError> {
+        (**self).forget(url, body)
+    }
 }
 
 impl<F: Fetcher + ?Sized> Fetcher for Box<F> {
@@ -33,6 +43,10 @@ impl<F: Fetcher + ?Sized> Fetcher for Box<F> {
 
     fn post(&self, url: &str, body: &[u8]) -> Result<Vec<u8>, FetchError> {
         (**self).post(url, body)
+    }
+
+    fn forget(&self, url: &str, body: Option<&[u8]>) -> Result<(), FetchError> {
+        (**self).forget(url, body)
     }
 }
 

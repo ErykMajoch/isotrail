@@ -12,7 +12,7 @@ repository = "https://github.com/ErykMajoch/isotrail"
 anyhow = "1.0.104"
 chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 chrono-tz = "0.10.4"
-clap = { version = "4.6.7", features = ["derive"] }
+clap = { version = "4.6.7", features = ["derive", "env"] }
 directories = "6.0.0"
 geo = { version = "0.33.1", default-features = false }
 png = "0.18.1"

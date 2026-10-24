@@ -6,11 +6,12 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use clap::Args;
 use isotrail_geo::{
-    Cache, CachedFetcher, DEFAULT_DETAIL, DemSource, Footprint, Grid, Heightmap, HttpFetcher,
-    TerrariumSource, vertical_exaggeration,
+    Cache, CachedFetcher, DEFAULT_DETAIL, DemSource, FeatureSource, Footprint, Grid, Heightmap,
+    HttpFetcher, OVERPASS_URL, OverpassSource, TerrariumSource, vertical_exaggeration,
 };
 use isotrail_track::Track;
 use png::ColorType;
+use tracing::info;
 
 const PREVIEW_SCALE: u32 = 4;
 const ROUTE_RGB: [u8; 3] = [230, 32, 48];
@@ -32,6 +33,10 @@ pub struct BundleArgs {
     /// Only use elevation and map data that is already in the cache
     #[arg(long)]
     offline: bool,
+
+    /// Overpass API endpoint for OpenStreetMap data
+    #[arg(long, value_name = "URL", env = "ISOTRAIL_OVERPASS_URL", default_value = OVERPASS_URL)]
+    overpass_url: String,
 }
 
 pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
@@ -43,8 +48,14 @@ pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
     let fetcher = CachedFetcher::new(HttpFetcher::new()?, Cache::new(crate::cache::dir()?))
         .offline(args.offline);
     let tiles = TerrariumSource::<HttpFetcher>::tiles(&grid).len();
-    let heightmap = TerrariumSource::new(fetcher).heightmap(&grid)?;
+    let heightmap = TerrariumSource::new(&fetcher).heightmap(&grid)?;
     let (min, max) = heightmap.range();
+    let features = OverpassSource::new(&fetcher)
+        .endpoint(&args.overpass_url)
+        .features(&grid)?;
+    for (tag, count) in features.counts() {
+        info!("{count:>6}  {tag}");
+    }
 
     let dir = &args.debug_dir;
     fs::create_dir_all(dir).with_context(|| format!("could not create {}", dir.display()))?;
@@ -75,6 +86,11 @@ pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
         grid.dem_zoom()
     );
     println!("Elevation {min:.0} – {max:.0} m");
+    println!(
+        "Map data: {} areas and {} lines from OpenStreetMap",
+        features.areas.len(),
+        features.lines.len()
+    );
     println!("Wrote {}", heightmap_png.display());
     println!("Wrote {}", hillshade_png.display());
     Ok(())

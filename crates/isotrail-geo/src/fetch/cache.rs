@@ -153,6 +153,20 @@ impl Cache {
                 source,
             })
     }
+
+    fn remove(&self, request: &Request) -> Result<(), FetchError> {
+        let key = request.key();
+        for ext in [DATA_EXT, META_EXT] {
+            let path = self.dir.join(format!("{key}.{ext}"));
+            match fs::remove_file(&path) {
+                Err(err) if err.kind() != io::ErrorKind::NotFound => {
+                    return Err(FetchError::Cache { path, source: err });
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Serves responses from a [`Cache`] and fills it from `inner` on a miss.
@@ -222,6 +236,24 @@ impl<F: Fetcher> Fetcher for CachedFetcher<F> {
             body,
         };
         self.fetch(request, || self.inner.post(url, body))
+    }
+
+    fn forget(&self, url: &str, body: Option<&[u8]>) -> Result<(), FetchError> {
+        let request = match body {
+            None => Request {
+                method: "GET",
+                url,
+                body: &[],
+            },
+            Some(body) => Request {
+                method: "POST",
+                url,
+                body,
+            },
+        };
+        debug!("forgetting {} {url}", request.method);
+        self.cache.remove(&request)?;
+        self.inner.forget(url, body)
     }
 }
 
@@ -388,6 +420,25 @@ mod tests {
 
         fetcher.get(URL).unwrap();
         assert_eq!(fetcher.inner.calls.get(), 3);
+    }
+
+    #[test]
+    fn forgotten_responses_are_fetched_again() {
+        let (_temp, cache) = setup();
+        let fetcher = CachedFetcher::new(Fake::default(), cache.clone());
+        fetcher.get(URL).unwrap();
+        fetcher.post(URL, b"q").unwrap();
+        fetcher.forget(URL, Some(b"q")).unwrap();
+        assert_eq!(cache.stats().unwrap().files, 2);
+        fetcher.get(URL).unwrap();
+        fetcher.post(URL, b"q").unwrap();
+        assert_eq!(fetcher.inner.calls.get(), 3);
+
+        fetcher.forget(URL, None).unwrap();
+        fetcher.forget(URL, None).unwrap();
+        let offline = CachedFetcher::new(Fake::default(), cache).offline(true);
+        assert!(matches!(offline.get(URL), Err(FetchError::Offline { .. })));
+        assert!(offline.post(URL, b"q").is_ok());
     }
 
     #[test]
