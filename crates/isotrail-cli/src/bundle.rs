@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::fs::{self, File};
 use std::io::BufWriter;
 use std::num::NonZeroU32;
@@ -6,8 +7,9 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use clap::Args;
 use isotrail_geo::{
-    Cache, CachedFetcher, DEFAULT_DETAIL, DemSource, FeatureSource, Footprint, Grid, Heightmap,
-    HttpFetcher, OVERPASS_URL, OverpassSource, TerrariumSource, vertical_exaggeration,
+    Cache, CachedFetcher, DEFAULT_DETAIL, DemSource, FeatureSource, Footprint, Grid, HttpFetcher,
+    Landcover, LandcoverMap, OVERPASS_URL, OverpassSource, TerrariumSource, legend_rgb, line_mask,
+    vertical_exaggeration,
 };
 use isotrail_track::Track;
 use png::ColorType;
@@ -15,13 +17,15 @@ use tracing::info;
 
 const PREVIEW_SCALE: u32 = 4;
 const ROUTE_RGB: [u8; 3] = [230, 32, 48];
+const MIN_REPORTED_SHARE: f64 = 0.01;
 
 #[derive(Debug, Args)]
 pub struct BundleArgs {
     /// GPX file to read
     file: PathBuf,
 
-    /// Write intermediate images (heightmap.png, hillshade.png) to this directory
+    /// Write intermediate images (heightmap, hillshade, landcover, water and
+    /// path maps) to this directory
     #[arg(long, value_name = "DIR")]
     debug_dir: PathBuf,
 
@@ -48,34 +52,76 @@ pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
     let fetcher = CachedFetcher::new(HttpFetcher::new()?, Cache::new(crate::cache::dir()?))
         .offline(args.offline);
     let tiles = TerrariumSource::<HttpFetcher>::tiles(&grid).len();
-    let heightmap = TerrariumSource::new(&fetcher).heightmap(&grid)?;
-    let (min, max) = heightmap.range();
+    let mut heightmap = TerrariumSource::new(&fetcher).heightmap(&grid)?;
     let features = OverpassSource::new(&fetcher)
         .endpoint(&args.overpass_url)
         .features(&grid)?;
     for (tag, count) in features.counts() {
         info!("{count:>6}  {tag}");
     }
+    let (min, max) = heightmap.range();
+    let landcover = LandcoverMap::classify(&grid, &features, &mut heightmap);
+    for (bit, cells) in landcover.line_counts() {
+        let name = match bit {
+            line_mask::PATH => "path",
+            line_mask::ROAD => "road",
+            _ => "stream",
+        };
+        info!("{cells:>6}  cells with a {name}");
+    }
 
     let dir = &args.debug_dir;
     fs::create_dir_all(dir).with_context(|| format!("could not create {}", dir.display()))?;
-    let heightmap_png = dir.join("heightmap.png");
-    write_png(
-        &heightmap_png,
-        grid.cols,
-        grid.rows,
-        ColorType::Grayscale,
-        &heightmap.greyscale(),
-    )?;
-    let hillshade_png = dir.join("hillshade.png");
-    let preview = preview(&track, &grid, &heightmap);
-    write_png(
-        &hillshade_png,
-        grid.cols * PREVIEW_SCALE,
-        grid.rows * PREVIEW_SCALE,
-        ColorType::Rgb,
-        &preview,
-    )?;
+    let (cols, rows) = (grid.cols, grid.rows);
+    let (width, height) = (cols * PREVIEW_SCALE, rows * PREVIEW_SCALE);
+    let exaggeration = vertical_exaggeration(grid.footprint.length_m, f64::from(max - min));
+    let shade = heightmap.hillshade(grid.cell_size_m, exaggeration);
+    let mut hillshade = enlarge(&grey_to_rgb(&shade), cols, 3);
+    draw_route(&mut hillshade, &track, &grid);
+    let mut landcover_rgb = enlarge(&landcover.legend_image(), cols, 3);
+    draw_route(&mut landcover_rgb, &track, &grid);
+
+    let images = [
+        (
+            "heightmap.png",
+            cols,
+            rows,
+            ColorType::Grayscale,
+            heightmap.greyscale(),
+        ),
+        ("hillshade.png", width, height, ColorType::Rgb, hillshade),
+        (
+            "landcover.png",
+            width,
+            height,
+            ColorType::Rgb,
+            landcover_rgb,
+        ),
+        (
+            "water.png",
+            width,
+            height,
+            ColorType::Grayscale,
+            enlarge(&landcover.water_mask(), cols, 1),
+        ),
+        (
+            "paths.png",
+            width,
+            height,
+            ColorType::Rgb,
+            enlarge(&landcover.line_image(), cols, 3),
+        ),
+    ];
+    let mut written = Vec::new();
+    for (name, w, h, color, data) in images {
+        let path = dir.join(name);
+        write_png(&path, w, h, color, &data)?;
+        written.push(path);
+    }
+    let legend = dir.join("landcover-legend.txt");
+    fs::write(&legend, legend_text(&landcover))
+        .with_context(|| format!("could not write {}", legend.display()))?;
+    written.push(legend);
 
     println!(
         "Heightmap {} × {} cells of {:.1} m from {tiles} terrain tile{} at zoom {}",
@@ -91,26 +137,66 @@ pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
         features.areas.len(),
         features.lines.len()
     );
-    println!("Wrote {}", heightmap_png.display());
-    println!("Wrote {}", hillshade_png.display());
+    let shares: Vec<String> = landcover
+        .shares()
+        .into_iter()
+        .filter(|&(_, share)| share >= MIN_REPORTED_SHARE)
+        .map(|(class, share)| format!("{} {:.0}%", class.name(), share * 100.0))
+        .collect();
+    println!("Landcover: {}", shares.join(", "));
+    let bodies = landcover.water.len();
+    println!(
+        "Water: {bodies} {} levelled",
+        if bodies == 1 { "lake" } else { "lakes" }
+    );
+    for path in written {
+        println!("Wrote {}", path.display());
+    }
     Ok(())
 }
 
-/// Hillshade at the slab's own exaggeration, enlarged, with the route on top
-fn preview(track: &Track, grid: &Grid, heightmap: &Heightmap) -> Vec<u8> {
-    let (min, max) = heightmap.range();
-    let exaggeration = vertical_exaggeration(grid.footprint.length_m, f64::from(max - min));
-    let shade = heightmap.hillshade(grid.cell_size_m, exaggeration);
+fn legend_text(landcover: &LandcoverMap) -> String {
+    let mut text = String::new();
+    let shares = landcover.shares();
+    for class in Landcover::ALL {
+        let [r, g, b] = legend_rgb(class);
+        let share = shares
+            .iter()
+            .find(|(c, _)| *c == class)
+            .map_or(0.0, |(_, s)| *s);
+        let _ = writeln!(
+            text,
+            "#{r:02x}{g:02x}{b:02x}  {:>5.1}%  {}",
+            share * 100.0,
+            class.name()
+        );
+    }
+    text
+}
 
-    let (width, height) = (grid.cols * PREVIEW_SCALE, grid.rows * PREVIEW_SCALE);
-    let mut rgb = Vec::with_capacity((width * height * 3) as usize);
-    for y in 0..height {
-        for x in 0..width {
-            let s = shade[((y / PREVIEW_SCALE) * grid.cols + x / PREVIEW_SCALE) as usize];
-            rgb.extend([s; 3]);
+fn grey_to_rgb(grey: &[u8]) -> Vec<u8> {
+    grey.iter().flat_map(|&g| [g; 3]).collect()
+}
+
+/// Each cell becomes a PREVIEW_SCALE square of pixels
+fn enlarge(cells: &[u8], cols: u32, channels: usize) -> Vec<u8> {
+    let (cols, scale) = (cols as usize, PREVIEW_SCALE as usize);
+    let mut out = Vec::with_capacity(cells.len() * scale * scale);
+    for row in cells.chunks_exact(cols * channels) {
+        for _ in 0..scale {
+            for cell in row.chunks_exact(channels) {
+                for _ in 0..scale {
+                    out.extend_from_slice(cell);
+                }
+            }
         }
     }
+    out
+}
 
+/// Draws the route in red over an enlarged RGB image of the grid
+fn draw_route(rgb: &mut [u8], track: &Track, grid: &Grid) {
+    let (width, height) = (grid.cols * PREVIEW_SCALE, grid.rows * PREVIEW_SCALE);
     let mut plot = |x: i64, y: i64| {
         if (0..i64::from(width)).contains(&x) && (0..i64::from(height)).contains(&y) {
             let i = ((y * i64::from(width) + x) * 3) as usize;
@@ -140,7 +226,6 @@ fn preview(track: &Track, grid: &Grid, heightmap: &Heightmap) -> Vec<u8> {
             }
         }
     }
-    rgb
 }
 
 fn write_png(
@@ -161,4 +246,23 @@ fn write_png(
         Ok(())
     };
     write().with_context(|| format!("could not write {}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn enlarging_repeats_cells_into_squares() {
+        assert_eq!(PREVIEW_SCALE, 4);
+        let big = enlarge(&[1, 2, 3, 4, 5, 6], 3, 1);
+        assert_eq!(big.len(), 6 * 16);
+        let first_row = [1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3];
+        for row in 0..4 {
+            assert_eq!(big[row * 12..(row + 1) * 12], first_row);
+        }
+        assert_eq!(big[4 * 12], 4);
+        assert_eq!(big[big.len() - 1], 6);
+        assert_eq!(enlarge(&[9, 8, 7], 1, 3), [9, 8, 7].repeat(16));
+    }
 }

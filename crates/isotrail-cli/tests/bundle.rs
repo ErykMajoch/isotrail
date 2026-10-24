@@ -110,8 +110,16 @@ fn offline_bundle_writes_debug_images_from_the_cache() {
         features.lines.len()
     );
     assert!(stdout.contains(&map_data), "{stdout}");
+    assert!(stdout.contains("\nLandcover: "), "{stdout}");
+    assert!(stdout.contains(", bare rock "), "{stdout}");
+    assert!(stdout.contains("levelled\n"), "{stdout}");
     assert_eq!(png_size(&debug.join("heightmap.png")), (32, 16));
-    assert_eq!(png_size(&debug.join("hillshade.png")), (128, 64));
+    for name in ["hillshade.png", "landcover.png", "water.png", "paths.png"] {
+        assert_eq!(png_size(&debug.join(name)), (128, 64), "{name}");
+    }
+    let legend = std::fs::read_to_string(debug.join("landcover-legend.txt")).unwrap();
+    assert_eq!(legend.lines().count(), 13);
+    assert!(legend.contains("  water\n"), "{legend}");
 }
 
 #[test]

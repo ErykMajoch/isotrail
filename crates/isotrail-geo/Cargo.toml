@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 directories.workspace = true
+isotrail-bundle = { path = "../isotrail-bundle" }
 isotrail-track = { path = "../isotrail-track" }
 png.workspace = true
 reqwest.workspace = true

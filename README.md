@@ -16,7 +16,15 @@ Prints distance, elevation gain and loss, elapsed and moving time, start and end
 isotrail bundle hike.gpx --debug-dir DIR [--detail N] [--offline] [--overpass-url URL]
 ```
 
-Downloads the elevation and OpenStreetMap data around the route, reports how many map features it found (`-v` lists them by type) and writes `heightmap.png` (lowest ground black, highest white) and `hillshade.png` (shaded relief with the route in red) to `DIR`, to check the terrain before rendering. The terrain slab is turned to follow the route, so the images are not north-up. `--detail` sets the number of grid cells along the slab's long side (default 256). `--offline` uses only data already in the cache. Map data comes from the public [Overpass API](https://overpass-api.de/). To use another instance, pass `--overpass-url` or set `ISOTRAIL_OVERPASS_URL`. On long routes, where a grid cell is wider than 100 m, footpaths, streams and minor roads are left out because they would be too small to show.
+Downloads the elevation and OpenStreetMap data around the route, reports how many map features it found (`-v` lists them by type) and works out what covers every grid cell from the map data where it has any and from the slope and height of the ground elsewhere. Lakes and reservoirs are given a level surface. It writes these images to `DIR`, to check the terrain before rendering:
+
+- `heightmap.png`: lowest ground black, highest white
+- `hillshade.png`: shaded relief with the route in red
+- `landcover.png`: one colour per kind of ground, with the route in red; `landcover-legend.txt` lists the colours and how much of the slab each covers
+- `water.png`: levelled lakes white, rivers grey
+- `paths.png`: footpaths and tracks white, roads orange, streams blue
+
+The terrain slab is turned to follow the route, so the images are not north-up. `--detail` sets the number of grid cells along the slab's long side (default 256). `--offline` uses only data already in the cache. Map data comes from the public [Overpass API](https://overpass-api.de/). To use another instance, pass `--overpass-url` or set `ISOTRAIL_OVERPASS_URL`. On long routes, where a grid cell is wider than 100 m, footpaths, streams and minor roads are left out because they would be too small to show.
 
 ```bash
 isotrail cache path

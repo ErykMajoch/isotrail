@@ -923,6 +923,7 @@ name = "isotrail-geo"
 version = "0.1.0"
 dependencies = [
  "directories",
+ "isotrail-bundle",
  "isotrail-track",
  "png",
  "reqwest",

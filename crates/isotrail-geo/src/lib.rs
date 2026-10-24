@@ -24,6 +24,7 @@ mod error;
 mod fetch;
 mod footprint;
 mod grid;
+mod landcover;
 mod osm;
 mod projection;
 mod relief;
@@ -39,6 +40,11 @@ pub use fetch::{
 };
 pub use footprint::{Footprint, MAX_ASPECT, MIN_PADDING_M, PADDING_FRACTION};
 pub use grid::{DEFAULT_DETAIL, Grid, MAX_DEM_ZOOM, dem_zoom, ground_resolution_m};
+pub use isotrail_bundle::{Landcover, line_mask};
+pub use landcover::{
+    ALPINE_ROCK_SLOPE_DEG, LandcoverMap, ROCK_ABOVE_TREELINE_M, ROCK_SLOPE_DEG, Treeline,
+    WATER_LEVEL_PERCENTILE, WaterBody, latitude_treeline_m, legend_rgb, slope_deg,
+};
 pub use osm::{
     Area, BoundingBox, FEATURE_KEYS, FeatureSource, Line, MINOR_WAY_MAX_CELL_M, OVERPASS_URL,
     OsmError, OsmFeatures, OsmId, OsmKind, OverpassSource, Polygon, Ring, Tags, overpass_query,
