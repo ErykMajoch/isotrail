@@ -14,6 +14,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true
+isotrail-geo = { path = "../isotrail-geo" }
 isotrail-track = { path = "../isotrail-track" }
 serde.workspace = true
 serde_json.workspace = true
@@ -22,6 +23,7 @@ tracing-subscriber.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true

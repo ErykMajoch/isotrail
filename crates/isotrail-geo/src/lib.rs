@@ -20,12 +20,17 @@
 //! ```
 
 mod error;
+mod fetch;
 mod footprint;
 mod grid;
 mod projection;
 mod relief;
 
 pub use error::GeoError;
+pub use fetch::{
+    Cache, CacheStats, CachedFetcher, FetchError, Fetcher, HttpFetcher, RecordedFetcher,
+    RetryPolicy, USER_AGENT,
+};
 pub use footprint::{Footprint, MAX_ASPECT, MIN_PADDING_M, PADDING_FRACTION};
 pub use grid::{DEFAULT_DETAIL, Grid, MAX_DEM_ZOOM, dem_zoom, ground_resolution_m};
 pub use projection::LocalProjection;

@@ -6,11 +6,18 @@ Early development.
 
 ## Usage
 
-```
+```bash
 isotrail stats hike.gpx [--json] [--units metric|imperial]
 ```
 
 Prints distance, elevation gain and loss, elapsed and moving time, start and end times in the local time zone, and the bounding box. `--json` always reports metres and seconds.
+
+```bash
+isotrail cache path
+isotrail cache clear [--yes]
+```
+
+Downloaded elevation and map data is cached on disk, so repeat renders of the same area work offline. The cache lives in `%LOCALAPPDATA%\isotrail\cache` on Windows, `~/.cache/isotrail` on Linux and `~/Library/Caches/isotrail` on macOS. Set `ISOTRAIL_CACHE_DIR` to use another directory.
 
 ## Credits
 

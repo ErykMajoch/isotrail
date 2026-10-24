@@ -1,6 +1,7 @@
 //! The `isotrail` command-line tool: turns a recorded hike into a pixel-art
 //! diorama render
 
+mod cache;
 mod stats;
 
 use std::io::IsTerminal;
@@ -24,6 +25,8 @@ struct Cli {
 enum Command {
     /// Print distance, elevation and time statistics for a GPX file
     Stats(stats::StatsArgs),
+    /// Show or clear the cache of downloaded elevation and map data
+    Cache(cache::CacheArgs),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -31,6 +34,7 @@ fn main() -> anyhow::Result<()> {
     init_logging(cli.verbose);
     match cli.command {
         Command::Stats(args) => stats::run(&args),
+        Command::Cache(args) => cache::run(&args),
     }
 }
 
