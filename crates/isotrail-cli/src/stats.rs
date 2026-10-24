@@ -1,11 +1,9 @@
-use std::fs::File;
 use std::io::{self, Write};
 use std::path::PathBuf;
 
-use anyhow::Context;
 use chrono::{DateTime, SecondsFormat, TimeDelta, TimeZone, Utc};
 use clap::{Args, ValueEnum};
-use isotrail_track::{GpxReader, Track, TrackReader, TrackStats, Units};
+use isotrail_track::{Track, TrackStats, Units};
 use serde::Serialize;
 
 #[derive(Debug, Args)]
@@ -39,12 +37,7 @@ impl From<UnitsArg> for Units {
 
 pub fn run(args: &StatsArgs) -> anyhow::Result<()> {
     let path = &args.file;
-    let mut file =
-        File::open(path).with_context(|| format!("could not open {}", path.display()))?;
-    let track = GpxReader
-        .read(&mut file)
-        .and_then(Track::clean)
-        .with_context(|| format!("could not read {}", path.display()))?;
+    let track = crate::read_track(path)?;
     let stats = track.stats()?;
     let title = track
         .name

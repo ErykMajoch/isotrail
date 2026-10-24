@@ -19,6 +19,7 @@
 //! # Ok::<(), isotrail_geo::GeoError>(())
 //! ```
 
+mod dem;
 mod error;
 mod fetch;
 mod footprint;
@@ -26,6 +27,10 @@ mod grid;
 mod projection;
 mod relief;
 
+pub use dem::{
+    DemError, DemSource, Heightmap, MAX_MERCATOR_LAT, TERRARIUM_URL, TILE_SIZE, TerrariumSource,
+    TileId, lat_lon_to_pixel, pixel_to_lat_lon,
+};
 pub use error::GeoError;
 pub use fetch::{
     Cache, CacheStats, CachedFetcher, FetchError, Fetcher, HttpFetcher, RecordedFetcher,

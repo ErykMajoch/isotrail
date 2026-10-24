@@ -1,0 +1,72 @@
+<?xml version="1.0"?>
+<gpx xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="1.1" creator="isotrail test fixture" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
+  <metadata>
+    <name><![CDATA[Synthetic Snowdon Descent]]></name>
+    <desc><![CDATA[A straight-ish line east from the summit of Yr Wyddfa, crossing a terrain tile edge at zoom 11.]]></desc>
+  </metadata>
+  <trk>
+    <name><![CDATA[Synthetic Snowdon Descent]]></name>
+    <trkseg>
+      <trkpt lat="53.06850" lon="-4.07630">
+        <ele>1080.00</ele>
+        <time>2025-06-14T09:00:00Z</time>
+      </trkpt>
+      <trkpt lat="53.06902" lon="-4.07335">
+        <ele>1044.29</ele>
+        <time>2025-06-14T09:01:30Z</time>
+      </trkpt>
+      <trkpt lat="53.06952" lon="-4.07040">
+        <ele>1008.57</ele>
+        <time>2025-06-14T09:03:00Z</time>
+      </trkpt>
+      <trkpt lat="53.07000" lon="-4.06745">
+        <ele>972.86</ele>
+        <time>2025-06-14T09:04:30Z</time>
+      </trkpt>
+      <trkpt lat="53.07044" lon="-4.06450">
+        <ele>937.14</ele>
+        <time>2025-06-14T09:06:00Z</time>
+      </trkpt>
+      <trkpt lat="53.07083" lon="-4.06155">
+        <ele>901.43</ele>
+        <time>2025-06-14T09:07:30Z</time>
+      </trkpt>
+      <trkpt lat="53.07117" lon="-4.05860">
+        <ele>865.71</ele>
+        <time>2025-06-14T09:09:00Z</time>
+      </trkpt>
+      <trkpt lat="53.07145" lon="-4.05565">
+        <ele>830.00</ele>
+        <time>2025-06-14T09:10:30Z</time>
+      </trkpt>
+      <trkpt lat="53.07167" lon="-4.05270">
+        <ele>794.29</ele>
+        <time>2025-06-14T09:12:00Z</time>
+      </trkpt>
+      <trkpt lat="53.07183" lon="-4.04975">
+        <ele>758.57</ele>
+        <time>2025-06-14T09:13:30Z</time>
+      </trkpt>
+      <trkpt lat="53.07194" lon="-4.04680">
+        <ele>722.86</ele>
+        <time>2025-06-14T09:15:00Z</time>
+      </trkpt>
+      <trkpt lat="53.07200" lon="-4.04385">
+        <ele>687.14</ele>
+        <time>2025-06-14T09:16:30Z</time>
+      </trkpt>
+      <trkpt lat="53.07202" lon="-4.04090">
+        <ele>651.43</ele>
+        <time>2025-06-14T09:18:00Z</time>
+      </trkpt>
+      <trkpt lat="53.07202" lon="-4.03795">
+        <ele>615.71</ele>
+        <time>2025-06-14T09:19:30Z</time>
+      </trkpt>
+      <trkpt lat="53.07200" lon="-4.03500">
+        <ele>580.00</ele>
+        <time>2025-06-14T09:21:00Z</time>
+      </trkpt>
+    </trkseg>
+  </trk>
+</gpx>

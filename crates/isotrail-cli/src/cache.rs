@@ -35,7 +35,7 @@ pub fn run(args: &CacheArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn dir() -> anyhow::Result<PathBuf> {
+pub fn dir() -> anyhow::Result<PathBuf> {
     env::var_os(DIR_ENV)
         .filter(|dir| !dir.is_empty())
         .map(PathBuf::from)

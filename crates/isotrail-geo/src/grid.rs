@@ -41,6 +41,15 @@ impl Grid {
         self.footprint.to_local(u, v)
     }
 
+    /// Fractional (col, row) of a local point; cell (c, r) spans [c, c + 1) × [r, r + 1)
+    pub fn local_to_cell(&self, x: f64, y: f64) -> (f64, f64) {
+        let (u, v) = self.footprint.from_local(x, y);
+        (
+            (u + self.footprint.length_m / 2.0) / self.cell_size_m,
+            (self.footprint.width_m / 2.0 - v) / self.cell_size_m,
+        )
+    }
+
     pub fn cell_center_lat_lon(&self, col: u32, row: u32) -> (f64, f64) {
         let (x, y) = self.cell_center_local(col, row);
         self.footprint.projection.unproject(x, y)
@@ -169,6 +178,25 @@ mod tests {
             let (ex, ey) = grid.cell_center_local(col, row);
             assert!((x - ex).hypot(y - ey) < 1e-6);
         }
+    }
+
+    #[test]
+    fn local_points_map_back_to_cells() {
+        let grid = Grid::new(
+            &footprint((-4_000.0, -1_500.0), (4_000.0, 2_500.0)),
+            detail(40),
+        );
+        for (col, row) in [(0, 0), (39, 0), (17, 9), (39, grid.rows - 1)] {
+            let (x, y) = grid.cell_center_local(col, row);
+            let (c, r) = grid.local_to_cell(x, y);
+            assert!(close(c, f64::from(col) + 0.5, 1e-9) && close(r, f64::from(row) + 0.5, 1e-9));
+        }
+        let [corner, ..] = grid.footprint.corners();
+        let (c, r) = grid.local_to_cell(corner.0, corner.1);
+        assert!(
+            close(c, 0.0, 1e-9) && close(r, f64::from(grid.rows), 1e-9),
+            "{c} {r}"
+        );
     }
 
     #[test]

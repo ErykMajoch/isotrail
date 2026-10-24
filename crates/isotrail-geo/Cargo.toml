@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 directories.workspace = true
 isotrail-track = { path = "../isotrail-track" }
+png.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
