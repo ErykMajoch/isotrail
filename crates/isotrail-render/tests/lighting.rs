@@ -4,7 +4,7 @@ use std::f32::consts::FRAC_PI_2;
 use glam::{Vec2, Vec3};
 use isotrail_bundle::{Landcover, SceneBundle};
 use isotrail_render::{
-    Aspect, BACKGROUND, BANDS, Camera, Frame, Gpu, Mesher, OffscreenTarget, SmoothMesher, SunState,
+    Aspect, BANDS, Camera, Frame, Gpu, Look, Mesher, OffscreenTarget, SmoothMesher, SunState,
     TerrainRenderer, VoxelMesher,
 };
 use isotrail_testkit::{bundle, grid};
@@ -37,7 +37,8 @@ struct Render {
 }
 
 impl Render {
-    /// Looks along slab-frame angle `heading` under the late-morning sun
+    /// Looks along slab-frame angle `heading` under the late-morning sun, with
+    /// no outlines or palette
     fn new(bundle: &SceneBundle, mesher: &dyn Mesher, heading: f32) -> Render {
         let gpu = Gpu::headless().unwrap();
         let framing = Aspect::Story.framing(3).unwrap();
@@ -46,7 +47,8 @@ impl Render {
         let sun = SunState::late_morning(&bundle.grid);
         let renderer = TerrainRenderer::new(&gpu);
         let target = OffscreenTarget::new(&gpu, framing.width, framing.height);
-        renderer.draw(&gpu, &target, &renderer.upload(&gpu, &mesh), &camera, &sun);
+        let mesh = renderer.upload(&gpu, &mesh);
+        renderer.draw(&gpu, &target, &mesh, &camera, &sun, &Look::plain());
         Render {
             frame: target.read_back(&gpu).unwrap(),
             camera,
@@ -60,6 +62,14 @@ impl Render {
         let x = (ndc.x + 1.0) / 2.0 * self.frame.width() as f32;
         let y = (1.0 - ndc.y) / 2.0 * self.frame.height() as f32;
         self.frame.pixel(x as u32, y as u32)
+    }
+
+    /// The left column is always outside the safe area, so it holds every
+    /// row's sky colour
+    fn sky(&self) -> HashSet<[u8; 4]> {
+        (0..self.frame.height())
+            .map(|y| self.frame.pixel(0, y))
+            .collect()
     }
 }
 
@@ -85,7 +95,7 @@ fn flat_ground_is_one_colour_without_acne() {
             let render = Render::new(&flat, mesher.as_ref(), heading);
             let colours: HashSet<[u8; 4]> = top_points(0.0, CELL_M).map(|p| render.at(p)).collect();
             assert_eq!(colours.len(), 1, "{name} at {heading}: {colours:?}");
-            assert!(!colours.contains(&BACKGROUND), "{name}");
+            assert!(colours.is_disjoint(&render.sky()), "{name}");
         }
     }
 }
@@ -127,13 +137,14 @@ fn a_tower_casts_its_shadow_away_from_the_sun() {
 fn light_falls_in_a_few_bands() {
     let hill = slab(|c, r| 300.0 * (-((c * c + r * r) as f32) / 60.0).exp());
     let render = Render::new(&hill, &SmoothMesher, 0.3);
+    let sky = render.sky();
     let colours: HashSet<[u8; 4]> = top_points(0.0, 4.0 * CELL_M)
         .map(|p| {
             let (c, r) = (p.x / CELL_M, p.y / CELL_M);
             let z = 300.0 * (-(c * c + r * r) / 60.0).exp();
             render.at(p.with_z(z))
         })
-        .filter(|&c| c != BACKGROUND)
+        .filter(|c| !sky.contains(c))
         .collect();
     let levels = (BANDS + 1) as usize;
     assert!(colours.len() > 2, "{colours:?}");

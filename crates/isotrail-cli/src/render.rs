@@ -4,7 +4,10 @@ use anyhow::{Context, bail};
 use clap::{Args, ValueEnum};
 use isotrail_bundle::SceneBundle;
 use isotrail_export::{DEFAULT_SCALE, render_still, upscale, write_png};
-use isotrail_render::{Aspect, DEFAULT_YAW_OFFSET_DEG, Gpu, Mesher, SmoothMesher, VoxelMesher};
+use isotrail_render::{
+    Aspect, DEFAULT_PALETTE, DEFAULT_YAW_OFFSET_DEG, Gpu, Look, Mesher, Palette, SmoothMesher,
+    VoxelMesher,
+};
 use tracing::info;
 
 use crate::bundle::DataArgs;
@@ -31,6 +34,11 @@ pub struct RenderArgs {
     /// slab's size and relief by default
     #[arg(long, value_name = "X", value_parser = crate::bundle::parse_exaggeration)]
     exaggeration: Option<f64>,
+
+    /// Colours to draw with: a built-in palette's name, a Lospec .hex file, or
+    /// none to keep the unquantised colours
+    #[arg(long, value_name = "NAME|FILE", default_value = DEFAULT_PALETTE)]
+    palette: String,
 
     #[command(flatten)]
     data: DataArgs,
@@ -60,6 +68,31 @@ impl RenderArgs {
     }
 }
 
+fn read_palette(value: &str) -> anyhow::Result<Option<Palette>> {
+    if value.eq_ignore_ascii_case("none") {
+        return Ok(None);
+    }
+    if let Some(palette) = Palette::builtin(value) {
+        return Ok(Some(palette));
+    }
+    let path = Path::new(value);
+    let is_hex = path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("hex"));
+    if !is_hex && !path.is_file() {
+        let names: Vec<&str> = Palette::builtin_names().collect();
+        bail!(
+            "unknown palette {value:?}: expected {}, none or a .hex file",
+            names.join(", ")
+        );
+    }
+    let bytes = crate::read_file(path)?;
+    let text = String::from_utf8_lossy(&bytes);
+    let palette = Palette::parse_hex(&text)
+        .with_context(|| format!("could not read the palette {}", path.display()))?;
+    Ok(Some(palette))
+}
+
 fn parse_block_height(value: &str) -> Result<f32, String> {
     let height: f32 = value.parse().map_err(|e| format!("{e}"))?;
     if (0.25..=4.0).contains(&height) {
@@ -72,6 +105,10 @@ fn parse_block_height(value: &str) -> Result<f32, String> {
 pub fn run(args: &RenderArgs) -> anyhow::Result<()> {
     let output = output_path(&args.file, args.output.as_deref())?;
     let mesher = args.mesher()?;
+    let look = Look {
+        palette: read_palette(&args.palette)?,
+        ..Look::default()
+    };
     let mut bundle = read_scene(&args.file, &args.data)?;
     if let Some(exaggeration) = args.exaggeration {
         bundle.grid.exaggeration = exaggeration;
@@ -89,6 +126,7 @@ pub fn run(args: &RenderArgs) -> anyhow::Result<()> {
         mesher.as_ref(),
         &framing,
         DEFAULT_YAW_OFFSET_DEG,
+        &look,
     )?;
     let frame = upscale(&frame, DEFAULT_SCALE)?;
     write_png(&output, &frame)?;

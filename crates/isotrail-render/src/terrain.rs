@@ -2,12 +2,11 @@ use glam::Vec3;
 use wgpu::util::DeviceExt;
 
 use crate::lighting::{BANDS, FILL};
-use crate::{Camera, Gpu, OffscreenTarget, SunState, TARGET_FORMAT, TerrainMesh, Vertex};
+use crate::post::{DEPTH_FORMAT, GBuffer, ID_FORMAT, NORMAL_FORMAT, PostPass, TERRAIN_ID};
+use crate::{Camera, Gpu, Look, OffscreenTarget, SunState, TARGET_FORMAT, TerrainMesh, Vertex};
 
-pub const BACKGROUND: [u8; 4] = [196, 214, 228, 255];
 /// Texels along each side of the square shadow map, the most WebGL2 allows
 pub const SHADOW_MAP_SIZE: u32 = 2048;
-const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 /// A terrain mesh uploaded to the GPU
 pub struct GpuMesh {
@@ -25,6 +24,7 @@ struct Uniforms {
     sun_colour: [f32; 4],
     fill: [f32; 4],
     shadow: [f32; 4],
+    object: [u32; 4],
 }
 
 /// Draws terrain meshes with banded Lambert lighting and sun shadows
@@ -35,6 +35,7 @@ pub struct TerrainRenderer {
     shadow_layout: wgpu::BindGroupLayout,
     shadow_view: wgpu::TextureView,
     shadow_sampler: wgpu::Sampler,
+    post: PostPass,
 }
 
 impl TerrainRenderer {
@@ -130,7 +131,11 @@ impl TerrainRenderer {
                 module: &module,
                 entry_point: Some("fs_main"),
                 compilation_options: Default::default(),
-                targets: &[Some(TARGET_FORMAT.into())],
+                targets: &[
+                    Some(TARGET_FORMAT.into()),
+                    Some(NORMAL_FORMAT.into()),
+                    Some(ID_FORMAT.into()),
+                ],
             }),
             multiview_mask: None,
             cache: None,
@@ -187,6 +192,7 @@ impl TerrainRenderer {
             shadow_layout,
             shadow_view,
             shadow_sampler,
+            post: PostPass::new(gpu),
         }
     }
 
@@ -216,8 +222,8 @@ impl TerrainRenderer {
         }
     }
 
-    /// Clears `target` to [`BACKGROUND`] and draws the mesh over it, lit and
-    /// shadowed by `sun`
+    /// Draws the mesh into `target` over the sky, lit and shadowed by `sun`
+    /// and finished with `look`
     pub fn draw(
         &self,
         gpu: &Gpu,
@@ -225,6 +231,7 @@ impl TerrainRenderer {
         mesh: &GpuMesh,
         camera: &Camera,
         sun: &SunState,
+        look: &Look,
     ) {
         let device = gpu.device();
         let light_view_proj = if mesh.count == 0 {
@@ -244,6 +251,7 @@ impl TerrainRenderer {
             sun_colour: (sun.colour * sun.intensity).extend(BANDS as f32).to_array(),
             fill: towards_camera.extend(FILL).to_array(),
             shadow: [texel_m, 0.0, 0.0, 0.0],
+            object: [TERRAIN_ID, 0, 0, 0],
         };
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("terrain uniforms"),
@@ -276,23 +284,8 @@ impl TerrainRenderer {
                 resource: uniform_buffer.as_entire_binding(),
             }],
         });
-        let depth = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain depth"),
-            size: wgpu::Extent3d {
-                width: target.width(),
-                height: target.height(),
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
-        let depth_view = depth.create_view(&wgpu::TextureViewDescriptor::default());
+        let gbuffer = GBuffer::new(gpu, target.width(), target.height());
 
-        let [r, g, b, a] = BACKGROUND.map(|c| f64::from(c) / 255.0);
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         {
@@ -316,20 +309,22 @@ impl TerrainRenderer {
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("terrain"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target.view(),
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color { r, g, b, a }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
+                color_attachments: &[&gbuffer.colour, &gbuffer.normal, &gbuffer.id].map(|view| {
+                    Some(wgpu::RenderPassColorAttachment {
+                        view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })
+                }),
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &depth_view,
+                    view: &gbuffer.depth,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Discard,
+                        store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,
                 }),
@@ -340,6 +335,8 @@ impl TerrainRenderer {
             pass.set_vertex_buffer(0, mesh.vertices.slice(..));
             pass.draw(0..mesh.count, 0..1);
         }
+        self.post
+            .encode(gpu, &mut encoder, &gbuffer, target, camera, look);
         gpu.queue().submit([encoder.finish()]);
     }
 }

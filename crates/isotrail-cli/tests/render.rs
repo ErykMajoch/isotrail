@@ -184,3 +184,55 @@ fn block_height_and_exaggeration_change_the_image() {
         "{stderr}"
     );
 }
+
+#[test]
+fn palettes_come_by_name_or_from_a_hex_file() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("hill.itb"), diorama_bundle().to_bytes()).unwrap();
+    fs::write(temp.path().join("mono.hex"), "000000\r\n#ffffff\r\n").unwrap();
+    fs::write(temp.path().join("broken.hex"), "000000\nnot-a-colour\n").unwrap();
+    let cache = temp.path().join("cache");
+    let render = |image: &str, palette: &str| {
+        isotrail(
+            &cache,
+            temp.path(),
+            &["render", "hill.itb", "-o", image, "--palette", palette],
+        )
+    };
+    let mut images = Vec::new();
+    for (image, palette) in [
+        ("default.png", "apollo"),
+        ("named.png", "AAP-64"),
+        ("file.png", "mono.hex"),
+        ("none.png", "none"),
+    ] {
+        let output = render(image, palette);
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        images.push(fs::read(temp.path().join(image)).unwrap());
+    }
+    for (i, a) in images.iter().enumerate() {
+        for b in &images[i + 1..] {
+            assert_ne!(a, b);
+        }
+    }
+    let output = isotrail(
+        &cache,
+        temp.path(),
+        &["render", "hill.itb", "-o", "plain.png"],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert_eq!(fs::read(temp.path().join("plain.png")).unwrap(), images[0]);
+
+    let output = render("x.png", "sepia");
+    assert!(!output.status.success());
+    let stderr = text(&output.stderr);
+    assert!(
+        stderr.contains("unknown palette \"sepia\": expected apollo, resurrect-64, aap-64"),
+        "{stderr}"
+    );
+    let output = render("x.png", "broken.hex");
+    assert!(!output.status.success());
+    let stderr = text(&output.stderr);
+    assert!(stderr.contains("line 2"), "{stderr}");
+    assert!(!temp.path().join("x.png").exists());
+}

@@ -9,6 +9,8 @@ struct Uniforms {
     fill: vec4<f32>,
     // x how far to push lookups along the normal, in metres
     shadow: vec4<f32>,
+    // x the id written to the object-id target
+    object: vec4<u32>,
 }
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -49,8 +51,14 @@ fn sunlit(world: vec3<f32>, normal: vec3<f32>) -> f32 {
     return textureSampleCompareLevel(shadow_map, shadow_sampler, uv, clip.z);
 }
 
+struct FragmentOut {
+    @location(0) colour: vec4<f32>,
+    @location(1) normal: vec4<f32>,
+    @location(2) id: u32,
+}
+
 @fragment
-fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+fn fs_main(in: VertexOut) -> FragmentOut {
     let ambient = uniforms.sun.w;
     let bands = uniforms.sun_colour.w;
     let facing = round(max(dot(in.normal, uniforms.fill.xyz), 0.0) * bands) / bands;
@@ -61,5 +69,9 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let diffuse = max(dot(in.normal, uniforms.sun.xyz), 0.0) * shadow;
     let banded = ceil(diffuse * bands - 0.25) / bands;
     let direct = uniforms.sun_colour.rgb * (1.0 - ambient) * clamp(banded, 0.0, 1.0);
-    return vec4<f32>(min(in.colour * (sky + direct), vec3<f32>(1.0)), 1.0);
+    var out: FragmentOut;
+    out.colour = vec4<f32>(min(in.colour * (sky + direct), vec3<f32>(1.0)), 1.0);
+    out.normal = vec4<f32>(in.normal * 0.5 + 0.5, 1.0);
+    out.id = uniforms.object.x;
+    return out;
 }

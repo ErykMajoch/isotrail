@@ -9,6 +9,8 @@ mod frame;
 mod gpu;
 mod lighting;
 mod mesh;
+mod palette;
+mod post;
 mod target;
 mod terrain;
 mod test_scene;
@@ -24,6 +26,8 @@ pub use lighting::{
     AMBIENT, BANDS, FILL, SUN_AZIMUTH_DEG, SUN_COLOUR, SUN_ELEVATION_DEG, SunState,
 };
 pub use mesh::{Mesher, SmoothMesher, TerrainMesh, Vertex, VoxelMesher};
+pub use palette::{DEFAULT_PALETTE, MAX_COLOURS, Palette, PaletteError, srgb_to_oklab};
+pub use post::{Edges, Look, SKY_BOTTOM, SKY_TOP};
 pub use target::{OffscreenTarget, TARGET_FORMAT};
-pub use terrain::{BACKGROUND, GpuMesh, SHADOW_MAP_SIZE, TerrainRenderer};
+pub use terrain::{GpuMesh, SHADOW_MAP_SIZE, TerrainRenderer};
 pub use test_scene::draw_test_scene;

@@ -1,6 +1,7 @@
 use isotrail_bundle::SceneBundle;
 use isotrail_render::{
-    Camera, Frame, Framing, Gpu, Mesher, OffscreenTarget, SunState, TerrainRenderer, view_heading,
+    Camera, Frame, Framing, Gpu, Look, Mesher, OffscreenTarget, SunState, TerrainRenderer,
+    view_heading,
 };
 
 use crate::ExportError;
@@ -9,13 +10,15 @@ use crate::ExportError;
 pub const DEFAULT_SCALE: u32 = 3;
 
 /// Renders the bundle's diorama at the framing's internal resolution, looking
-/// `yaw_offset_deg` off the hike's heading, under the fixed sun
+/// `yaw_offset_deg` off the hike's heading, under the fixed sun, finished with
+/// `look`
 pub fn render_still(
     gpu: &Gpu,
     bundle: &SceneBundle,
     mesher: &dyn Mesher,
     framing: &Framing,
     yaw_offset_deg: f32,
+    look: &Look,
 ) -> Result<Frame, ExportError> {
     let grid = &bundle.grid;
     let mesh = mesher.mesh(bundle);
@@ -29,6 +32,7 @@ pub fn render_still(
         &renderer.upload(gpu, &mesh),
         &camera,
         &SunState::late_morning(grid),
+        look,
     );
     Ok(target.read_back(gpu)?)
 }
