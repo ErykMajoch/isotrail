@@ -1,17 +1,11 @@
+pub use isotrail_bundle::WaterBody;
+
 use super::percentile;
 use crate::Heightmap;
 
 /// Low, because resampling blends the higher shore into the cells along it
 pub const WATER_LEVEL_PERCENTILE: f64 = 0.1;
 pub(super) const NO_LAKE: u32 = u32::MAX;
-
-/// A lake or reservoir with a level surface
-#[derive(Debug, Clone, PartialEq)]
-pub struct WaterBody {
-    pub level_m: f32,
-    /// Row-major cell indices, ascending
-    pub cells: Vec<u32>,
-}
 
 /// Splits each lake's cells into 4-connected bodies and flattens every body
 /// to its level; `lakes` holds, per cell, the lake that claimed it first

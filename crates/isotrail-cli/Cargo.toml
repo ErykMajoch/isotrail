@@ -14,6 +14,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true
+isotrail-bundle = { path = "../isotrail-bundle" }
 isotrail-geo = { path = "../isotrail-geo" }
 isotrail-track = { path = "../isotrail-track" }
 png.workspace = true

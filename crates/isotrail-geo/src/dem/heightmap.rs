@@ -12,6 +12,24 @@ impl Heightmap {
         self.heights_m[(row * self.cols + col) as usize]
     }
 
+    /// Bilinear between cell centres at a fractional (col, row), held flat
+    /// beyond the outer centres
+    pub fn sample(&self, col: f64, row: f64) -> f32 {
+        let axis = |at: f64, len: u32| {
+            let at = (at - 0.5).clamp(0.0, f64::from(len - 1));
+            let lo = at.floor() as u32;
+            (lo, (lo + 1).min(len - 1), (at - f64::from(lo)) as f32)
+        };
+        let (c0, c1, tc) = axis(col, self.cols);
+        let (r0, r1, tr) = axis(row, self.rows);
+        let lerp = |a: f32, b: f32, t: f32| a + (b - a) * t;
+        lerp(
+            lerp(self.get(c0, r0), self.get(c1, r0), tc),
+            lerp(self.get(c0, r1), self.get(c1, r1), tc),
+            tr,
+        )
+    }
+
     pub fn range(&self) -> (f32, f32) {
         self.heights_m
             .iter()
@@ -91,6 +109,19 @@ mod tests {
         assert_eq!(map.get(2, 0), 2.0);
         assert_eq!(map.get(1, 1), 11.0);
         assert_eq!(map.range(), (0.0, 12.0));
+    }
+
+    #[test]
+    fn samples_blend_between_cell_centres() {
+        let map = heightmap(3, 2, |col, row| (row * 10 + col) as f32);
+        assert_eq!(map.sample(0.5, 0.5), 0.0);
+        assert_eq!(map.sample(2.5, 1.5), 12.0);
+        assert_eq!(map.sample(1.0, 0.5), 0.5);
+        assert_eq!(map.sample(1.5, 1.0), 6.0);
+        assert_eq!(map.sample(1.25, 1.25), 8.25);
+        assert_eq!(map.sample(0.0, 0.0), 0.0, "clamped at the edge");
+        assert_eq!(map.sample(-4.0, 9.0), 10.0);
+        assert_eq!(heightmap(1, 1, |_, _| 7.0).sample(0.9, 0.1), 7.0);
     }
 
     #[test]

@@ -7,16 +7,16 @@ Early development.
 ## Usage
 
 ```bash
-isotrail stats hike.gpx [--json] [--units metric|imperial]
+isotrail stats hike.gpx|hike.itb [--json] [--units metric|imperial]
 ```
 
-Prints distance, elevation gain and loss, elapsed and moving time, start and end times in the local time zone, and the bounding box. `--json` always reports metres and seconds.
+Prints distance, elevation gain and loss, elapsed and moving time, start and end times in the local time zone, and the bounding box, for a GPX file or a scene bundle made from one. `--json` always reports metres and seconds.
 
 ```bash
-isotrail bundle hike.gpx --debug-dir DIR [--detail N] [--offline] [--overpass-url URL]
+isotrail bundle hike.gpx -o hike.itb [--debug-dir DIR] [--detail N] [--offline] [--overpass-url URL]
 ```
 
-Downloads the elevation and OpenStreetMap data around the route, reports how many map features it found (`-v` lists them by type) and works out what covers every grid cell from the map data where it has any and from the slope and height of the ground elsewhere. Lakes and reservoirs are given a level surface. It writes these images to `DIR`, to check the terrain before rendering:
+Downloads the elevation and OpenStreetMap data around the route, reports how many map features it found (`-v` lists them by type) and works out what covers every grid cell from the map data where it has any and from the slope and height of the ground elsewhere. Lakes and reservoirs are given a level surface. The result is saved with the route, its elevation profile and the hike's statistics as a scene bundle (`.itb`): one compact file that holds everything needed to render the hike, with no further downloads. With `--debug-dir`, it also writes these images to `DIR`, to check the terrain before rendering:
 
 - `heightmap.png`: lowest ground black, highest white
 - `hillshade.png`: shaded relief with the route in red

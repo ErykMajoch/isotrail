@@ -3,6 +3,7 @@ use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+use isotrail_bundle::SceneBundle;
 use isotrail_geo::{
     Cache, CachedFetcher, FeatureSource, Fetcher, Footprint, Grid, OVERPASS_URL, OverpassSource,
     RecordedFetcher, TerrariumSource, TileId,
@@ -77,17 +78,20 @@ fn gpx() -> String {
 }
 
 #[test]
-fn offline_bundle_writes_debug_images_from_the_cache() {
+fn offline_bundle_writes_the_bundle_and_debug_images_from_the_cache() {
     let temp = tempfile::tempdir().unwrap();
     let cache_dir = temp.path().join("cache");
     warm(&cache_dir, true);
 
     let debug = temp.path().join("debug");
+    let itb = temp.path().join("snowdon.itb");
     let output = isotrail(
         &cache_dir,
         &[
             "bundle",
             &gpx(),
+            "-o",
+            itb.to_str().unwrap(),
             "--detail",
             "32",
             "--offline",
@@ -113,6 +117,16 @@ fn offline_bundle_writes_debug_images_from_the_cache() {
     assert!(stdout.contains("\nLandcover: "), "{stdout}");
     assert!(stdout.contains(", bare rock "), "{stdout}");
     assert!(stdout.contains("levelled\n"), "{stdout}");
+    assert!(stdout.contains("\nRoute: "), "{stdout}");
+    let size = std::fs::metadata(&itb).unwrap().len().div_ceil(1024);
+    assert!(
+        stdout.contains(&format!("Wrote {} ({size} KB)\n", itb.display())),
+        "{stdout}"
+    );
+    let bundle = SceneBundle::from_bytes(&std::fs::read(&itb).unwrap()).unwrap();
+    assert_eq!((bundle.grid.cols, bundle.grid.rows), (32, 16));
+    assert_eq!(bundle.meta.title, "Synthetic Snowdon Descent");
+    assert!(!bundle.route.points.is_empty());
     assert_eq!(png_size(&debug.join("heightmap.png")), (32, 16));
     for name in ["hillshade.png", "landcover.png", "water.png", "paths.png"] {
         assert_eq!(png_size(&debug.join(name)), (128, 64), "{name}");
@@ -126,11 +140,14 @@ fn offline_bundle_writes_debug_images_from_the_cache() {
 fn offline_bundle_without_cached_tiles_explains_why() {
     let temp = tempfile::tempdir().unwrap();
     let debug = temp.path().join("debug");
+    let itb = temp.path().join("hike.itb");
     let output = isotrail(
         &temp.path().join("cache"),
         &[
             "bundle",
             &gpx(),
+            "-o",
+            itb.to_str().unwrap(),
             "--offline",
             "--debug-dir",
             debug.to_str().unwrap(),
@@ -143,7 +160,7 @@ fn offline_bundle_without_cached_tiles_explains_why() {
         "{stderr}"
     );
     assert!(stderr.contains("offline mode is on"), "{stderr}");
-    assert!(!debug.exists());
+    assert!(!debug.exists() && !itb.exists());
 }
 
 #[test]
@@ -152,11 +169,14 @@ fn offline_bundle_without_cached_map_data_explains_why() {
     let cache_dir = temp.path().join("cache");
     warm(&cache_dir, false);
     let debug = temp.path().join("debug");
+    let itb = temp.path().join("hike.itb");
     let output = isotrail(
         &cache_dir,
         &[
             "bundle",
             &gpx(),
+            "-o",
+            itb.to_str().unwrap(),
             "--detail",
             "32",
             "--offline",
@@ -171,7 +191,7 @@ fn offline_bundle_without_cached_map_data_explains_why() {
         "{stderr}"
     );
     assert!(stderr.contains("offline mode is on"), "{stderr}");
-    assert!(!debug.exists());
+    assert!(!debug.exists() && !itb.exists());
 }
 
 #[test]
@@ -179,15 +199,15 @@ fn overpass_endpoint_comes_from_the_flag_or_the_environment() {
     let temp = tempfile::tempdir().unwrap();
     let cache_dir = temp.path().join("cache");
     warm(&cache_dir, true);
-    let debug = temp.path().join("debug");
+    let itb = temp.path().join("hike.itb");
     let args = [
         "bundle",
         &gpx(),
+        "-o",
+        itb.to_str().unwrap(),
         "--detail",
         "32",
         "--offline",
-        "--debug-dir",
-        debug.to_str().unwrap(),
     ];
 
     let flag = [&args[..], &["--overpass-url", MIRROR]].concat();
@@ -210,8 +230,65 @@ fn detail_is_range_checked() {
     let temp = tempfile::tempdir().unwrap();
     let output = isotrail(
         temp.path(),
-        &["bundle", &gpx(), "--detail", "2", "--debug-dir", "unused"],
+        &["bundle", &gpx(), "--detail", "2", "-o", "unused.itb"],
     );
     assert!(!output.status.success());
     assert!(text(&output.stderr).contains("--detail"));
+}
+
+#[test]
+fn stats_of_a_bundle_match_the_gpx() {
+    let temp = tempfile::tempdir().unwrap();
+    let cache_dir = temp.path().join("cache");
+    warm(&cache_dir, true);
+    let itb = temp.path().join("hike.itb");
+    let output = isotrail(
+        &cache_dir,
+        &[
+            "bundle",
+            &gpx(),
+            "-o",
+            itb.to_str().unwrap(),
+            "--detail",
+            "32",
+            "--offline",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert!(!text(&output.stdout).contains("png"));
+    let renamed = temp.path().join("hike.bin");
+    std::fs::copy(&itb, &renamed).unwrap();
+
+    for extra in [&[][..], &["--json"], &["--units", "imperial"]] {
+        let stats = |file: &str| {
+            let output = isotrail(&cache_dir, &[&["stats", file][..], extra].concat());
+            assert!(output.status.success(), "{}", text(&output.stderr));
+            text(&output.stdout)
+        };
+        let expected = stats(&gpx());
+        assert_eq!(stats(itb.to_str().unwrap()), expected, "{extra:?}");
+        assert_eq!(stats(renamed.to_str().unwrap()), expected, "{extra:?}");
+    }
+}
+
+#[test]
+fn stats_of_a_damaged_bundle_explains_why() {
+    let temp = tempfile::tempdir().unwrap();
+    for (name, bytes, reason) in [
+        (
+            "damaged.itb",
+            &b"ITB1\x01\x00not deflate"[..],
+            "the bundle is damaged",
+        ),
+        ("newer.dat", b"ITB1\x09\x00", "format version 9"),
+        ("hike.itb", b"<gpx/>", "not an isotrail scene bundle"),
+    ] {
+        let path = temp.path().join(name);
+        std::fs::write(&path, bytes).unwrap();
+        let output = isotrail(temp.path(), &["stats", path.to_str().unwrap()]);
+        assert!(!output.status.success());
+        let stderr = text(&output.stderr);
+        assert!(stderr.contains("could not read"), "{stderr}");
+        assert!(stderr.contains(reason), "{stderr}");
+    }
 }

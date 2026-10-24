@@ -1,6 +1,6 @@
 //! Geographic preparation for isotrail: local projection, the terrain grid,
-//! elevation and map data sources and the on-disk cache that keeps them
-//! offline-friendly
+//! elevation and map data sources, the on-disk cache that keeps them
+//! offline-friendly and assembly of the scene bundle
 //!
 //! ```
 //! use isotrail_geo::{DEFAULT_DETAIL, Footprint, Grid};
@@ -28,6 +28,7 @@ mod landcover;
 mod osm;
 mod projection;
 mod relief;
+mod scene;
 
 pub use dem::{
     DemError, DemSource, Heightmap, MAX_MERCATOR_LAT, TERRARIUM_URL, TILE_SIZE, TerrariumSource,
@@ -40,7 +41,7 @@ pub use fetch::{
 };
 pub use footprint::{Footprint, MAX_ASPECT, MIN_PADDING_M, PADDING_FRACTION};
 pub use grid::{DEFAULT_DETAIL, Grid, MAX_DEM_ZOOM, dem_zoom, ground_resolution_m};
-pub use isotrail_bundle::{Landcover, line_mask};
+pub use isotrail_bundle::{Landcover, Provenance, SceneBundle, line_mask};
 pub use landcover::{
     ALPINE_ROCK_SLOPE_DEG, LandcoverMap, ROCK_ABOVE_TREELINE_M, ROCK_SLOPE_DEG, Treeline,
     WATER_LEVEL_PERCENTILE, WaterBody, latitude_treeline_m, legend_rgb, slope_deg,
@@ -51,3 +52,7 @@ pub use osm::{
 };
 pub use projection::LocalProjection;
 pub use relief::{EXAGGERATION_FACTOR, MAX_EXAGGERATION, MIN_EXAGGERATION, vertical_exaggeration};
+pub use scene::{
+    DEM_ATTRIBUTION, OSM_ATTRIBUTION, PROFILE_SAMPLES, ROUTE_BREAK_M, ROUTE_TOLERANCE_CELLS,
+    scene_bundle,
+};

@@ -5,7 +5,7 @@ mod bundle;
 mod cache;
 mod stats;
 
-use std::fs::File;
+use std::fs;
 use std::io::IsTerminal;
 use std::path::Path;
 
@@ -28,9 +28,11 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Print distance, elevation and time statistics for a GPX file
+    /// Print distance, elevation and time statistics for a GPX file or scene
+    /// bundle
     Stats(stats::StatsArgs),
-    /// Prepare the terrain around a GPX route and write debug images of it
+    /// Prepare the terrain around a GPX route and save it with the route as
+    /// a scene bundle (.itb)
     Bundle(bundle::BundleArgs),
     /// Show or clear the cache of downloaded elevation and map data
     Cache(cache::CacheArgs),
@@ -47,12 +49,27 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn read_track(path: &Path) -> anyhow::Result<Track> {
-    let mut file =
-        File::open(path).with_context(|| format!("could not open {}", path.display()))?;
+    parse_track(&read_file(path)?, path)
+}
+
+fn read_file(path: &Path) -> anyhow::Result<Vec<u8>> {
+    fs::read(path).with_context(|| format!("could not open {}", path.display()))
+}
+
+fn parse_track(bytes: &[u8], path: &Path) -> anyhow::Result<Track> {
     GpxReader
-        .read(&mut file)
+        .parse(bytes)
         .and_then(Track::clean)
         .with_context(|| format!("could not read {}", path.display()))
+}
+
+/// The track's name, or the file name without its extension
+fn title(track: &Track, path: &Path) -> String {
+    track
+        .name
+        .clone()
+        .or_else(|| Some(path.file_stem()?.to_string_lossy().into_owned()))
+        .unwrap_or_default()
 }
 
 fn init_logging(verbose: u8) {

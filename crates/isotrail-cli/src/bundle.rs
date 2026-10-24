@@ -6,12 +6,12 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use clap::Args;
+use isotrail_bundle::Route;
 use isotrail_geo::{
-    Cache, CachedFetcher, DEFAULT_DETAIL, DemSource, FeatureSource, Footprint, Grid, HttpFetcher,
-    Landcover, LandcoverMap, OVERPASS_URL, OverpassSource, TerrariumSource, legend_rgb, line_mask,
-    vertical_exaggeration,
+    Cache, CachedFetcher, DEFAULT_DETAIL, DemSource, FeatureSource, Footprint, Grid, Heightmap,
+    HttpFetcher, Landcover, LandcoverMap, OVERPASS_URL, OverpassSource, Provenance, SceneBundle,
+    TERRARIUM_URL, TerrariumSource, legend_rgb, line_mask, scene_bundle,
 };
-use isotrail_track::Track;
 use png::ColorType;
 use tracing::info;
 
@@ -24,10 +24,14 @@ pub struct BundleArgs {
     /// GPX file to read
     file: PathBuf,
 
-    /// Write intermediate images (heightmap, hillshade, landcover, water and
-    /// path maps) to this directory
+    /// Where to write the scene bundle (.itb)
+    #[arg(short, long, value_name = "BUNDLE")]
+    output: PathBuf,
+
+    /// Also write intermediate images (heightmap, hillshade, landcover, water
+    /// and path maps) to this directory
     #[arg(long, value_name = "DIR")]
-    debug_dir: PathBuf,
+    debug_dir: Option<PathBuf>,
 
     /// Grid cells along the long side of the terrain slab
     #[arg(long, value_name = "N", default_value_t = DEFAULT_DETAIL.get(),
@@ -70,16 +74,84 @@ pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
         info!("{cells:>6}  cells with a {name}");
     }
 
-    let dir = &args.debug_dir;
+    let provenance = Provenance {
+        generator: format!("isotrail {}", env!("CARGO_PKG_VERSION")),
+        elevation: format!("{TERRARIUM_URL} at zoom {}", grid.dem_zoom()),
+        map_data: format!("OpenStreetMap via {}", args.overpass_url),
+    };
+    let bundle = scene_bundle(
+        &track,
+        &crate::title(&track, &args.file),
+        &grid,
+        &heightmap,
+        &landcover,
+        provenance,
+    )?;
+    let bytes = bundle.to_bytes();
+    let output = &args.output;
+    fs::write(output, &bytes).with_context(|| format!("could not write {}", output.display()))?;
+    let mut written = vec![(output.clone(), Some(bytes.len()))];
+    if let Some(dir) = &args.debug_dir {
+        let images = write_debug_images(dir, &grid, &heightmap, &landcover, &bundle)?;
+        written.extend(images.into_iter().map(|path| (path, None)));
+    }
+
+    println!(
+        "Heightmap {} × {} cells of {:.1} m from {tiles} terrain tile{} at zoom {}",
+        grid.cols,
+        grid.rows,
+        grid.cell_size_m,
+        if tiles == 1 { "" } else { "s" },
+        grid.dem_zoom()
+    );
+    println!("Elevation {min:.0} – {max:.0} m");
+    println!(
+        "Map data: {} areas and {} lines from OpenStreetMap",
+        features.areas.len(),
+        features.lines.len()
+    );
+    let shares: Vec<String> = landcover
+        .shares()
+        .into_iter()
+        .filter(|&(_, share)| share >= MIN_REPORTED_SHARE)
+        .map(|(class, share)| format!("{} {:.0}%", class.name(), share * 100.0))
+        .collect();
+    println!("Landcover: {}", shares.join(", "));
+    let bodies = landcover.water.len();
+    println!(
+        "Water: {bodies} {} levelled",
+        if bodies == 1 { "lake" } else { "lakes" }
+    );
+    let pieces = bundle.route.breaks.len() + 1;
+    println!(
+        "Route: {} points in {pieces} piece{}",
+        bundle.route.points.len(),
+        if pieces == 1 { "" } else { "s" }
+    );
+    for (path, size) in written {
+        match size {
+            Some(bytes) => println!("Wrote {} ({} KB)", path.display(), bytes.div_ceil(1024)),
+            None => println!("Wrote {}", path.display()),
+        }
+    }
+    Ok(())
+}
+
+fn write_debug_images(
+    dir: &Path,
+    grid: &Grid,
+    heightmap: &Heightmap,
+    landcover: &LandcoverMap,
+    bundle: &SceneBundle,
+) -> anyhow::Result<Vec<PathBuf>> {
     fs::create_dir_all(dir).with_context(|| format!("could not create {}", dir.display()))?;
     let (cols, rows) = (grid.cols, grid.rows);
     let (width, height) = (cols * PREVIEW_SCALE, rows * PREVIEW_SCALE);
-    let exaggeration = vertical_exaggeration(grid.footprint.length_m, f64::from(max - min));
-    let shade = heightmap.hillshade(grid.cell_size_m, exaggeration);
+    let shade = heightmap.hillshade(grid.cell_size_m, bundle.grid.exaggeration);
     let mut hillshade = enlarge(&grey_to_rgb(&shade), cols, 3);
-    draw_route(&mut hillshade, &track, &grid);
+    draw_route(&mut hillshade, &bundle.route, width, height);
     let mut landcover_rgb = enlarge(&landcover.legend_image(), cols, 3);
-    draw_route(&mut landcover_rgb, &track, &grid);
+    draw_route(&mut landcover_rgb, &bundle.route, width, height);
 
     let images = [
         (
@@ -119,40 +191,10 @@ pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
         written.push(path);
     }
     let legend = dir.join("landcover-legend.txt");
-    fs::write(&legend, legend_text(&landcover))
+    fs::write(&legend, legend_text(landcover))
         .with_context(|| format!("could not write {}", legend.display()))?;
     written.push(legend);
-
-    println!(
-        "Heightmap {} × {} cells of {:.1} m from {tiles} terrain tile{} at zoom {}",
-        grid.cols,
-        grid.rows,
-        grid.cell_size_m,
-        if tiles == 1 { "" } else { "s" },
-        grid.dem_zoom()
-    );
-    println!("Elevation {min:.0} – {max:.0} m");
-    println!(
-        "Map data: {} areas and {} lines from OpenStreetMap",
-        features.areas.len(),
-        features.lines.len()
-    );
-    let shares: Vec<String> = landcover
-        .shares()
-        .into_iter()
-        .filter(|&(_, share)| share >= MIN_REPORTED_SHARE)
-        .map(|(class, share)| format!("{} {:.0}%", class.name(), share * 100.0))
-        .collect();
-    println!("Landcover: {}", shares.join(", "));
-    let bodies = landcover.water.len();
-    println!(
-        "Water: {bodies} {} levelled",
-        if bodies == 1 { "lake" } else { "lakes" }
-    );
-    for path in written {
-        println!("Wrote {}", path.display());
-    }
-    Ok(())
+    Ok(written)
 }
 
 fn legend_text(landcover: &LandcoverMap) -> String {
@@ -194,9 +236,9 @@ fn enlarge(cells: &[u8], cols: u32, channels: usize) -> Vec<u8> {
     out
 }
 
-/// Draws the route in red over an enlarged RGB image of the grid
-fn draw_route(rgb: &mut [u8], track: &Track, grid: &Grid) {
-    let (width, height) = (grid.cols * PREVIEW_SCALE, grid.rows * PREVIEW_SCALE);
+/// Draws the bundle's route in red over an enlarged RGB image of the grid,
+/// leaving its breaks open
+fn draw_route(rgb: &mut [u8], route: &Route, width: u32, height: u32) {
     let mut plot = |x: i64, y: i64| {
         if (0..i64::from(width)).contains(&x) && (0..i64::from(height)).contains(&y) {
             let i = ((y * i64::from(width) + x) * 3) as usize;
@@ -204,26 +246,23 @@ fn draw_route(rgb: &mut [u8], track: &Track, grid: &Grid) {
         }
     };
     let scale = f64::from(PREVIEW_SCALE);
-    for segment in &track.segments {
-        let pixels: Vec<(f64, f64)> = segment
-            .points
-            .iter()
-            .map(|p| {
-                let (x, y) = grid.footprint.projection.project(p.lat, p.lon);
-                let (col, row) = grid.local_to_cell(x, y);
-                (col * scale, row * scale)
-            })
-            .collect();
-        for pair in pixels.windows(2) {
-            let (a, b) = (pair[0], pair[1]);
-            let steps = (b.0 - a.0).abs().max((b.1 - a.1).abs()).ceil().max(1.0);
-            for step in 0..=steps as i64 {
-                let t = step as f64 / steps;
-                plot(
-                    (a.0 + t * (b.0 - a.0)).floor() as i64,
-                    (a.1 + t * (b.1 - a.1)).floor() as i64,
-                );
-            }
+    let pixels: Vec<(f64, f64)> = route
+        .points
+        .iter()
+        .map(|p| (f64::from(p.col) * scale, f64::from(p.row) * scale))
+        .collect();
+    for (i, pair) in pixels.windows(2).enumerate() {
+        if route.breaks.contains(&(i as u32 + 1)) {
+            continue;
+        }
+        let (a, b) = (pair[0], pair[1]);
+        let steps = (b.0 - a.0).abs().max((b.1 - a.1).abs()).ceil().max(1.0);
+        for step in 0..=steps as i64 {
+            let t = step as f64 / steps;
+            plot(
+                (a.0 + t * (b.0 - a.0)).floor() as i64,
+                (a.1 + t * (b.1 - a.1)).floor() as i64,
+            );
         }
     }
 }

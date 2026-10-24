@@ -1,14 +1,16 @@
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use anyhow::Context;
 use chrono::{DateTime, SecondsFormat, TimeDelta, TimeZone, Utc};
 use clap::{Args, ValueEnum};
-use isotrail_track::{Track, TrackStats, Units};
+use isotrail_bundle::{HikeStats, SceneBundle, is_bundle};
+use isotrail_track::{Bounds, TrackStats, Units};
 use serde::Serialize;
 
 #[derive(Debug, Args)]
 pub struct StatsArgs {
-    /// GPX file to read
+    /// GPX file or scene bundle (.itb) to read
     file: PathBuf,
 
     /// Print machine-readable JSON (always metres and seconds)
@@ -36,23 +38,73 @@ impl From<UnitsArg> for Units {
 }
 
 pub fn run(args: &StatsArgs) -> anyhow::Result<()> {
-    let path = &args.file;
-    let track = crate::read_track(path)?;
-    let stats = track.stats()?;
-    let title = track
-        .name
-        .clone()
-        .or_else(|| Some(path.file_stem()?.to_string_lossy().into_owned()))
-        .unwrap_or_default();
-
+    let summary = Summary::read(&args.file)?;
     let mut out = io::stdout().lock();
     if args.json {
-        serde_json::to_writer_pretty(&mut out, &Report::new(&track, &stats))?;
+        serde_json::to_writer_pretty(&mut out, &Report::new(&summary))?;
         writeln!(out)?;
     } else {
-        write_table(&mut out, &title, &stats, args.units.into())?;
+        write_table(&mut out, &summary.title, &summary.stats, args.units.into())?;
     }
     Ok(())
+}
+
+struct Summary {
+    title: String,
+    name: Option<String>,
+    desc: Option<String>,
+    stats: TrackStats,
+}
+
+impl Summary {
+    fn read(path: &Path) -> anyhow::Result<Summary> {
+        let bytes = crate::read_file(path)?;
+        let itb = path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("itb"));
+        if itb || is_bundle(&bytes) {
+            let meta = SceneBundle::from_bytes(&bytes)
+                .with_context(|| format!("could not read {}", path.display()))?
+                .meta;
+            return Ok(Summary {
+                stats: track_stats(&meta.stats, meta.timezone.as_deref()),
+                title: meta.title,
+                name: meta.name,
+                desc: meta.desc,
+            });
+        }
+        let track = crate::parse_track(&bytes, path)?;
+        Ok(Summary {
+            stats: track.stats()?,
+            title: crate::title(&track, path),
+            name: track.name,
+            desc: track.desc,
+        })
+    }
+}
+
+fn track_stats(stats: &HikeStats, timezone: Option<&str>) -> TrackStats {
+    let time = |secs: Option<i64>| DateTime::from_timestamp(secs?, 0);
+    TrackStats {
+        points: stats.points as usize,
+        segments: stats.segments as usize,
+        distance_m: stats.distance_m,
+        gain_m: stats.gain_m,
+        loss_m: stats.loss_m,
+        min_ele_m: stats.min_ele_m,
+        max_ele_m: stats.max_ele_m,
+        bounds: Bounds {
+            min_lat: stats.bounds.min_lat,
+            min_lon: stats.bounds.min_lon,
+            max_lat: stats.bounds.max_lat,
+            max_lon: stats.bounds.max_lon,
+        },
+        start: time(stats.start),
+        end: time(stats.end),
+        elapsed: stats.elapsed_s.map(TimeDelta::seconds),
+        moving: stats.moving_s.map(TimeDelta::seconds),
+        timezone: timezone.and_then(|name| name.parse().ok()),
+    }
 }
 
 const MISSING: &str = "—";
@@ -179,12 +231,13 @@ struct BoundsReport {
 }
 
 impl<'a> Report<'a> {
-    fn new(track: &'a Track, stats: &TrackStats) -> Self {
+    fn new(summary: &'a Summary) -> Self {
+        let stats = &summary.stats;
         let decimetres = |m: f64| (m * 10.0).round() / 10.0;
         let rfc3339 = |t: DateTime<_>| t.to_rfc3339_opts(SecondsFormat::Secs, true);
         Report {
-            name: track.name.as_deref(),
-            desc: track.desc.as_deref(),
+            name: summary.name.as_deref(),
+            desc: summary.desc.as_deref(),
             points: stats.points,
             segments: stats.segments,
             distance_m: decimetres(stats.distance_m),

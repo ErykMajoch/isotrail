@@ -10,9 +10,25 @@ impl Track {
         let segments = self
             .segments
             .iter()
+            .zip(self.simplified_indices(tolerance_m))
+            .map(|(segment, kept)| Segment {
+                points: kept.into_iter().map(|i| segment.points[i]).collect(),
+            })
+            .collect();
+        Track {
+            name: self.name.clone(),
+            desc: self.desc.clone(),
+            segments,
+        }
+    }
+
+    /// Indices of the points [`Track::simplified`] keeps, per segment
+    pub fn simplified_indices(&self, tolerance_m: f64) -> Vec<Vec<usize>> {
+        self.segments
+            .iter()
             .map(|segment| {
                 let Some(first) = segment.points.first() else {
-                    return Segment::default();
+                    return Vec::new();
                 };
                 let line: LineString = segment
                     .points
@@ -22,20 +38,9 @@ impl Track {
                         Coord { x, y }
                     })
                     .collect();
-                Segment {
-                    points: line
-                        .simplify_idx(tolerance_m)
-                        .into_iter()
-                        .map(|i| segment.points[i])
-                        .collect(),
-                }
+                line.simplify_idx(tolerance_m)
             })
-            .collect();
-        Track {
-            name: self.name.clone(),
-            desc: self.desc.clone(),
-            segments,
-        }
+            .collect()
     }
 }
 
@@ -87,6 +92,7 @@ mod tests {
             [segment.points[0], segment.points[2], segment.points[4]]
         );
         assert_eq!(track.simplified(100.0).point_count(), 2);
+        assert_eq!(track.simplified_indices(50.0), [[0, 2, 4]]);
     }
 
     #[test]
