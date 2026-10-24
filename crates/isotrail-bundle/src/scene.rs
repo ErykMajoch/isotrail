@@ -77,6 +77,25 @@ impl GridInfo {
     pub fn cells(&self) -> usize {
         (self.cols as usize).saturating_mul(self.rows as usize)
     }
+
+    pub fn length_m(&self) -> f64 {
+        f64::from(self.cols) * self.cell_size_m
+    }
+
+    pub fn width_m(&self) -> f64 {
+        f64::from(self.rows) * self.cell_size_m
+    }
+
+    /// Compass bearing of the long side, in [0, 180)
+    pub fn long_axis_bearing_deg(&self) -> f64 {
+        (90.0 - self.rotation_rad.to_degrees()).rem_euclid(180.0)
+    }
+
+    /// Compass bearing the default isometric camera faces, with the long side
+    /// on a 2:1 screen diagonal; an east-west slab gives the classic 45°
+    pub fn camera_yaw_deg(&self) -> f64 {
+        (self.long_axis_bearing_deg() - 45.0).rem_euclid(360.0)
+    }
 }
 
 /// Per-cell layers, row-major
@@ -183,6 +202,31 @@ mod tests {
                 "{error} at {i}"
             );
         }
+    }
+
+    #[test]
+    fn camera_yaw_puts_the_long_side_on_a_diagonal() {
+        let grid = |rotation_deg: f64| GridInfo {
+            cols: 8,
+            rows: 4,
+            cell_size_m: 10.0,
+            origin_lat: 0.0,
+            origin_lon: 0.0,
+            center_m: (0.0, 0.0),
+            rotation_rad: rotation_deg.to_radians(),
+            exaggeration: 1.0,
+        };
+        for (rotation, bearing, yaw) in [
+            (0.0, 90.0, 45.0),
+            (90.0, 0.0, 315.0),
+            (30.0, 60.0, 15.0),
+            (-60.0, 150.0, 105.0),
+        ] {
+            let grid = grid(rotation);
+            assert!((grid.long_axis_bearing_deg() - bearing).abs() < 1e-9);
+            assert!((grid.camera_yaw_deg() - yaw).abs() < 1e-9, "{rotation}");
+        }
+        assert_eq!((grid(0.0).length_m(), grid(0.0).width_m()), (80.0, 40.0));
     }
 
     #[test]

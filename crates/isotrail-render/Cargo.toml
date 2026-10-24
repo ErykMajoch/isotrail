@@ -7,12 +7,18 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+bytemuck.workspace = true
+glam.workspace = true
+isotrail-bundle = { path = "../isotrail-bundle" }
 thiserror.workspace = true
 tracing.workspace = true
 wgpu.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 pollster.workspace = true
+
+[dev-dependencies]
+isotrail-testkit = { path = "../isotrail-testkit" }
 
 [lints]
 workspace = true

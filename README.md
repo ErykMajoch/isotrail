@@ -27,6 +27,12 @@ Downloads the elevation and OpenStreetMap data around the route, reports how man
 The terrain slab is turned to follow the route, so the images are not north-up. `--detail` sets the number of grid cells along the slab's long side (default 256). `--offline` uses only data already in the cache. Map data comes from the public [Overpass API](https://overpass-api.de/). To use another instance, pass `--overpass-url` or set `ISOTRAIL_OVERPASS_URL`. On long routes, where a grid cell is wider than 100 m, footpaths, streams and minor roads are left out because they would be too small to show.
 
 ```bash
+isotrail render hike.gpx|hike.itb [-o hike.png] [--detail N] [--offline] [--overpass-url URL]
+```
+
+Renders the terrain as a 1080 × 1920 PNG. The slab is seen from above at an angle, looking the way the hike goes, so the start is in front; for loops and out-and-backs, that means towards the halfway point. It is drawn at a third of the final size and enlarged so every pixel stays crisp. For now, each kind of ground has a flat colour, with simple shading from a fixed sun. A GPX file is first prepared the same way as `isotrail bundle`, with the same options; a scene bundle is rendered as is. Without `-o`, the image is named after the input and written to the current directory.
+
+```bash
 isotrail cache path
 isotrail cache clear [--yes]
 ```

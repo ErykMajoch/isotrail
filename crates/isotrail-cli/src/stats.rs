@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use chrono::{DateTime, SecondsFormat, TimeDelta, TimeZone, Utc};
 use clap::{Args, ValueEnum};
-use isotrail_bundle::{HikeStats, SceneBundle, is_bundle};
+use isotrail_bundle::{HikeStats, SceneBundle};
 use isotrail_track::{Bounds, TrackStats, Units};
 use serde::Serialize;
 
@@ -59,10 +59,7 @@ struct Summary {
 impl Summary {
     fn read(path: &Path) -> anyhow::Result<Summary> {
         let bytes = crate::read_file(path)?;
-        let itb = path
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("itb"));
-        if itb || is_bundle(&bytes) {
+        if crate::is_bundle_file(path, &bytes) {
             let meta = SceneBundle::from_bytes(&bytes)
                 .with_context(|| format!("could not read {}", path.display()))?
                 .meta;

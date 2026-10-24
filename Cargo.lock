@@ -746,6 +746,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glam"
+version = "0.34.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc148d4ddd3930c52f9e5ae79b89805c6f07e9ff417e7b083e0348cea60a5aba"
+
+[[package]]
 name = "glow"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1129,7 +1135,10 @@ dependencies = [
  "chrono",
  "clap",
  "isotrail-bundle",
+ "isotrail-export",
  "isotrail-geo",
+ "isotrail-render",
+ "isotrail-testkit",
  "isotrail-track",
  "png",
  "serde",
@@ -1144,6 +1153,7 @@ name = "isotrail-export"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "isotrail-bundle",
  "isotrail-render",
  "isotrail-testkit",
  "png",
@@ -1172,6 +1182,10 @@ dependencies = [
 name = "isotrail-render"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
+ "glam",
+ "isotrail-bundle",
+ "isotrail-testkit",
  "pollster",
  "thiserror",
  "tracing",
@@ -1182,6 +1196,7 @@ dependencies = [
 name = "isotrail-testkit"
 version = "0.1.0"
 dependencies = [
+ "isotrail-bundle",
  "png",
  "tempfile",
 ]

@@ -15,7 +15,9 @@ anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true
 isotrail-bundle = { path = "../isotrail-bundle" }
+isotrail-export = { path = "../isotrail-export" }
 isotrail-geo = { path = "../isotrail-geo" }
+isotrail-render = { path = "../isotrail-render" }
 isotrail-track = { path = "../isotrail-track" }
 png.workspace = true
 serde.workspace = true
@@ -24,6 +26,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+isotrail-testkit = { path = "../isotrail-testkit" }
 png.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

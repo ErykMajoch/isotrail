@@ -1,6 +1,6 @@
 [package]
 name = "isotrail-testkit"
-description = "Golden-image test helpers for isotrail"
+description = "Golden-image and synthetic-scene test helpers for isotrail"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,6 +8,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+isotrail-bundle = { path = "../isotrail-bundle" }
 png.workspace = true
 
 [dev-dependencies]

@@ -7,6 +7,9 @@ pub enum ExportError {
     #[error("the upscale factor must be at least 1")]
     ZeroScale,
 
+    #[error(transparent)]
+    Render(#[from] isotrail_render::RenderError),
+
     #[error("could not encode PNG")]
     Png(#[from] ::png::EncodingError),
 

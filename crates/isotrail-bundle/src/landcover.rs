@@ -53,6 +53,25 @@ impl Landcover {
         }
     }
 
+    /// Map-like colours for debug images and renders
+    pub fn legend_rgb(self) -> [u8; 3] {
+        match self {
+            Landcover::Water => [58, 123, 213],
+            Landcover::Snow => [240, 244, 248],
+            Landcover::Rock => [140, 140, 140],
+            Landcover::Scree => [190, 178, 154],
+            Landcover::Grassland => [156, 204, 101],
+            Landcover::Heath => [160, 112, 143],
+            Landcover::Scrub => [107, 142, 35],
+            Landcover::Coniferous => [31, 77, 43],
+            Landcover::Broadleaf => [63, 143, 58],
+            Landcover::MixedForest => [46, 107, 52],
+            Landcover::Wetland => [106, 168, 160],
+            Landcover::Farmland => [227, 210, 122],
+            Landcover::BuiltUp => [192, 80, 77],
+        }
+    }
+
     pub fn is_forest(self) -> bool {
         matches!(
             self,

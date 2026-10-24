@@ -9,8 +9,8 @@ use clap::Args;
 use isotrail_bundle::Route;
 use isotrail_geo::{
     Cache, CachedFetcher, DEFAULT_DETAIL, DemSource, FeatureSource, Footprint, Grid, Heightmap,
-    HttpFetcher, Landcover, LandcoverMap, OVERPASS_URL, OverpassSource, Provenance, SceneBundle,
-    TERRARIUM_URL, TerrariumSource, legend_rgb, line_mask, scene_bundle,
+    HttpFetcher, Landcover, LandcoverMap, OVERPASS_URL, OsmFeatures, OverpassSource, Provenance,
+    SceneBundle, TERRARIUM_URL, TerrariumSource, line_mask, scene_bundle,
 };
 use png::ColorType;
 use tracing::info;
@@ -33,6 +33,13 @@ pub struct BundleArgs {
     #[arg(long, value_name = "DIR")]
     debug_dir: Option<PathBuf>,
 
+    #[command(flatten)]
+    data: DataArgs,
+}
+
+/// How terrain and map data are fetched for a GPX file
+#[derive(Debug, Args)]
+pub struct DataArgs {
     /// Grid cells along the long side of the terrain slab
     #[arg(long, value_name = "N", default_value_t = DEFAULT_DETAIL.get(),
           value_parser = clap::value_parser!(u32).range(8..=1024))]
@@ -47,23 +54,35 @@ pub struct BundleArgs {
     overpass_url: String,
 }
 
-pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
-    let track = crate::read_track(&args.file)?;
+/// A scene bundle and what went into it
+pub struct Prepared {
+    pub bundle: SceneBundle,
+    grid: Grid,
+    heightmap: Heightmap,
+    landcover: LandcoverMap,
+    features: OsmFeatures,
+    tiles: usize,
+    elevation_range: (f32, f32),
+}
+
+/// Fetches terrain and map data around a GPX route and packs them into a bundle
+pub fn prepare(file: &Path, data: &DataArgs) -> anyhow::Result<Prepared> {
+    let track = crate::read_track(file)?;
     let footprint = Footprint::from_track(&track)?;
-    let detail = NonZeroU32::new(args.detail).context("--detail must be positive")?;
+    let detail = NonZeroU32::new(data.detail).context("--detail must be positive")?;
     let grid = Grid::new(&footprint, detail);
 
     let fetcher = CachedFetcher::new(HttpFetcher::new()?, Cache::new(crate::cache::dir()?))
-        .offline(args.offline);
+        .offline(data.offline);
     let tiles = TerrariumSource::<HttpFetcher>::tiles(&grid).len();
     let mut heightmap = TerrariumSource::new(&fetcher).heightmap(&grid)?;
     let features = OverpassSource::new(&fetcher)
-        .endpoint(&args.overpass_url)
+        .endpoint(&data.overpass_url)
         .features(&grid)?;
     for (tag, count) in features.counts() {
         info!("{count:>6}  {tag}");
     }
-    let (min, max) = heightmap.range();
+    let elevation_range = heightmap.range();
     let landcover = LandcoverMap::classify(&grid, &features, &mut heightmap);
     for (bit, cells) in landcover.line_counts() {
         let name = match bit {
@@ -77,16 +96,37 @@ pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
     let provenance = Provenance {
         generator: format!("isotrail {}", env!("CARGO_PKG_VERSION")),
         elevation: format!("{TERRARIUM_URL} at zoom {}", grid.dem_zoom()),
-        map_data: format!("OpenStreetMap via {}", args.overpass_url),
+        map_data: format!("OpenStreetMap via {}", data.overpass_url),
     };
     let bundle = scene_bundle(
         &track,
-        &crate::title(&track, &args.file),
+        &crate::title(&track, file),
         &grid,
         &heightmap,
         &landcover,
         provenance,
     )?;
+    Ok(Prepared {
+        bundle,
+        grid,
+        heightmap,
+        landcover,
+        features,
+        tiles,
+        elevation_range,
+    })
+}
+
+pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
+    let Prepared {
+        bundle,
+        grid,
+        heightmap,
+        landcover,
+        features,
+        tiles,
+        elevation_range: (min, max),
+    } = prepare(&args.file, &args.data)?;
     let bytes = bundle.to_bytes();
     let output = &args.output;
     fs::write(output, &bytes).with_context(|| format!("could not write {}", output.display()))?;
@@ -201,7 +241,7 @@ fn legend_text(landcover: &LandcoverMap) -> String {
     let mut text = String::new();
     let shares = landcover.shares();
     for class in Landcover::ALL {
-        let [r, g, b] = legend_rgb(class);
+        let [r, g, b] = class.legend_rgb();
         let share = shares
             .iter()
             .find(|(c, _)| *c == class)

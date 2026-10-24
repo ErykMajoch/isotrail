@@ -3,6 +3,7 @@
 
 mod bundle;
 mod cache;
+mod render;
 mod stats;
 
 use std::fs;
@@ -34,6 +35,8 @@ enum Command {
     /// Prepare the terrain around a GPX route and save it with the route as
     /// a scene bundle (.itb)
     Bundle(bundle::BundleArgs),
+    /// Render a GPX file or scene bundle as a diorama image
+    Render(render::RenderArgs),
     /// Show or clear the cache of downloaded elevation and map data
     Cache(cache::CacheArgs),
 }
@@ -44,6 +47,7 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Command::Stats(args) => stats::run(&args),
         Command::Bundle(args) => bundle::run(&args),
+        Command::Render(args) => render::run(&args),
         Command::Cache(args) => cache::run(&args),
     }
 }
@@ -54,6 +58,13 @@ fn read_track(path: &Path) -> anyhow::Result<Track> {
 
 fn read_file(path: &Path) -> anyhow::Result<Vec<u8>> {
     fs::read(path).with_context(|| format!("could not open {}", path.display()))
+}
+
+/// A scene bundle by its extension or its first bytes, otherwise GPX
+fn is_bundle_file(path: &Path, bytes: &[u8]) -> bool {
+    path.extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("itb"))
+        || isotrail_bundle::is_bundle(bytes)
 }
 
 fn parse_track(bytes: &[u8], path: &Path) -> anyhow::Result<Track> {

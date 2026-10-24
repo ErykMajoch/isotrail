@@ -168,9 +168,9 @@ impl LandcoverMap {
             .map(|bit| (bit, self.lines.iter().filter(|&&l| l & bit != 0).count()))
     }
 
-    /// Each cell in its [`legend_rgb`] colour
+    /// Each cell in its [`Landcover::legend_rgb`] colour
     pub fn legend_image(&self) -> Vec<u8> {
-        self.classes.iter().flat_map(|&c| legend_rgb(c)).collect()
+        self.classes.iter().flat_map(|&c| c.legend_rgb()).collect()
     }
 
     /// Levelled water white, other water (rivers) grey, land black
@@ -203,25 +203,6 @@ impl LandcoverMap {
                 }
             })
             .collect()
-    }
-}
-
-/// Map-like colours for debug images
-pub fn legend_rgb(class: Landcover) -> [u8; 3] {
-    match class {
-        Landcover::Water => [58, 123, 213],
-        Landcover::Snow => [240, 244, 248],
-        Landcover::Rock => [140, 140, 140],
-        Landcover::Scree => [190, 178, 154],
-        Landcover::Grassland => [156, 204, 101],
-        Landcover::Heath => [160, 112, 143],
-        Landcover::Scrub => [107, 142, 35],
-        Landcover::Coniferous => [31, 77, 43],
-        Landcover::Broadleaf => [63, 143, 58],
-        Landcover::MixedForest => [46, 107, 52],
-        Landcover::Wetland => [106, 168, 160],
-        Landcover::Farmland => [227, 210, 122],
-        Landcover::BuiltUp => [192, 80, 77],
     }
 }
 
@@ -543,8 +524,8 @@ mod tests {
         );
         let image = map.legend_image();
         assert_eq!(image.len(), 52 * 26 * 3);
-        assert_eq!(image[..3], legend_rgb(Landcover::Scree));
-        assert_eq!(image[image.len() - 3..], legend_rgb(Landcover::Grassland));
+        assert_eq!(image[..3], Landcover::Scree.legend_rgb());
+        assert_eq!(image[image.len() - 3..], Landcover::Grassland.legend_rgb());
         assert_eq!(map.line_image().len(), 52 * 26 * 3);
         assert_eq!(map.water_mask(), vec![0; 52 * 26]);
         assert!(matches!(map.treeline, Treeline::Latitude(_)));

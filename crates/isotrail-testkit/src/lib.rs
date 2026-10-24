@@ -1,13 +1,18 @@
-//! Test helpers for isotrail: golden-image comparison with a tolerance
+//! Test helpers for isotrail: golden-image comparison with a tolerance, and
+//! synthetic scene bundles built in code
 //!
 //! Goldens live in `fixtures/golden/<name>.png`. Run the tests with
 //! `UPDATE_GOLDENS=1` to create or refresh them. When a comparison fails, the
 //! actual image and a diff (differing pixels in red) are written to
 //! `target/golden-failures/`
 
+mod scene;
+
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
+
+pub use scene::{bundle, diorama_bundle, grid};
 
 pub const UPDATE_ENV: &str = "UPDATE_GOLDENS";
 
