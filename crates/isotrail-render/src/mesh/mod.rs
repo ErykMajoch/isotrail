@@ -1,3 +1,5 @@
+mod cover;
+mod props;
 mod smooth;
 mod strata;
 mod surface;
@@ -172,4 +174,15 @@ fn side_rgba(value: u8) -> [u8; 4] {
     let [r, g, b, a] = landcover_rgba(value);
     let shade = |c: u8| (f32::from(c) * SIDE_SHADE).round() as u8;
     [shade(r), shade(g), shade(b), a]
+}
+
+fn hash<const N: usize>(seed: u64, keys: [u64; N]) -> u64 {
+    keys.into_iter().fold(seed, |h, k| splitmix64(h ^ k))
+}
+
+fn splitmix64(x: u64) -> u64 {
+    let mut z = x.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
 }

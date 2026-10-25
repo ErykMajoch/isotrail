@@ -1,6 +1,6 @@
 use isotrail_bundle::{
     Bounds, GridInfo, HikeStats, Landcover, Metadata, Provenance, Route, RoutePoint, SceneBundle,
-    Terrain, WaterBody,
+    Terrain, WaterBody, line_mask,
 };
 
 /// An unrotated grid centred on the origin
@@ -87,8 +87,9 @@ pub fn bundle(grid: GridInfo, heights_m: &[f32], landcover: &[Landcover]) -> Sce
     bundle
 }
 
-/// A turned 96 × 48 slab with a tilted plain, a rocky hill, a levelled lake
-/// and two forests, and a straight route from the lake shore to the summit
+/// A turned 96 × 48 slab with a tilted plain, a rocky hill ringed by scree, a
+/// levelled lake fed by a stream, two forests, a path and a road, and a
+/// straight route from the lake shore to the summit
 pub fn diorama_bundle() -> SceneBundle {
     let grid = GridInfo {
         rotation_rad: 0.4,
@@ -109,6 +110,7 @@ pub fn diorama_bundle() -> SceneBundle {
         + 30.0;
     let mut heights = Vec::with_capacity(grid.cells());
     let mut classes = Vec::with_capacity(grid.cells());
+    let mut lines = Vec::with_capacity(grid.cells());
     for row in 0..rows {
         for col in 0..cols {
             let (c, r) = (col as f32 + 0.5, row as f32 + 0.5);
@@ -117,6 +119,8 @@ pub fn diorama_bundle() -> SceneBundle {
                 Landcover::Water
             } else if hill > 190.0 {
                 Landcover::Rock
+            } else if hill > 130.0 {
+                Landcover::Scree
             } else if (c - 58.0).powi(2) / 2.0 + (r - 38.0).powi(2) < 60.0 {
                 Landcover::Coniferous
             } else if (c - 12.0).powi(2) + (r - 10.0).powi(2) < 50.0 {
@@ -124,11 +128,21 @@ pub fn diorama_bundle() -> SceneBundle {
             } else {
                 Landcover::Grassland
             };
+            // A stream into the lake, a path through the conifers, a road
+            let line = match (col, row) {
+                _ if class == Landcover::Water => 0,
+                (90, _) => line_mask::ROAD,
+                (44.., 38) => line_mask::PATH,
+                (..24, 30) => line_mask::STREAM,
+                _ => 0,
+            };
             heights.push(if class == Landcover::Water { level } else { h });
             classes.push(class);
+            lines.push(line);
         }
     }
     let mut bundle = bundle(grid, &heights, &classes);
+    bundle.terrain.lines = lines;
     let (from, to) = ((34.0f32, 40.0f32), (64.0f32, 20.0f32));
     let length_m = (to.0 - from.0).hypot(to.1 - from.1) * grid.cell_size_m as f32;
     bundle.route.points = (0..=10)
@@ -160,6 +174,7 @@ mod tests {
         for class in [
             Landcover::Water,
             Landcover::Rock,
+            Landcover::Scree,
             Landcover::Coniferous,
             Landcover::Broadleaf,
             Landcover::Grassland,
@@ -168,6 +183,9 @@ mod tests {
                 bundle.terrain.landcover.contains(&u8::from(class)),
                 "{class:?}"
             );
+        }
+        for bit in [line_mask::PATH, line_mask::ROAD, line_mask::STREAM] {
+            assert!(bundle.terrain.lines.iter().any(|&l| l & bit != 0), "{bit}");
         }
         let lake = &bundle.water[0];
         assert!(lake.cells.len() > 50);

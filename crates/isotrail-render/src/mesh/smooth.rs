@@ -1,6 +1,6 @@
 use isotrail_bundle::{Landcover, SceneBundle};
 
-use super::{Columns, Mesher, Surface, TerrainMesh, landcover_rgba, slab_position, strata};
+use super::{Columns, Mesher, Surface, TerrainMesh, cover, slab_position, strata};
 
 /// A height at every cell corner and two flat-shaded triangles per cell,
 /// coloured by the cell's landcover, over layered slab sides
@@ -12,6 +12,7 @@ impl Mesher for SmoothMesher {
         let grid = &bundle.grid;
         let (cols, rows) = (grid.cols as usize, grid.rows as usize);
         let corners = corner_heights(bundle);
+        let colours = cover::top_colours(bundle);
         let corner = |col: usize, row: usize| {
             slab_position(grid, col as f64, row as f64).extend(corners[row * (cols + 1) + col])
         };
@@ -22,7 +23,7 @@ impl Mesher for SmoothMesher {
         };
         for row in 0..rows {
             for col in 0..cols {
-                let colour = landcover_rgba(bundle.terrain.landcover[row * cols + col]);
+                let colour = colours[row * cols + col];
                 let (top_left, top_right) = (corner(col, row), corner(col + 1, row));
                 let (bottom_left, bottom_right) = (corner(col, row + 1), corner(col + 1, row + 1));
                 mesh.push_triangle([bottom_left, bottom_right, top_right], colour);
@@ -86,6 +87,7 @@ mod tests {
     use isotrail_testkit::{bundle, grid};
 
     use super::*;
+    use crate::mesh::landcover_rgba;
     use crate::mesh::strata::base;
 
     fn mesh(grid: GridInfo, heights: &[f32], classes: &[Landcover]) -> TerrainMesh {
@@ -173,8 +175,9 @@ mod tests {
         let mut classes = [Landcover::Grassland; 12];
         classes[5] = Landcover::Water;
         classes[6] = Landcover::Water;
-        let mesh = mesh(grid(4, 3, 10.0), &heights, &classes);
-        let water = landcover_rgba(u8::from(Landcover::Water));
+        let bundle = bundle(grid(4, 3, 10.0), &heights, &classes);
+        let mesh = SmoothMesher.mesh(&bundle);
+        let water = cover::top_colours(&bundle)[5];
         let lake: Vec<_> = surface(&mesh).filter(|t| t[0].colour == water).collect();
         assert_eq!(lake.len(), 4);
         for vertex in lake.into_iter().flatten() {

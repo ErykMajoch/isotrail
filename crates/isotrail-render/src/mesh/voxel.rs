@@ -1,6 +1,6 @@
 use isotrail_bundle::SceneBundle;
 
-use super::{Columns, Mesher, Side, Surface, TerrainMesh, landcover_rgba, side_rgba, strata};
+use super::{Columns, Mesher, Side, Surface, TerrainMesh, cover, side_rgba, strata};
 
 /// One column per cell, its height rounded to whole blocks, with a top in the
 /// cell's landcover colour and darker sides
@@ -20,6 +20,7 @@ impl Mesher for VoxelMesher {
     fn mesh(&self, bundle: &SceneBundle) -> TerrainMesh {
         let step = bundle.grid.cell_size_m as f32 * self.block_height;
         let tops = column_tops(bundle, step);
+        let colours = cover::top_colours(bundle);
         let columns = Columns::new(&bundle.grid, bundle.terrain.landcover.clone());
         let lowest = tops.iter().copied().fold(f32::INFINITY, f32::min);
         let (cols, rows) = (columns.cols, columns.rows);
@@ -38,7 +39,7 @@ impl Mesher for VoxelMesher {
                         corner((col + 1, row)),
                         corner((col, row)),
                     ],
-                    landcover_rgba(landcover[cell]),
+                    colours[cell],
                 );
                 for side in Side::ALL {
                     let Some((c, r)) = side.neighbour(col, row, cols, rows) else {
@@ -84,6 +85,7 @@ mod tests {
     use isotrail_testkit::{bundle, grid};
 
     use super::*;
+    use crate::mesh::landcover_rgba;
     use crate::mesh::strata::base;
 
     fn mesh(grid: GridInfo, heights: &[f32], classes: &[Landcover]) -> TerrainMesh {
@@ -179,8 +181,9 @@ mod tests {
         let mut classes = [Landcover::Grassland; 12];
         classes[5] = Landcover::Water;
         classes[6] = Landcover::Water;
-        let mesh = mesh(grid(4, 3, 10.0), &heights, &classes);
-        let water = landcover_rgba(u8::from(Landcover::Water));
+        let bundle = bundle(grid(4, 3, 10.0), &heights, &classes);
+        let mesh = VoxelMesher::default().mesh(&bundle);
+        let water = cover::top_colours(&bundle)[5];
         let lake: Vec<_> = mesh.triangles().filter(|t| t[0].colour == water).collect();
         assert_eq!(lake.len(), 4);
         for vertex in lake.into_iter().flatten() {

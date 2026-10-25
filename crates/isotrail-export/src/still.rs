@@ -21,9 +21,10 @@ pub fn render_still(
     look: &Look,
 ) -> Result<Frame, ExportError> {
     let grid = &bundle.grid;
-    let mesh = mesher.mesh(bundle);
+    let mut mesh = mesher.mesh(bundle);
     let heading = view_heading(bundle, yaw_offset_deg);
     let camera = Camera::diorama(heading, mesh.positions(), framing);
+    mesh.add_props(bundle, camera.metres_per_px);
     // About one point per internal pixel
     let route = RouteLine::drape(bundle, &mesh.surface, camera.metres_per_px / 2.0);
     let renderer = TerrainRenderer::new(gpu);

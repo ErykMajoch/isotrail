@@ -1,7 +1,7 @@
 use glam::Vec2;
 use isotrail_bundle::Landcover;
 
-use super::{BASE_BLOCKS, Columns, Side, TerrainMesh, side_rgba};
+use super::{BASE_BLOCKS, Columns, Side, TerrainMesh, hash, side_rgba};
 
 /// Block rows above the base that are deep stone
 const DEEP_BLOCKS: u32 = 2;
@@ -203,17 +203,6 @@ fn clip_below(polygon: &[Vec2], heights: [f32; 2]) -> Vec<Vec2> {
         }
     }
     clipped
-}
-
-fn hash(seed: u64, keys: [u64; 3]) -> u64 {
-    keys.into_iter().fold(seed, |h, k| splitmix64(h ^ k))
-}
-
-fn splitmix64(x: u64) -> u64 {
-    let mut z = x.wrapping_add(0x9e37_79b9_7f4a_7c15);
-    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    z ^ (z >> 31)
 }
 
 #[cfg(test)]
