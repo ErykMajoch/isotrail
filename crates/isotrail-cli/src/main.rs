@@ -5,6 +5,7 @@ mod bundle;
 mod cache;
 mod render;
 mod stats;
+mod style_lab;
 
 use std::fs;
 use std::io::IsTerminal;
@@ -37,6 +38,9 @@ enum Command {
     Bundle(bundle::BundleArgs),
     /// Render a GPX file or scene bundle as a diorama image
     Render(render::RenderArgs),
+    /// Render a hike with every mesher, pixel scale and built-in palette, and
+    /// lay the images out on a labelled contact sheet
+    StyleLab(style_lab::StyleLabArgs),
     /// Show or clear the cache of downloaded elevation and map data
     Cache(cache::CacheArgs),
 }
@@ -48,6 +52,7 @@ fn main() -> anyhow::Result<()> {
         Command::Stats(args) => stats::run(&args),
         Command::Bundle(args) => bundle::run(&args),
         Command::Render(args) => render::run(&args),
+        Command::StyleLab(args) => style_lab::run(&args),
         Command::Cache(args) => cache::run(&args),
     }
 }

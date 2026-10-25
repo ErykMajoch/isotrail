@@ -2,7 +2,7 @@ use glam::Vec3;
 
 /// The most colours a palette can hold, as the quantise shader's table is fixed
 pub const MAX_COLOURS: usize = 256;
-/// Used when no palette is asked for, until a style is settled
+/// Used when no palette is asked for
 pub const DEFAULT_PALETTE: &str = "apollo";
 
 const BUILTIN: [(&str, &str); 3] = [

@@ -61,7 +61,7 @@ impl Landcover {
             Landcover::Rock => [140, 140, 140],
             Landcover::Scree => [190, 178, 154],
             Landcover::Grassland => [156, 204, 101],
-            Landcover::Heath => [160, 112, 143],
+            Landcover::Heath => [108, 104, 72],
             Landcover::Scrub => [107, 142, 35],
             Landcover::Coniferous => [31, 77, 43],
             Landcover::Broadleaf => [63, 143, 58],

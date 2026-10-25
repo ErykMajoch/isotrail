@@ -6,7 +6,7 @@ use isotrail_render::{
 
 use crate::ExportError;
 
-/// Output pixels per internal pixel, until a style is settled
+/// Output pixels per internal pixel
 pub const DEFAULT_SCALE: u32 = 3;
 
 /// Renders the bundle's diorama and its whole route at the framing's internal
