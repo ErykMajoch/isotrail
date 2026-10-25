@@ -1119,7 +1119,7 @@ checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
 name = "isotrail-bundle"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "miniz_oxide 0.9.1",
  "postcard",
@@ -1129,7 +1129,7 @@ dependencies = [
 
 [[package]]
 name = "isotrail-cli"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1152,7 +1152,7 @@ dependencies = [
 
 [[package]]
 name = "isotrail-export"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "isotrail-bundle",
@@ -1164,7 +1164,7 @@ dependencies = [
 
 [[package]]
 name = "isotrail-geo"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "directories",
@@ -1182,7 +1182,7 @@ dependencies = [
 
 [[package]]
 name = "isotrail-render"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bytemuck",
  "geo",
@@ -1198,7 +1198,7 @@ dependencies = [
 
 [[package]]
 name = "isotrail-testkit"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "isotrail-bundle",
  "png",
@@ -1207,7 +1207,7 @@ dependencies = [
 
 [[package]]
 name = "isotrail-track"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -1222,7 +1222,7 @@ dependencies = [
 
 [[package]]
 name = "isotrail-web"
-version = "0.1.0"
+version = "1.0.0"
 
 [[package]]
 name = "itoa"

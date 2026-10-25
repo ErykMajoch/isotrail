@@ -1,0 +1,56 @@
+name: Bug report
+description: Something doesn't work or a render looks wrong
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! The more of this you can fill in, the faster it can be fixed.
+  - type: input
+    id: version
+    attributes:
+      label: isotrail version
+      description: The output of `isotrail --version`
+      placeholder: isotrail 1.0.0
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - Linux
+        - macOS
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Command
+      description: The command you ran
+      placeholder: isotrail render hike.gpx --aspect wide
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what did you expect?
+      description: Attach the render if it looks wrong
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log output
+      description: Run the command again with `-v` and paste the output. It names the GPU adapter that was used
+      render: text
+  - type: input
+    id: source
+    attributes:
+      label: Where does the GPX file come from?
+      description: AllTrails, Strava, Garmin, a route planner…
+  - type: markdown
+    attributes:
+      value: |
+        If the problem depends on the hike, a scene bundle (`isotrail bundle hike.gpx -o hike.itb`, zipped) is the most useful thing to attach. Only share your recording if you're happy to.

@@ -1,0 +1,16 @@
+name: Feature request
+description: An idea for a new option, look or output
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like isotrail to do?
+      description: Describe the result you have in mind. Sketches and example images are welcome
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: What is it for?
+      description: Where would you use it, and how do you work around it today?
