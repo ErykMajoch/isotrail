@@ -1,6 +1,6 @@
 use isotrail_bundle::SceneBundle;
 
-use super::{Columns, Mesher, Side, TerrainMesh, landcover_rgba, side_rgba, strata};
+use super::{Columns, Mesher, Side, Surface, TerrainMesh, landcover_rgba, side_rgba, strata};
 
 /// One column per cell, its height rounded to whole blocks, with a top in the
 /// cell's landcover colour and darker sides
@@ -60,6 +60,7 @@ impl Mesher for VoxelMesher {
             &mut mesh,
             |cell, _| tops[cell],
         );
+        mesh.surface = Surface::Steps { cols, tops };
         mesh
     }
 }

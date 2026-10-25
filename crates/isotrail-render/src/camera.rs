@@ -72,6 +72,8 @@ pub struct Camera {
     pub view_proj: Mat4,
     /// Unit vector the camera looks along
     pub forward: Vec3,
+    /// Size of an internal pixel on a plane facing the camera
+    pub metres_per_px: f32,
 }
 
 impl Camera {
@@ -126,6 +128,7 @@ impl Camera {
         Camera {
             view_proj: projection * view,
             forward,
+            metres_per_px: per_pixel,
         }
     }
 }

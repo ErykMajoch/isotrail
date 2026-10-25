@@ -1,6 +1,6 @@
 use isotrail_bundle::{Landcover, SceneBundle};
 
-use super::{Columns, Mesher, TerrainMesh, landcover_rgba, slab_position, strata};
+use super::{Columns, Mesher, Surface, TerrainMesh, landcover_rgba, slab_position, strata};
 
 /// A height at every cell corner and two flat-shaded triangles per cell,
 /// coloured by the cell's landcover, over layered slab sides
@@ -18,6 +18,7 @@ impl Mesher for SmoothMesher {
 
         let mut mesh = TerrainMesh {
             vertices: Vec::with_capacity(cols * rows * 6),
+            surface: Surface::default(),
         };
         for row in 0..rows {
             for col in 0..cols {
@@ -38,6 +39,7 @@ impl Mesher for SmoothMesher {
             &mut mesh,
             |_, (col, row)| corners[row * (cols + 1) + col],
         );
+        mesh.surface = Surface::Triangles { cols, corners };
         mesh
     }
 }

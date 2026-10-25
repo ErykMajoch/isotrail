@@ -1,18 +1,43 @@
-use glam::Vec3;
+use glam::{IVec2, Vec3};
 use wgpu::util::DeviceExt;
 
 use crate::lighting::{BANDS, FILL};
 use crate::post::{DEPTH_FORMAT, GBuffer, ID_FORMAT, NORMAL_FORMAT, PostPass, TERRAIN_ID};
-use crate::{Camera, Gpu, Look, OffscreenTarget, SunState, TARGET_FORMAT, TerrainMesh, Vertex};
+use crate::route::{RoutePass, to_pixel};
+use crate::sprite::Sprite;
+use crate::{
+    Camera, Gpu, Look, OffscreenTarget, RouteLine, SunState, TARGET_FORMAT, TerrainMesh, Vertex,
+};
 
 /// Texels along each side of the square shadow map, the most WebGL2 allows
 pub const SHADOW_MAP_SIZE: u32 = 2048;
+/// Pixels between flag poles when the start and finish meet
+const FLAG_SPACING_PX: i32 = 8;
 
 /// A terrain mesh uploaded to the GPU
 pub struct GpuMesh {
     vertices: wgpu::Buffer,
     count: u32,
     corners: [Vec3; 8],
+}
+
+/// What a frame shows
+pub struct Scene<'a> {
+    pub mesh: &'a GpuMesh,
+    pub route: Option<&'a RouteLine>,
+    /// Share of the route drawn, by distance: 1 draws all of it with the
+    /// finish marker, anything less ends in the head marker
+    pub progress: f32,
+}
+
+impl<'a> Scene<'a> {
+    pub fn terrain(mesh: &'a GpuMesh) -> Scene<'a> {
+        Scene {
+            mesh,
+            route: None,
+            progress: 1.0,
+        }
+    }
 }
 
 #[repr(C)]
@@ -27,7 +52,8 @@ struct Uniforms {
     object: [u32; 4],
 }
 
-/// Draws terrain meshes with banded Lambert lighting and sun shadows
+/// Draws terrain meshes with banded Lambert lighting and sun shadows, and
+/// the route over them
 pub struct TerrainRenderer {
     pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
@@ -35,6 +61,7 @@ pub struct TerrainRenderer {
     shadow_layout: wgpu::BindGroupLayout,
     shadow_view: wgpu::TextureView,
     shadow_sampler: wgpu::Sampler,
+    route: RoutePass,
     post: PostPass,
 }
 
@@ -192,6 +219,7 @@ impl TerrainRenderer {
             shadow_layout,
             shadow_view,
             shadow_sampler,
+            route: RoutePass::new(gpu),
             post: PostPass::new(gpu),
         }
     }
@@ -222,18 +250,19 @@ impl TerrainRenderer {
         }
     }
 
-    /// Draws the mesh into `target` over the sky, lit and shadowed by `sun`
+    /// Draws the scene into `target` over the sky, lit and shadowed by `sun`
     /// and finished with `look`
     pub fn draw(
         &self,
         gpu: &Gpu,
         target: &OffscreenTarget,
-        mesh: &GpuMesh,
+        scene: &Scene,
         camera: &Camera,
         sun: &SunState,
         look: &Look,
     ) {
         let device = gpu.device();
+        let mesh = scene.mesh;
         let light_view_proj = if mesh.count == 0 {
             sun.shadow_view_proj([])
         } else {
@@ -335,8 +364,43 @@ impl TerrainRenderer {
             pass.set_vertex_buffer(0, mesh.vertices.slice(..));
             pass.draw(0..mesh.count, 0..1);
         }
+        let route = scene.route.filter(|line| !line.pieces().is_empty());
+        let distance_m = route.map_or(0.0, |line| line.distance_at(scene.progress));
+        self.route.encode(
+            &mut encoder,
+            &gbuffer,
+            route,
+            distance_m,
+            camera,
+            look.route.hidden_dash_px,
+        );
+        let mut sprites = Vec::new();
+        if let (Some(line), Some(start)) = (route, route.and_then(RouteLine::start)) {
+            let atlas = self.post.sprites();
+            let pixel = |point: Vec3| {
+                to_pixel(camera, point, target.width(), target.height())
+                    .floor()
+                    .as_ivec2()
+            };
+            let start = pixel(start.position);
+            sprites.push(atlas.place(Sprite::Start, start));
+            if scene.progress >= 1.0 {
+                if let Some(finish) = line.finish() {
+                    let mut finish = pixel(finish.position);
+                    // Loops and out-and-backs fly both flags side by side
+                    if (finish - start).abs().max_element() < FLAG_SPACING_PX {
+                        finish = start + IVec2::new(FLAG_SPACING_PX, 0);
+                    }
+                    sprites.push(atlas.place(Sprite::Finish, finish));
+                }
+            } else if scene.progress > 0.0
+                && let Some(head) = line.point_at(distance_m)
+            {
+                sprites.push(atlas.place(Sprite::Head, pixel(head)));
+            }
+        }
         self.post
-            .encode(gpu, &mut encoder, &gbuffer, target, camera, look);
+            .encode(&mut encoder, &gbuffer, target, camera, look, &sprites);
         gpu.queue().submit([encoder.finish()]);
     }
 }

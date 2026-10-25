@@ -2,6 +2,7 @@ use glam::Vec4;
 use wgpu::util::DeviceExt;
 
 use crate::palette::{MAX_COLOURS, srgb_to_oklab};
+use crate::sprite::{Placed, SpriteAtlas};
 use crate::{Camera, DEFAULT_PALETTE, Gpu, OffscreenTarget, Palette, TARGET_FORMAT};
 
 /// The sky's colour at the top and bottom of the frame
@@ -10,6 +11,7 @@ pub const SKY_BOTTOM: [u8; 3] = [214, 230, 240];
 
 pub(crate) const NORMAL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 pub(crate) const ID_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Uint;
+pub(crate) const ROUTE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Uint;
 pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 /// Object ids in the geometry pass, 0 being the sky
@@ -53,7 +55,34 @@ impl Default for Edges {
     }
 }
 
-/// The finishing passes: sky, outlines and palette
+/// How the route is drawn over the terrain
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RouteStyle {
+    pub colour: [u8; 3],
+    /// In internal pixels, from 1 to 3
+    pub width_px: u32,
+    /// How much of the route's colour covers the terrain that hides it
+    pub hidden_opacity: f32,
+    /// Length of the hidden line's dashes and gaps, in internal pixels; 0
+    /// draws it solid
+    pub hidden_dash_px: f32,
+    /// How much a one-pixel border darkens the terrain around the visible line
+    pub outline: f32,
+}
+
+impl Default for RouteStyle {
+    fn default() -> Self {
+        RouteStyle {
+            colour: [214, 72, 52],
+            width_px: 2,
+            hidden_opacity: 0.6,
+            hidden_dash_px: 2.0,
+            outline: 0.4,
+        }
+    }
+}
+
+/// The finishing passes: sky, outlines, route and palette
 #[derive(Clone, Debug, PartialEq)]
 pub struct Look {
     /// `None` keeps the lit colours as they are
@@ -62,6 +91,7 @@ pub struct Look {
     /// How far ordered dithering moves the sky's colours before quantising,
     /// as a share of full brightness
     pub sky_dither: f32,
+    pub route: RouteStyle,
 }
 
 impl Look {
@@ -71,6 +101,7 @@ impl Look {
             palette: None,
             edges: Edges::NONE,
             sky_dither: 0.0,
+            route: RouteStyle::default(),
         }
     }
 }
@@ -81,6 +112,7 @@ impl Default for Look {
             palette: Palette::builtin(DEFAULT_PALETTE),
             edges: Edges::default(),
             sky_dither: 0.08,
+            route: RouteStyle::default(),
         }
     }
 }
@@ -93,16 +125,26 @@ struct Uniforms {
     sky_bottom: [f32; 4],
     edges: [f32; 4],
     look: [f32; 4],
+    route: [f32; 4],
+    counts: [u32; 4],
+    sprite_frame: [[i32; 4]; MAX_SPRITES],
+    sprite_atlas: [[i32; 4]; MAX_SPRITES],
     palette_lab: [[f32; 4]; MAX_COLOURS],
     palette_rgb: [[f32; 4]; MAX_COLOURS],
 }
 
-/// The geometry pass's targets at internal resolution
+/// The most sprites one frame can show
+pub(crate) const MAX_SPRITES: usize = 4;
+
+/// The geometry and route passes' targets at internal resolution
 pub(crate) struct GBuffer {
+    pub width: u32,
+    pub height: u32,
     pub colour: wgpu::TextureView,
     pub normal: wgpu::TextureView,
     pub id: wgpu::TextureView,
     pub depth: wgpu::TextureView,
+    pub route: wgpu::TextureView,
 }
 
 impl GBuffer {
@@ -127,17 +169,22 @@ impl GBuffer {
                 .create_view(&wgpu::TextureViewDescriptor::default())
         };
         GBuffer {
+            width,
+            height,
             colour: view("g-buffer colour", TARGET_FORMAT),
             normal: view("g-buffer normal", NORMAL_FORMAT),
             id: view("g-buffer id", ID_FORMAT),
             depth: view("g-buffer depth", DEPTH_FORMAT),
+            route: view("g-buffer route", ROUTE_FORMAT),
         }
     }
 }
 
 pub(crate) struct PostPass {
+    device: wgpu::Device,
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
+    sprites: SpriteAtlas,
 }
 
 impl PostPass {
@@ -172,6 +219,8 @@ impl PostPass {
                 texture(2, unfiltered),
                 texture(3, wgpu::TextureSampleType::Uint),
                 texture(4, wgpu::TextureSampleType::Depth),
+                texture(5, wgpu::TextureSampleType::Uint),
+                texture(6, unfiltered),
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -200,19 +249,29 @@ impl PostPass {
             multiview_mask: None,
             cache: None,
         });
-        PostPass { pipeline, layout }
+        PostPass {
+            device: device.clone(),
+            pipeline,
+            layout,
+            sprites: SpriteAtlas::new(gpu),
+        }
     }
 
+    pub fn sprites(&self) -> &SpriteAtlas {
+        &self.sprites
+    }
+
+    /// Finishes the frame with `sprites` on top, the later ones in front
     pub fn encode(
         &self,
-        gpu: &Gpu,
         encoder: &mut wgpu::CommandEncoder,
         gbuffer: &GBuffer,
         target: &OffscreenTarget,
         camera: &Camera,
         look: &Look,
+        sprites: &[Placed],
     ) {
-        let device = gpu.device();
+        let device = &self.device;
         let inv_view_proj = camera.view_proj.inverse();
         let metres_per_px = 2.0 * inv_view_proj.x_axis.truncate().length() / target.width() as f32;
         let colour =
@@ -231,11 +290,28 @@ impl PostPass {
                 look.edges.crease_angle_deg.to_radians().cos(),
                 look.sky_dither,
                 look.palette.as_ref().map_or(0, |p| p.colours().len()) as f32,
-                0.0,
+                look.route.outline,
             ],
+            route: colour(look.route.colour)
+                .truncate()
+                .extend(look.route.hidden_opacity)
+                .to_array(),
+            counts: [
+                look.route.width_px.clamp(1, 3),
+                sprites.len().min(MAX_SPRITES) as u32,
+                0,
+                0,
+            ],
+            sprite_frame: [[0; 4]; MAX_SPRITES],
+            sprite_atlas: [[0; 4]; MAX_SPRITES],
             palette_lab: [[0.0; 4]; MAX_COLOURS],
             palette_rgb: [[0.0; 4]; MAX_COLOURS],
         };
+        for (i, sprite) in sprites.iter().take(MAX_SPRITES).enumerate() {
+            let (origin, size) = (sprite.origin, sprite.size);
+            uniforms.sprite_frame[i] = [origin.x, origin.y, size.x, size.y];
+            uniforms.sprite_atlas[i] = [sprite.atlas.x, sprite.atlas.y, 0, 0];
+        }
         for (i, &rgb) in look.palette.iter().flat_map(|p| p.colours()).enumerate() {
             uniforms.palette_lab[i] = srgb_to_oklab(rgb).extend(0.0).to_array();
             uniforms.palette_rgb[i] = colour(rgb).to_array();
@@ -261,6 +337,8 @@ impl PostPass {
                 view(2, &gbuffer.normal),
                 view(3, &gbuffer.id),
                 view(4, &gbuffer.depth),
+                view(5, &gbuffer.route),
+                view(6, &self.sprites.view),
             ],
         });
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

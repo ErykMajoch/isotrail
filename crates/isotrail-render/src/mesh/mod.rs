@@ -1,11 +1,13 @@
 mod smooth;
 mod strata;
+mod surface;
 mod voxel;
 
 use glam::{Vec2, Vec3};
 use isotrail_bundle::{GridInfo, Landcover, SceneBundle};
 
 pub use smooth::SmoothMesher;
+pub use surface::Surface;
 pub use voxel::VoxelMesher;
 
 /// How far the slab's base sits below the lowest terrain, in blocks of one
@@ -28,10 +30,11 @@ pub struct Vertex {
     pub colour: [u8; 4],
 }
 
-/// Unindexed triangles, three vertices each
+/// Unindexed triangles, three vertices each, and the top they form
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TerrainMesh {
     pub vertices: Vec<Vertex>,
+    pub surface: Surface,
 }
 
 impl TerrainMesh {

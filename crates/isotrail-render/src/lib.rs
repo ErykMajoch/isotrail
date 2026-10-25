@@ -11,6 +11,8 @@ mod lighting;
 mod mesh;
 mod palette;
 mod post;
+mod route;
+mod sprite;
 mod target;
 mod terrain;
 mod test_scene;
@@ -25,9 +27,10 @@ pub use gpu::{ADAPTER_ENV, AdapterMode, Gpu};
 pub use lighting::{
     AMBIENT, BANDS, FILL, SUN_AZIMUTH_DEG, SUN_COLOUR, SUN_ELEVATION_DEG, SunState,
 };
-pub use mesh::{Mesher, SmoothMesher, TerrainMesh, Vertex, VoxelMesher};
+pub use mesh::{Mesher, SmoothMesher, Surface, TerrainMesh, Vertex, VoxelMesher};
 pub use palette::{DEFAULT_PALETTE, MAX_COLOURS, Palette, PaletteError, srgb_to_oklab};
-pub use post::{Edges, Look, SKY_BOTTOM, SKY_TOP};
+pub use post::{Edges, Look, RouteStyle, SKY_BOTTOM, SKY_TOP};
+pub use route::{RouteLine, RouteVertex};
 pub use target::{OffscreenTarget, TARGET_FORMAT};
-pub use terrain::{GpuMesh, SHADOW_MAP_SIZE, TerrainRenderer};
+pub use terrain::{GpuMesh, SHADOW_MAP_SIZE, Scene, TerrainRenderer};
 pub use test_scene::draw_test_scene;

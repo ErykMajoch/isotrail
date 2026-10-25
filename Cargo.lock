@@ -1183,9 +1183,11 @@ name = "isotrail-render"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "geo",
  "glam",
  "isotrail-bundle",
  "isotrail-testkit",
+ "png",
  "pollster",
  "thiserror",
  "tracing",

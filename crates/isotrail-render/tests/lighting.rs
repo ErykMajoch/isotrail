@@ -4,8 +4,8 @@ use std::f32::consts::FRAC_PI_2;
 use glam::{Vec2, Vec3};
 use isotrail_bundle::{Landcover, SceneBundle};
 use isotrail_render::{
-    Aspect, BANDS, Camera, Frame, Gpu, Look, Mesher, OffscreenTarget, SmoothMesher, SunState,
-    TerrainRenderer, VoxelMesher,
+    Aspect, BANDS, Camera, Frame, Gpu, Look, Mesher, OffscreenTarget, Scene, SmoothMesher,
+    SunState, TerrainRenderer, VoxelMesher,
 };
 use isotrail_testkit::{bundle, grid};
 
@@ -48,7 +48,14 @@ impl Render {
         let renderer = TerrainRenderer::new(&gpu);
         let target = OffscreenTarget::new(&gpu, framing.width, framing.height);
         let mesh = renderer.upload(&gpu, &mesh);
-        renderer.draw(&gpu, &target, &mesh, &camera, &sun, &Look::plain());
+        renderer.draw(
+            &gpu,
+            &target,
+            &Scene::terrain(&mesh),
+            &camera,
+            &sun,
+            &Look::plain(),
+        );
         Render {
             frame: target.read_back(&gpu).unwrap(),
             camera,

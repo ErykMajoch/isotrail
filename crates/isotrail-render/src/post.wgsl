@@ -6,8 +6,16 @@ struct Uniforms {
     // threshold in metres
     edges: vec4<f32>,
     // x the crease threshold as a cosine, y the sky's dither spread, z the
-    // palette size (0 for none)
+    // palette size (0 for none), w how much the route's border darkens
     look: vec4<f32>,
+    // rgb the route's colour, a its opacity where hidden
+    route: vec4<f32>,
+    // x the route's width in pixels, y the sprite count
+    counts: vec4<u32>,
+    // xy each sprite's top-left pixel, zw its size
+    sprite_frame: array<vec4<i32>, 4>,
+    // xy each sprite's top-left texel in the atlas
+    sprite_atlas: array<vec4<i32>, 4>,
     // xyz OKLab
     palette_lab: array<vec4<f32>, 256>,
     // rgb sRGB
@@ -19,6 +27,9 @@ struct Uniforms {
 @group(0) @binding(2) var normal_map: texture_2d<f32>;
 @group(0) @binding(3) var id_map: texture_2d<u32>;
 @group(0) @binding(4) var depth_map: texture_depth_2d;
+// 0 no route, 1 hidden, 2 visible
+@group(0) @binding(5) var route_map: texture_2d<u32>;
+@group(0) @binding(6) var sprite_map: texture_2d<f32>;
 
 @vertex
 fn vs_main(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
@@ -92,16 +103,79 @@ fn quantise(srgb: vec3<f32>) -> vec3<f32> {
     return uniforms.palette_rgb[best].rgb;
 }
 
+// The opaque texel of the frontmost sprite covering the pixel, if any
+fn sprite_at(pixel: vec2<i32>) -> vec4<f32> {
+    var colour = vec4<f32>(0.0);
+    for (var i = 0u; i < uniforms.counts.y; i++) {
+        let frame = uniforms.sprite_frame[i];
+        let local = pixel - frame.xy;
+        if all(local >= vec2<i32>(0)) && all(local < frame.zw) {
+            let texel = textureLoad(sprite_map, uniforms.sprite_atlas[i].xy + local, 0);
+            if texel.a > 0.5 {
+                colour = texel;
+            }
+        }
+    }
+    return colour;
+}
+
+// The route's line widened down and to the right, visible winning over hidden
+fn route_at(pixel: vec2<i32>) -> u32 {
+    let size = vec2<i32>(textureDimensions(route_map));
+    let width = i32(uniforms.counts.x);
+    var mark = 0u;
+    for (var dy = 0; dy < width; dy++) {
+        for (var dx = 0; dx < width; dx++) {
+            let p = pixel - vec2<i32>(dx, dy);
+            if all(p >= vec2<i32>(0)) && all(p < size) {
+                mark = max(mark, textureLoad(route_map, p, 0).r);
+            }
+        }
+    }
+    return mark;
+}
+
+fn borders_route(pixel: vec2<i32>) -> bool {
+    let offsets = array<vec2<i32>, 4>(vec2<i32>(1, 0), vec2<i32>(-1, 0), vec2<i32>(0, 1), vec2<i32>(0, -1));
+    for (var i = 0; i < 4; i++) {
+        if route_at(pixel + offsets[i]) == 2u {
+            return true;
+        }
+    }
+    return false;
+}
+
 @fragment
 fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     let pixel = vec2<i32>(position.xy);
+    let sprite = sprite_at(pixel);
+    if sprite.a > 0.5 {
+        return vec4<f32>(quantise(sprite.rgb), 1.0);
+    }
+    var colour = scene(pixel);
+    let mark = route_at(pixel);
+    if mark == 2u {
+        colour = uniforms.route.rgb;
+    } else {
+        if mark == 1u {
+            colour = mix(colour, uniforms.route.rgb, uniforms.route.a);
+        }
+        if borders_route(pixel) {
+            colour *= 1.0 - uniforms.look.w;
+        }
+    }
+    return vec4<f32>(quantise(colour), 1.0);
+}
+
+// The lit, outlined terrain or the dithered sky, before quantising
+fn scene(pixel: vec2<i32>) -> vec3<f32> {
     let centre = load(pixel);
     if centre.id == 0u {
         let size = textureDimensions(id_map);
         let t = (f32(pixel.y) + 0.5) / f32(size.y);
         // Rounded like the terrain's colour target, so both quantise the same way
         let sky = round(mix(uniforms.sky_top.rgb, uniforms.sky_bottom.rgb, t) * 255.0) / 255.0;
-        return vec4<f32>(quantise(sky + bayer(pixel) * uniforms.look.y), 1.0);
+        return sky + bayer(pixel) * uniforms.look.y;
     }
 
     var silhouette = false;
@@ -136,5 +210,5 @@ fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     } else if crease {
         colour = min(colour * (1.0 + uniforms.edges.z), vec3<f32>(1.0));
     }
-    return vec4<f32>(quantise(colour), 1.0);
+    return colour;
 }

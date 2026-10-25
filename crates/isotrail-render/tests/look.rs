@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use isotrail_bundle::{Landcover, SceneBundle};
 use isotrail_render::{
     Aspect, Camera, DEFAULT_PALETTE, Edges, Frame, Gpu, Look, Mesher, OffscreenTarget, Palette,
-    SmoothMesher, SunState, TerrainRenderer, VoxelMesher,
+    Scene, SmoothMesher, SunState, TerrainRenderer, VoxelMesher,
 };
 use isotrail_testkit::{bundle, diorama_bundle, grid};
 
@@ -18,7 +18,7 @@ fn render(bundle: &SceneBundle, mesher: &dyn Mesher, look: &Look) -> Frame {
     let target = OffscreenTarget::new(&gpu, framing.width, framing.height);
     let mesh = renderer.upload(&gpu, &mesh);
     let sun = SunState::late_morning(&bundle.grid);
-    renderer.draw(&gpu, &target, &mesh, &camera, &sun, look);
+    renderer.draw(&gpu, &target, &Scene::terrain(&mesh), &camera, &sun, look);
     target.read_back(&gpu).unwrap()
 }
 
