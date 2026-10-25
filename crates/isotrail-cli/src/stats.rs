@@ -3,10 +3,12 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use chrono::{DateTime, SecondsFormat, TimeDelta, TimeZone, Utc};
-use clap::{Args, ValueEnum};
+use clap::Args;
 use isotrail_bundle::{HikeStats, SceneBundle};
 use isotrail_track::{Bounds, TrackStats, Units};
 use serde::Serialize;
+
+use crate::UnitsArg;
 
 #[derive(Debug, Args)]
 pub struct StatsArgs {
@@ -20,21 +22,6 @@ pub struct StatsArgs {
     /// Units for the human-readable table
     #[arg(long, value_enum, default_value_t = UnitsArg::Metric)]
     units: UnitsArg,
-}
-
-#[derive(Debug, Clone, Copy, ValueEnum)]
-enum UnitsArg {
-    Metric,
-    Imperial,
-}
-
-impl From<UnitsArg> for Units {
-    fn from(units: UnitsArg) -> Self {
-        match units {
-            UnitsArg::Metric => Units::Metric,
-            UnitsArg::Imperial => Units::Imperial,
-        }
-    }
 }
 
 pub fn run(args: &StatsArgs) -> anyhow::Result<()> {

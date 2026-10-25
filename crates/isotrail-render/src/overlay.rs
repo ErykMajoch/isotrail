@@ -1,0 +1,1081 @@
+use std::collections::HashMap;
+
+use glam::IVec2;
+use isotrail_bundle::{HikeStats, SceneBundle, Units};
+
+use crate::{Frame, Framing, Insets, Palette, PixelFont, TextEffect};
+
+/// Text colour, and the softer colour of subtitles, dates and labels
+pub const TEXT: [u8; 3] = [235, 237, 233];
+pub const SUBTEXT: [u8; 3] = [164, 221, 219];
+pub const TEXT_SHADOW: [u8; 3] = [16, 20, 31];
+/// Panels blur what lies under them and blend it with this colour
+pub const PANEL_TINT: [u8; 3] = [32, 46, 55];
+const PANEL_TINT_SHARE: f32 = 0.5;
+const PANEL_BLUR_PX: i32 = 3;
+/// The panel's top edge catches the light
+const PANEL_EDGE: [u8; 3] = [129, 151, 150];
+
+/// Title separators, earliest first, where a title too long for two large
+/// lines splits into a title and a subtitle
+const SEPARATORS: [&str; 4] = [" | ", " - ", " – ", " — "];
+const TITLE_LINES: usize = 2;
+const SUBTITLE_LINES: usize = 2;
+/// Rows of the glyph cell a line box covers: lowercase accents to descenders
+const BOX_TOP: u32 = 2;
+const BOX_ROWS: u32 = PixelFont::HEIGHT - BOX_TOP;
+/// The row under the capitals, where large figures and small units line up
+const BASELINE: u32 = PixelFont::CAP_TOP + 7;
+
+/// The words drawn over a render
+#[derive(Clone, Debug, PartialEq)]
+pub struct OverlayText {
+    /// Empty for no title block
+    pub title: String,
+    pub subtitle: Subtitle,
+    /// Local start date, ready to print
+    pub date: Option<String>,
+    pub stats: Vec<Stat>,
+}
+
+/// What goes under the title
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Subtitle {
+    /// The rest of a title too long for its lines, from its first separator
+    #[default]
+    Auto,
+    Text(String),
+    None,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Stat {
+    pub value: String,
+    pub label: String,
+}
+
+/// The statistics an overlay can show
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum StatKind {
+    Distance,
+    Gain,
+    Loss,
+    /// Moving time, or elapsed time if the track has none
+    Time,
+    Elapsed,
+    High,
+    Low,
+    /// Average over the moving time
+    Speed,
+    Pace,
+}
+
+pub const DEFAULT_STATS: [StatKind; 4] = [
+    StatKind::Distance,
+    StatKind::Gain,
+    StatKind::Time,
+    StatKind::High,
+];
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DateFormat {
+    /// `Saturday 14 June 2025`
+    #[default]
+    Long,
+    /// `14 Jun 2025`
+    Short,
+    /// `2025-06-14`
+    Iso,
+}
+
+impl OverlayText {
+    /// The bundle's title, start date and the chosen stats, leaving out
+    /// those the track didn't record
+    pub fn from_bundle(
+        bundle: &SceneBundle,
+        units: Units,
+        stats: &[StatKind],
+        date_format: DateFormat,
+    ) -> OverlayText {
+        let meta = &bundle.meta;
+        OverlayText {
+            title: meta.title.clone(),
+            subtitle: Subtitle::Auto,
+            date: meta
+                .local_date
+                .as_deref()
+                .and_then(|date| format_date(date, date_format)),
+            stats: stats
+                .iter()
+                .filter_map(|kind| kind.stat(&meta.stats, units))
+                .collect(),
+        }
+    }
+}
+
+impl Stat {
+    pub fn new(value: impl Into<String>, label: impl Into<String>) -> Stat {
+        Stat {
+            value: value.into(),
+            label: label.into(),
+        }
+    }
+}
+
+impl StatKind {
+    /// `None` if the track didn't record what this needs
+    pub fn stat(self, stats: &HikeStats, units: Units) -> Option<Stat> {
+        let elevation = |m: f64| format!("{:.0} {}", units.elevation(m), units.elevation_unit());
+        let time = stats.moving_s.or(stats.elapsed_s).filter(|&s| s > 0);
+        let distance = units.distance(stats.distance_m);
+        let (value, label) = match self {
+            StatKind::Distance => (format_distance(stats.distance_m, units), "distance"),
+            StatKind::Gain => (elevation(stats.gain_m?), "gain"),
+            StatKind::Loss => (elevation(stats.loss_m?), "loss"),
+            StatKind::Time => (format_duration(time?), "time"),
+            StatKind::Elapsed => (format_elapsed(stats.elapsed_s?), "elapsed"),
+            StatKind::High => (elevation(stats.max_ele_m?), "high point"),
+            StatKind::Low => (elevation(stats.min_ele_m?), "low point"),
+            StatKind::Speed => {
+                let unit = match units {
+                    Units::Metric => "km/h",
+                    Units::Imperial => "mph",
+                };
+                let speed = distance / (time? as f64 / 3600.0);
+                (format!("{speed:.1} {unit}"), "speed")
+            }
+            StatKind::Pace => {
+                if distance <= 0.0 {
+                    return None;
+                }
+                let seconds = (time? as f64 / distance).round() as i64;
+                let pace = format!("{}:{:02}", seconds / 60, seconds % 60);
+                (format!("{pace} /{}", units.distance_unit()), "pace")
+            }
+        };
+        Some(Stat::new(value, label))
+    }
+}
+
+/// One decimal below 100, whole units above
+fn format_distance(metres: f64, units: Units) -> String {
+    let value = units.distance(metres);
+    let unit = units.distance_unit();
+    if value < 99.95 {
+        format!("{value:.1} {unit}")
+    } else {
+        format!("{value:.0} {unit}")
+    }
+}
+
+fn format_duration(seconds: i64) -> String {
+    let minutes = (seconds.max(0) + 30) / 60;
+    if minutes < 60 {
+        format!("{minutes}m")
+    } else {
+        format!("{}h {:02}m", minutes / 60, minutes % 60)
+    }
+}
+
+/// Days and hours once it reaches a day, as multi-day hikes span nights
+fn format_elapsed(seconds: i64) -> String {
+    if seconds < 86_400 {
+        return format_duration(seconds);
+    }
+    let hours = (seconds + 1800) / 3600;
+    format!("{}d {}h", hours / 24, hours % 24)
+}
+
+/// A `YYYY-MM-DD` date in `format`, or `None` if it isn't a real date
+pub fn format_date(iso: &str, format: DateFormat) -> Option<String> {
+    const MONTHS: [&str; 12] = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ];
+    const WEEKDAYS: [&str; 7] = [
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+    ];
+    let mut parts = iso.splitn(3, '-').map(str::parse::<u32>);
+    let (year, month, day) = (
+        parts.next()?.ok()?,
+        parts.next()?.ok()?,
+        parts.next()?.ok()?,
+    );
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days_in_month = match month {
+        2 if leap => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        1..=12 => 31,
+        _ => return None,
+    };
+    if day == 0 || day > days_in_month {
+        return None;
+    }
+    let month_name = MONTHS[month as usize - 1];
+    Some(match format {
+        DateFormat::Long => {
+            // Sakamoto's method
+            const OFFSETS: [u32; 12] = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+            let y = if month < 3 { year - 1 } else { year };
+            let weekday = (y + y / 4 - y / 100 + y / 400 + OFFSETS[month as usize - 1] + day) % 7;
+            format!("{} {day} {month_name} {year}", WEEKDAYS[weekday as usize])
+        }
+        DateFormat::Short => format!("{day} {} {year}", &month_name[..3]),
+        DateFormat::Iso => format!("{year:04}-{month:02}-{day:02}"),
+    })
+}
+
+/// Whether text sits on frosted panels or straight on the scene
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PanelStyle {
+    #[default]
+    Frosted,
+    /// Text keeps a dark outline instead
+    None,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TitleSize {
+    #[default]
+    Large,
+    /// The size of the subtitle and date
+    Small,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct OverlayStyle {
+    pub panel: PanelStyle,
+    pub title_size: TitleSize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Tone {
+    Text,
+    Subtext,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Line {
+    text: String,
+    /// Top-left of the glyph cell
+    origin: IVec2,
+    scale: u32,
+    tone: Tone,
+}
+
+/// Inclusive-exclusive pixel bounds
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Rect {
+    min: IVec2,
+    max: IVec2,
+}
+
+/// Where the title and stats panels and their lines sit in a frame
+#[derive(Clone, Debug, PartialEq)]
+pub struct Overlays {
+    framing: Framing,
+    style: OverlayStyle,
+    panels: Vec<Rect>,
+    lines: Vec<Line>,
+    /// Pixels the top and bottom panels take, counted from the frame's edges
+    top_px: u32,
+    bottom_px: u32,
+}
+
+impl Overlays {
+    /// The title block hangs from the top of the safe area and the stats
+    /// block stands on its bottom. Large text is two pixels per glyph pixel
+    /// in a 360-pixel-wide frame, and keeps that size on screen at other
+    /// pixel scales
+    pub fn layout(text: &OverlayText, style: &OverlayStyle, framing: &Framing) -> Overlays {
+        let font = PixelFont::monogram();
+        let (width, height) = (framing.width, framing.height);
+        let large = (width.min(height) / 180).clamp(1, 3);
+        let small = (large / 2).max(1);
+        let pad = IVec2::new(3 * large as i32, 2 * large as i32);
+        // Half the diorama's side margin: the sides of a story stay uncovered
+        let margin = ((width as f32 * framing.safe.left / 2.0).round() as i32).max(2);
+        let max_width = (width as i32 - 2 * margin - 2 * pad.x).max(1) as u32;
+        let mut layout = Overlays {
+            framing: *framing,
+            style: *style,
+            panels: Vec::new(),
+            lines: Vec::new(),
+            top_px: 0,
+            bottom_px: 0,
+        };
+
+        let mut block = Vec::new();
+        let title = text.title.trim();
+        if !title.is_empty() {
+            let title_scale = match style.title_size {
+                TitleSize::Large => large,
+                TitleSize::Small => small,
+            };
+            let (head, tail) = match &text.subtitle {
+                Subtitle::Auto => split_title(font, title, title_scale, max_width),
+                Subtitle::Text(subtitle) => (title, subtitle.trim()),
+                Subtitle::None => (title, ""),
+            };
+            for line in font.wrap(head, title_scale, max_width, TITLE_LINES) {
+                block.push((line, title_scale, Tone::Text));
+            }
+            for line in font.wrap(tail, small, max_width, SUBTITLE_LINES) {
+                block.push((line, small, Tone::Subtext));
+            }
+        }
+        if let Some(date) = &text.date {
+            for line in font.wrap(date, small, max_width, 1) {
+                block.push((line, small, Tone::Subtext));
+            }
+        }
+        if !block.is_empty() {
+            let top = (height as f32 * framing.safe.top).round() as i32;
+            let bottom = layout.place_block(&block, top, pad, small);
+            layout.top_px = bottom.max(0) as u32;
+        }
+
+        if !text.stats.is_empty() {
+            let bottom = (height as f32 * (1.0 - framing.safe.bottom)).round() as i32;
+            let top = layout.place_stats(&text.stats, bottom, large, small, pad, max_width);
+            layout.bottom_px = (height as i32 - top).max(0) as u32;
+        }
+        layout
+    }
+
+    /// The framing with its safe area grown to keep the diorama clear of
+    /// the panels
+    pub fn diorama_framing(&self) -> Framing {
+        let gap = 4.0 * (self.framing.width.min(self.framing.height) / 180).max(1) as f32;
+        let height = self.framing.height as f32;
+        let share = |px: u32| {
+            if px == 0 {
+                0.0
+            } else {
+                (px as f32 + gap) / height
+            }
+        };
+        let safe = self.framing.safe;
+        Framing {
+            safe: Insets {
+                top: safe.top.max(share(self.top_px)),
+                bottom: safe.bottom.max(share(self.bottom_px)),
+                ..safe
+            },
+            ..self.framing
+        }
+    }
+
+    /// Draws the panels, if the style has them, and the text, with every
+    /// colour moved to the nearest in `palette`
+    pub fn draw(&self, frame: &mut Frame, palette: Option<&Palette>) {
+        let mut snap = Snap::new(palette);
+        let shadow = snap.colour(TEXT_SHADOW);
+        let effect = match self.style.panel {
+            PanelStyle::Frosted => {
+                for panel in &self.panels {
+                    draw_panel(frame, *panel, &mut snap);
+                }
+                TextEffect::Shadow(shadow)
+            }
+            PanelStyle::None => TextEffect::Outline(shadow),
+        };
+        let font = PixelFont::monogram();
+        for line in &self.lines {
+            let colour = snap.colour(match line.tone {
+                Tone::Text => TEXT,
+                Tone::Subtext => SUBTEXT,
+            });
+            font.draw(frame, &line.text, line.origin, line.scale, colour, effect);
+        }
+    }
+
+    /// Centres the lines in a panel whose top edge is at `top`, returning
+    /// the panel's bottom edge
+    fn place_block(
+        &mut self,
+        block: &[(String, u32, Tone)],
+        top: i32,
+        pad: IVec2,
+        small: u32,
+    ) -> i32 {
+        let font = PixelFont::monogram();
+        let width = self.framing.width as i32;
+        let inner = block
+            .iter()
+            .map(|(line, scale, _)| font.width(line, *scale))
+            .max()
+            .unwrap_or(0) as i32;
+        let mut y = top + pad.y;
+        let mut previous = None;
+        for (line, scale, tone) in block {
+            if previous.is_some_and(|(_, previous_tone)| previous_tone != *tone) {
+                y += small as i32;
+            }
+            let line_width = font.width(line, *scale) as i32;
+            self.lines.push(Line {
+                text: line.clone(),
+                origin: IVec2::new((width - line_width) / 2, y - (BOX_TOP * scale) as i32),
+                scale: *scale,
+                tone: *tone,
+            });
+            previous = Some((y + (BOX_ROWS * scale) as i32, *tone));
+            y += (PixelFont::LINE_HEIGHT * scale) as i32;
+        }
+        let bottom = previous.map_or(y, |(bottom, _)| bottom) + pad.y;
+        let left = (width - inner) / 2 - pad.x;
+        self.panels.push(Rect {
+            min: IVec2::new(left, top),
+            max: IVec2::new(width - left, bottom),
+        });
+        bottom
+    }
+
+    /// Lays the stats out as values over labels in as few rows as fit, in
+    /// a panel whose bottom edge is at `bottom`; returns the panel's top edge
+    fn place_stats(
+        &mut self,
+        stats: &[Stat],
+        bottom: i32,
+        large: u32,
+        small: u32,
+        pad: IVec2,
+        max_width: u32,
+    ) -> i32 {
+        let font = PixelFont::monogram();
+        let gap = 8 * large as i32;
+        let cell_width = |stat: &Stat| {
+            value_runs(&stat.value, large, small)
+                .1
+                .max(font.width(&stat.label, small) as i32)
+        };
+        let columns_for = |per_row: usize| -> Vec<i32> {
+            (0..per_row)
+                .map(|column| {
+                    stats
+                        .iter()
+                        .skip(column)
+                        .step_by(per_row)
+                        .map(cell_width)
+                        .max()
+                        .unwrap_or(0)
+                })
+                .collect()
+        };
+        let total =
+            |columns: &[i32]| columns.iter().sum::<i32>() + gap * (columns.len() as i32 - 1);
+        let columns = (1..=stats.len())
+            .map(|rows| columns_for(stats.len().div_ceil(rows)))
+            .find(|columns| total(columns) <= max_width as i32)
+            .unwrap_or_else(|| columns_for(1));
+        let rows = stats.len().div_ceil(columns.len());
+        let label_gap = small as i32;
+        let cell_height = ((BOX_ROWS * large) as i32) + label_gap + (BOX_ROWS * small) as i32;
+        let row_gap = 2 * pad.y;
+        let inner_height = rows as i32 * cell_height + (rows as i32 - 1) * row_gap;
+        let top = bottom - inner_height - 2 * pad.y;
+
+        let width = self.framing.width as i32;
+        let inner_width = total(&columns);
+        let left = (width - inner_width) / 2;
+        for (i, stat) in stats.iter().enumerate() {
+            let (row, column) = (i / columns.len(), i % columns.len());
+            let x = left + columns[..column].iter().map(|w| w + gap).sum::<i32>();
+            let y = top + pad.y + row as i32 * (cell_height + row_gap);
+            let centred = |width: i32| x + (columns[column] - width) / 2;
+            let (runs, value_width) = value_runs(&stat.value, large, small);
+            let value_x = centred(value_width);
+            let baseline = y + ((BASELINE - BOX_TOP) * large) as i32;
+            for (text, scale, offset) in runs {
+                self.lines.push(Line {
+                    text,
+                    origin: IVec2::new(value_x + offset, baseline - (BASELINE * scale) as i32),
+                    scale,
+                    tone: Tone::Text,
+                });
+            }
+            let label_y = y + (BOX_ROWS * large) as i32 + label_gap;
+            self.lines.push(Line {
+                text: stat.label.clone(),
+                origin: IVec2::new(
+                    centred(font.width(&stat.label, small) as i32),
+                    label_y - (BOX_TOP * small) as i32,
+                ),
+                scale: small,
+                tone: Tone::Subtext,
+            });
+        }
+        self.panels.push(Rect {
+            min: IVec2::new(left - pad.x, top),
+            max: IVec2::new(width - left + pad.x, bottom),
+        });
+        top
+    }
+}
+
+/// A stat's value as runs of large figures and small units, each with its
+/// offset from the value's left edge, and the value's width: `12.7 km`
+/// becomes `12.7` and `km`, `4h 05m` becomes `4`, `h`, `05` and `m`
+fn value_runs(value: &str, large: u32, small: u32) -> (Vec<(String, u32, i32)>, i32) {
+    let font = PixelFont::monogram();
+    let figure = |c: char| c.is_ascii_digit() || matches!(c, '.' | ',' | ':' | '+' | '-');
+    let mut runs: Vec<(String, u32, i32)> = Vec::new();
+    let mut x = 0;
+    let mut spaced = false;
+    for c in value.chars() {
+        if c.is_whitespace() {
+            spaced = true;
+            continue;
+        }
+        let scale = if figure(c) { large } else { small };
+        match runs.last_mut() {
+            Some((run, run_scale, _)) if *run_scale == scale && !spaced => run.push(c),
+            last => {
+                if let Some((run, run_scale, offset)) = last {
+                    let gap = if spaced { 3 * large } else { large };
+                    x = *offset + (font.width(run, *run_scale) + gap) as i32;
+                }
+                runs.push((c.to_string(), scale, x));
+            }
+        }
+        spaced = false;
+    }
+    let width = runs.last().map_or(0, |(run, scale, offset)| {
+        offset + font.width(run, *scale) as i32
+    });
+    (runs, width)
+}
+
+/// The title as it is if it fits the large lines, otherwise split at its
+/// first separator into a title and a subtitle
+fn split_title<'a>(
+    font: &PixelFont,
+    title: &'a str,
+    scale: u32,
+    max_width: u32,
+) -> (&'a str, &'a str) {
+    if font.wrap(title, scale, max_width, usize::MAX).len() <= TITLE_LINES {
+        return (title, "");
+    }
+    SEPARATORS
+        .iter()
+        .filter_map(|sep| title.find(sep).map(|at| (at, sep.len())))
+        .filter(|&(at, _)| at > 0)
+        .min()
+        .map_or((title, ""), |(at, len)| {
+            (title[..at].trim(), title[at + len..].trim())
+        })
+}
+
+/// Colours moved to the nearest in a palette, remembered as they're found
+struct Snap<'a> {
+    palette: Option<&'a Palette>,
+    seen: HashMap<[u8; 3], [u8; 3]>,
+}
+
+impl<'a> Snap<'a> {
+    fn new(palette: Option<&'a Palette>) -> Snap<'a> {
+        Snap {
+            palette,
+            seen: HashMap::new(),
+        }
+    }
+
+    fn colour(&mut self, rgb: [u8; 3]) -> [u8; 3] {
+        match self.palette {
+            None => rgb,
+            Some(palette) => *self.seen.entry(rgb).or_insert_with(|| palette.nearest(rgb)),
+        }
+    }
+}
+
+/// Frosted glass: the frame under the panel blurred, tinted and snapped,
+/// with its corner pixels left out and a lit top edge
+fn draw_panel(frame: &mut Frame, rect: Rect, snap: &mut Snap) {
+    let (width, height) = (frame.width() as i32, frame.height() as i32);
+    let min = rect.min.max(IVec2::ZERO);
+    let max = rect.max.min(IVec2::new(width, height));
+    if min.x >= max.x || min.y >= max.y {
+        return;
+    }
+    let blurred = box_blur(frame, min, max, PANEL_BLUR_PX);
+    let size = max - min;
+    let tint = PANEL_TINT.map(f32::from);
+    for y in 0..size.y {
+        for x in 0..size.x {
+            let (fx, fy) = (min.x + x, min.y + y);
+            let corner = (fx == rect.min.x || fx == rect.max.x - 1)
+                && (fy == rect.min.y || fy == rect.max.y - 1);
+            if corner {
+                continue;
+            }
+            let under = blurred[(y * size.x + x) as usize];
+            let mixed: [u8; 3] = std::array::from_fn(|c| {
+                (under[c] + (tint[c] - under[c]) * PANEL_TINT_SHARE).round() as u8
+            });
+            let [r, g, b] = snap.colour(mixed);
+            frame.set_pixel(fx, fy, [r, g, b, 255]);
+        }
+    }
+    let [r, g, b] = snap.colour(PANEL_EDGE);
+    for x in rect.min.x + 1..rect.max.x - 1 {
+        frame.set_pixel(x, rect.min.y, [r, g, b, 255]);
+    }
+}
+
+/// The frame's colours over `min..max`, each averaged with its neighbours
+/// up to `radius` away, reaching outside the box but not the frame
+fn box_blur(frame: &Frame, min: IVec2, max: IVec2, radius: i32) -> Vec<[f32; 3]> {
+    let (width, height) = (frame.width() as i32, frame.height() as i32);
+    let rgb = |x: i32, y: i32| {
+        let p = frame.pixel(x.clamp(0, width - 1) as u32, y.clamp(0, height - 1) as u32);
+        [f32::from(p[0]), f32::from(p[1]), f32::from(p[2])]
+    };
+    let taps = (2 * radius + 1) as f32;
+    // Rows first, over the box grown by the radius vertically
+    let grown = IVec2::new(min.x, min.y - radius);
+    let rows_size = IVec2::new(max.x - min.x, max.y - min.y + 2 * radius);
+    let mut rows = vec![[0.0; 3]; (rows_size.x * rows_size.y) as usize];
+    for y in 0..rows_size.y {
+        for x in 0..rows_size.x {
+            let mut sum = [0.0; 3];
+            for dx in -radius..=radius {
+                let p = rgb(grown.x + x + dx, grown.y + y);
+                (0..3).for_each(|c| sum[c] += p[c]);
+            }
+            rows[(y * rows_size.x + x) as usize] = sum.map(|s| s / taps);
+        }
+    }
+    let size = max - min;
+    let mut out = vec![[0.0; 3]; (size.x * size.y) as usize];
+    for y in 0..size.y {
+        for x in 0..size.x {
+            let mut sum = [0.0; 3];
+            for dy in 0..=2 * radius {
+                let p = rows[((y + dy) * rows_size.x + x) as usize];
+                (0..3).for_each(|c| sum[c] += p[c]);
+            }
+            out[(y * size.x + x) as usize] = sum.map(|s| s / taps);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use isotrail_bundle::Bounds;
+
+    use super::*;
+    use crate::Aspect;
+
+    fn story() -> Framing {
+        Aspect::Story.framing(3).unwrap()
+    }
+
+    fn text(title: &str) -> OverlayText {
+        OverlayText {
+            title: title.into(),
+            subtitle: Subtitle::Auto,
+            date: Some("Sunday 15 June 2025".into()),
+            stats: vec![
+                Stat::new("12.4 km", "distance"),
+                Stat::new("846 m", "gain"),
+                Stat::new("5h 02m", "time"),
+                Stat::new("1085 m", "high point"),
+            ],
+        }
+    }
+
+    fn hike_stats() -> HikeStats {
+        HikeStats {
+            points: 900,
+            segments: 1,
+            distance_m: 12_000.0,
+            gain_m: Some(846.4),
+            loss_m: Some(791.0),
+            min_ele_m: Some(312.0),
+            max_ele_m: Some(1085.0),
+            bounds: Bounds {
+                min_lat: 0.0,
+                min_lon: 0.0,
+                max_lat: 0.1,
+                max_lon: 0.1,
+            },
+            start: Some(0),
+            end: Some(30 * 3600),
+            elapsed_s: Some(30 * 3600 + 25 * 60),
+            moving_s: Some(4 * 3600),
+        }
+    }
+
+    fn layout(text: &OverlayText) -> Overlays {
+        Overlays::layout(text, &OverlayStyle::default(), &story())
+    }
+
+    #[test]
+    fn dates_print_in_each_format() {
+        let long = |iso| format_date(iso, DateFormat::Long);
+        assert_eq!(long("2025-06-14").unwrap(), "Saturday 14 June 2025");
+        assert_eq!(long("2000-02-29").unwrap(), "Tuesday 29 February 2000");
+        assert_eq!(long("2026-01-01").unwrap(), "Thursday 1 January 2026");
+        assert_eq!(long("1999-12-31").unwrap(), "Friday 31 December 1999");
+        assert_eq!(
+            format_date("2025-06-04", DateFormat::Short).unwrap(),
+            "4 Jun 2025"
+        );
+        assert_eq!(
+            format_date("2025-6-4", DateFormat::Iso).unwrap(),
+            "2025-06-04"
+        );
+        for bad in [
+            "2025-02-29",
+            "2025-13-01",
+            "2025-06-31",
+            "2025-06",
+            "June",
+            "",
+        ] {
+            for format in [DateFormat::Long, DateFormat::Short, DateFormat::Iso] {
+                assert_eq!(format_date(bad, format), None, "{bad}");
+            }
+        }
+    }
+
+    #[test]
+    fn durations_and_distances_stay_short() {
+        assert_eq!(format_duration(29), "0m");
+        assert_eq!(format_duration(45 * 60 + 10), "45m");
+        assert_eq!(format_duration(4 * 3600 + 34 * 60 + 40), "4h 35m");
+        assert_eq!(format_duration(26 * 3600), "26h 00m");
+        assert_eq!(format_elapsed(23 * 3600), "23h 00m");
+        assert_eq!(format_elapsed(77 * 3600 + 40 * 60), "3d 6h");
+        assert_eq!(format_distance(12_740.0, Units::Metric), "12.7 km");
+        assert_eq!(format_distance(101_500.0, Units::Metric), "102 km");
+        assert_eq!(format_distance(16_093.44, Units::Imperial), "10.0 mi");
+    }
+
+    #[test]
+    fn every_stat_has_a_value_and_label() {
+        let stats = hike_stats();
+        let all = [
+            StatKind::Distance,
+            StatKind::Gain,
+            StatKind::Loss,
+            StatKind::Time,
+            StatKind::Elapsed,
+            StatKind::High,
+            StatKind::Low,
+            StatKind::Speed,
+            StatKind::Pace,
+        ];
+        let shown = |units| -> Vec<(String, String)> {
+            all.iter()
+                .map(|kind| kind.stat(&stats, units).unwrap())
+                .map(|stat| (stat.value, stat.label))
+                .collect()
+        };
+        let pairs = |list: &[(&str, &str)]| -> Vec<(String, String)> {
+            list.iter()
+                .map(|(v, l)| (v.to_string(), l.to_string()))
+                .collect()
+        };
+        assert_eq!(
+            shown(Units::Metric),
+            pairs(&[
+                ("12.0 km", "distance"),
+                ("846 m", "gain"),
+                ("791 m", "loss"),
+                ("4h 00m", "time"),
+                ("1d 6h", "elapsed"),
+                ("1085 m", "high point"),
+                ("312 m", "low point"),
+                ("3.0 km/h", "speed"),
+                ("20:00 /km", "pace"),
+            ])
+        );
+        let imperial = shown(Units::Imperial);
+        assert_eq!(imperial[0].0, "7.5 mi");
+        assert_eq!(imperial[1].0, "2777 ft");
+        assert_eq!(imperial[7].0, "1.9 mph");
+        assert_eq!(imperial[8].0, "32:11 /mi");
+    }
+
+    #[test]
+    fn stats_the_track_lacks_are_left_out() {
+        let bare = HikeStats {
+            gain_m: None,
+            loss_m: None,
+            min_ele_m: None,
+            max_ele_m: None,
+            elapsed_s: None,
+            moving_s: None,
+            ..hike_stats()
+        };
+        for kind in [
+            StatKind::Gain,
+            StatKind::Time,
+            StatKind::Elapsed,
+            StatKind::Low,
+            StatKind::Speed,
+            StatKind::Pace,
+        ] {
+            assert_eq!(kind.stat(&bare, Units::Metric), None, "{kind:?}");
+        }
+        assert!(StatKind::Distance.stat(&bare, Units::Metric).is_some());
+        let standing = HikeStats {
+            distance_m: 0.0,
+            ..hike_stats()
+        };
+        assert_eq!(StatKind::Pace.stat(&standing, Units::Metric), None);
+        // Elapsed time stands in for moving time
+        let unmoving = HikeStats {
+            moving_s: None,
+            ..hike_stats()
+        };
+        let time = StatKind::Time.stat(&unmoving, Units::Metric).unwrap();
+        assert_eq!(time.value, "30h 25m");
+    }
+
+    #[test]
+    fn values_split_into_large_figures_and_small_units() {
+        let (runs, width) = value_runs("12.7 km", 2, 1);
+        assert_eq!(runs, [("12.7".into(), 2, 0), ("km".into(), 1, 46 + 6)]);
+        assert_eq!(width, 52 + 11);
+        let (runs, _) = value_runs("4h 05m", 2, 1);
+        let texts: Vec<(&str, u32)> = runs.iter().map(|(t, s, _)| (t.as_str(), *s)).collect();
+        assert_eq!(texts, [("4", 2), ("h", 1), ("05", 2), ("m", 1)]);
+        assert_eq!(runs[1].2, 10 + 2);
+        let (runs, _) = value_runs("20:00 /km", 2, 1);
+        let texts: Vec<(&str, u32)> = runs.iter().map(|(t, s, _)| (t.as_str(), *s)).collect();
+        assert_eq!(texts, [("20:00", 2), ("/km", 1)]);
+        assert_eq!(value_runs("", 2, 1), (Vec::new(), 0));
+    }
+
+    #[test]
+    fn short_titles_stay_whole_and_long_ones_split_at_a_separator() {
+        let font = PixelFont::monogram();
+        let (head, tail) = split_title(font, "Snowdon Horseshoe", 2, 312);
+        assert_eq!((head, tail), ("Snowdon Horseshoe", ""));
+        let long = "Dolina Pięciu Stawów Polskich - Kozi Wierch | Zawrat";
+        assert_eq!(
+            split_title(font, long, 2, 312),
+            ("Dolina Pięciu Stawów Polskich", "Kozi Wierch | Zawrat")
+        );
+        let unbroken = "Dolina Pięciu Stawów Polskich przez Kozi Wierch i Zawrat";
+        assert_eq!(split_title(font, unbroken, 2, 312), (unbroken, ""));
+    }
+
+    fn texts_of(overlays: &Overlays, tone: Tone) -> Vec<&str> {
+        overlays
+            .lines
+            .iter()
+            .filter(|line| line.tone == tone)
+            .map(|line| line.text.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn a_given_subtitle_or_none_keeps_the_title_whole() {
+        let long = "Dolina Pięciu Stawów Polskich - Kozi Wierch | Zawrat i Świnica";
+        let subtext = |subtitle: Subtitle| {
+            let overlays = layout(&OverlayText {
+                subtitle,
+                ..text(long)
+            });
+            texts_of(&overlays, Tone::Subtext)
+                .into_iter()
+                .take_while(|line| !line.starts_with("Sunday"))
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(subtext(Subtitle::Auto), ["Kozi Wierch | Zawrat i Świnica"]);
+        assert_eq!(subtext(Subtitle::Text("Tatry".into())), ["Tatry"]);
+        assert!(subtext(Subtitle::None).is_empty());
+        let overlays = layout(&OverlayText {
+            subtitle: Subtitle::None,
+            ..text(long)
+        });
+        let title: Vec<&str> = overlays
+            .lines
+            .iter()
+            .filter(|line| line.tone == Tone::Text && line.scale == 2)
+            .take(2)
+            .map(|line| line.text.as_str())
+            .collect();
+        assert!(title[1].ends_with('…'), "{title:?}");
+    }
+
+    #[test]
+    fn a_small_title_uses_the_subtitle_size() {
+        let style = OverlayStyle {
+            title_size: TitleSize::Small,
+            ..OverlayStyle::default()
+        };
+        let overlays = Overlays::layout(&text("Giewont"), &style, &story());
+        let title = overlays
+            .lines
+            .iter()
+            .find(|line| line.text == "Giewont")
+            .unwrap();
+        assert_eq!(title.scale, 1);
+        let default = layout(&text("Giewont"));
+        let large = default.lines.iter().find(|line| line.text == "Giewont");
+        assert_eq!(large.unwrap().scale, 2);
+        assert!(overlays.panels[0].max.y < default.panels[0].max.y);
+    }
+
+    #[test]
+    fn panels_sit_inside_the_safe_area_and_clear_the_diorama() {
+        let framing = story();
+        let overlays = layout(&text("Przełęcz pod Łańcuchem | Zażółć gęślą jaźń"));
+        assert_eq!(overlays.panels.len(), 2);
+        let (title, stats) = (overlays.panels[0], overlays.panels[1]);
+        assert_eq!(title.min.y, (640.0_f32 * 0.14).round() as i32);
+        assert_eq!(stats.max.y, (640.0_f32 * 0.8).round() as i32);
+        for panel in [title, stats] {
+            assert!(panel.min.x >= 9 && panel.max.x <= 351, "{panel:?}");
+            assert_eq!(panel.min.x + panel.max.x, 360, "centred");
+        }
+        let diorama = overlays.diorama_framing();
+        assert!(diorama.safe.top * 640.0 >= title.max.y as f32);
+        assert!((1.0 - diorama.safe.bottom) * 640.0 <= stats.min.y as f32);
+        assert_eq!(diorama.safe.left, framing.safe.left);
+        // Every line lies inside a panel
+        let font = PixelFont::monogram();
+        for line in &overlays.lines {
+            let (first, last) = font.ink_rows(&line.text).unwrap();
+            let top = line.origin.y + (first * line.scale) as i32;
+            let bottom = line.origin.y + ((last + 1) * line.scale) as i32;
+            let right = line.origin.x + font.width(&line.text, line.scale) as i32;
+            assert!(
+                overlays.panels.iter().any(|p| p.min.x < line.origin.x
+                    && right < p.max.x
+                    && p.min.y < top
+                    && bottom < p.max.y),
+                "{line:?}"
+            );
+        }
+    }
+
+    fn stat_rows(overlays: &Overlays, labels: &[&str]) -> Vec<usize> {
+        let mut rows: Vec<(i32, usize)> = Vec::new();
+        for line in overlays
+            .lines
+            .iter()
+            .filter(|l| labels.contains(&l.text.as_str()))
+        {
+            match rows.last_mut() {
+                Some((y, count)) if *y == line.origin.y => *count += 1,
+                _ => rows.push((line.origin.y, 1)),
+            }
+        }
+        rows.into_iter().map(|(_, count)| count).collect()
+    }
+
+    #[test]
+    fn stats_take_as_few_rows_as_fit() {
+        let labels = ["distance", "gain", "time", "high point"];
+        let mut long = text("Ridge");
+        long.stats = vec![
+            Stat::new("1234.5 mi", "distance"),
+            Stat::new("123456 ft", "gain"),
+            Stat::new("1234h 40m", "time"),
+            Stat::new("12345 ft", "high point"),
+        ];
+        assert_eq!(stat_rows(&layout(&text("Ridge")), &labels), [4]);
+        assert_eq!(stat_rows(&layout(&long), &labels), [2, 2]);
+        let mut six = text("Ridge");
+        six.stats = ["a", "b", "c", "d", "e", "f"]
+            .map(|label| Stat::new("1234 m", label))
+            .to_vec();
+        let six_labels = ["a", "b", "c", "d", "e", "f"];
+        assert_eq!(stat_rows(&layout(&six), &six_labels), [3, 3]);
+        six.stats.pop();
+        assert_eq!(stat_rows(&layout(&six), &six_labels), [3, 2]);
+    }
+
+    #[test]
+    fn nothing_to_say_leaves_the_frame_alone() {
+        let framing = story();
+        let empty = OverlayText {
+            title: " ".into(),
+            subtitle: Subtitle::Text("not shown without a title".into()),
+            date: None,
+            stats: Vec::new(),
+        };
+        let overlays = layout(&empty);
+        assert!(overlays.panels.is_empty() && overlays.lines.is_empty());
+        assert_eq!(overlays.diorama_framing(), framing);
+    }
+
+    fn palette_frame(palette: &Palette) -> Frame {
+        let framing = story();
+        Frame::new(
+            framing.width,
+            framing.height,
+            (0..framing.width * framing.height)
+                .flat_map(|i| {
+                    let [r, g, b] = palette.colours()[i as usize % palette.colours().len()];
+                    [r, g, b, 255]
+                })
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn panels_and_text_use_only_palette_colours() {
+        let palette = Palette::builtin("apollo").unwrap();
+        let mut frame = palette_frame(&palette);
+        layout(&text("Giewont")).draw(&mut frame, Some(&palette));
+        assert!(
+            frame
+                .rgba()
+                .chunks(4)
+                .all(|p| palette.colours().contains(&[p[0], p[1], p[2]]))
+        );
+    }
+
+    #[test]
+    fn without_panels_only_the_text_and_its_outline_change() {
+        let palette = Palette::builtin("apollo").unwrap();
+        let before = palette_frame(&palette);
+        let mut frame = before.clone();
+        let style = OverlayStyle {
+            panel: PanelStyle::None,
+            ..OverlayStyle::default()
+        };
+        let overlays = Overlays::layout(&text("Giewont"), &style, &story());
+        overlays.draw(&mut frame, Some(&palette));
+        let ink = [TEXT, SUBTEXT, TEXT_SHADOW].map(|c| palette.nearest(c));
+        let mut changed = 0;
+        for (now, was) in frame.rgba().chunks(4).zip(before.rgba().chunks(4)) {
+            if now != was {
+                changed += 1;
+                assert!(ink.contains(&[now[0], now[1], now[2]]), "{now:?}");
+            }
+        }
+        assert!(changed > 0);
+        // The space the panels would take is still kept clear of the diorama
+        assert_eq!(
+            overlays.diorama_framing(),
+            layout(&text("Giewont")).diorama_framing()
+        );
+    }
+}

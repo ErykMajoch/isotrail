@@ -1,7 +1,9 @@
+use isotrail_bundle::Units;
 use isotrail_export::{render_still, upscale};
 use isotrail_render::{
-    Aspect, DEFAULT_PALETTE, DEFAULT_YAW_OFFSET_DEG, Gpu, Look, Mesher, OffscreenTarget, Palette,
-    SmoothMesher, VoxelMesher, draw_test_scene,
+    Aspect, DEFAULT_PALETTE, DEFAULT_STATS, DEFAULT_YAW_OFFSET_DEG, DateFormat, Gpu, Look, Mesher,
+    OffscreenTarget, OverlayStyle, OverlayText, Overlays, Palette, SmoothMesher, VoxelMesher,
+    draw_test_scene,
 };
 use isotrail_testkit::{assert_golden, diorama_bundle};
 
@@ -54,4 +56,36 @@ fn other_palettes_match_goldens() {
         };
         assert_terrain_golden(&format!("palette-{name}"), &VoxelMesher::default(), &look);
     }
+}
+
+#[test]
+fn overlays_on_the_diorama_match_golden() {
+    let gpu = Gpu::headless().unwrap();
+    let mut bundle = diorama_bundle();
+    bundle.meta.title = "Zażółć gęślą jaźń | Łańcuch".into();
+    bundle.meta.local_date = Some("2025-06-14".into());
+    let stats = &mut bundle.meta.stats;
+    (stats.distance_m, stats.gain_m) = (7_420.0, Some(612.0));
+    (stats.moving_s, stats.max_ele_m) = (Some(9_000), Some(842.0));
+    let framing = Aspect::Story.framing(6).unwrap();
+    let text = OverlayText::from_bundle(&bundle, Units::Metric, &DEFAULT_STATS, DateFormat::Long);
+    assert_eq!(text.date.as_deref(), Some("Saturday 14 June 2025"));
+    let overlays = Overlays::layout(&text, &OverlayStyle::default(), &framing);
+    let look = Look::default();
+    let mut frame = render_still(
+        &gpu,
+        &bundle,
+        &VoxelMesher::default(),
+        &overlays.diorama_framing(),
+        DEFAULT_YAW_OFFSET_DEG,
+        &look,
+    )
+    .unwrap();
+    overlays.draw(&mut frame, look.palette.as_ref());
+    assert_golden(
+        "overlay-diorama",
+        frame.width(),
+        frame.height(),
+        frame.rgba(),
+    );
 }

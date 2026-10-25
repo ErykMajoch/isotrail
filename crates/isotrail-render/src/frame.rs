@@ -48,4 +48,13 @@ impl Frame {
             self.rgba[i + 3],
         ]
     }
+
+    /// Ignores pixels outside the frame
+    pub fn set_pixel(&mut self, x: i32, y: i32, rgba: [u8; 4]) {
+        if x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 {
+            return;
+        }
+        let i = (y as usize * self.width as usize + x as usize) * 4;
+        self.rgba[i..i + 4].copy_from_slice(&rgba);
+    }
 }

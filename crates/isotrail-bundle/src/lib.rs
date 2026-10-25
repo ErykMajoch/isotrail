@@ -7,6 +7,7 @@ mod error;
 mod format;
 mod landcover;
 mod scene;
+mod units;
 
 pub use error::BundleError;
 pub use format::{FORMAT_VERSION, MAGIC, is_bundle};
@@ -15,3 +16,4 @@ pub use scene::{
     Bounds, GridInfo, HikeStats, Metadata, ProfileSample, Provenance, Route, RoutePoint,
     SceneBundle, Terrain, WaterBody,
 };
+pub use units::Units;

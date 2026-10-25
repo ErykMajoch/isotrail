@@ -10,6 +10,7 @@ repository.workspace = true
 chrono.workspace = true
 chrono-tz.workspace = true
 geo.workspace = true
+isotrail-bundle = { path = "../isotrail-bundle" }
 quick-xml.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

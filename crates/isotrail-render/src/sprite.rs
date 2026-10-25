@@ -120,7 +120,7 @@ impl SpriteAtlas {
 }
 
 /// Width, height and RGBA8 pixels
-fn decode(bytes: &[u8]) -> (u32, u32, Vec<u8>) {
+pub(crate) fn decode(bytes: &[u8]) -> (u32, u32, Vec<u8>) {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::ALPHA | png::Transformations::STRIP_16);
     let mut reader = decoder.read_info().expect("shipped sprites decode");

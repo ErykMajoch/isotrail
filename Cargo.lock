@@ -1210,6 +1210,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "geo",
+ "isotrail-bundle",
  "quick-xml",
  "thiserror",
  "toml",

@@ -3,6 +3,7 @@
 
 mod bundle;
 mod cache;
+mod overlay;
 mod render;
 mod stats;
 mod style_lab;
@@ -12,8 +13,8 @@ use std::io::IsTerminal;
 use std::path::Path;
 
 use anyhow::Context;
-use clap::{ArgAction, Parser, Subcommand};
-use isotrail_track::{GpxReader, Track, TrackReader};
+use clap::{ArgAction, Parser, Subcommand, ValueEnum};
+use isotrail_track::{GpxReader, Track, TrackReader, Units};
 use tracing::level_filters::LevelFilter;
 
 /// Turn a recorded hike (GPX) into a pixel-art 3D diorama
@@ -54,6 +55,21 @@ fn main() -> anyhow::Result<()> {
         Command::Render(args) => render::run(&args),
         Command::StyleLab(args) => style_lab::run(&args),
         Command::Cache(args) => cache::run(&args),
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum UnitsArg {
+    Metric,
+    Imperial,
+}
+
+impl From<UnitsArg> for Units {
+    fn from(units: UnitsArg) -> Self {
+        match units {
+            UnitsArg::Metric => Units::Metric,
+            UnitsArg::Imperial => Units::Imperial,
+        }
     }
 }
 

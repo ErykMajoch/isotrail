@@ -9,6 +9,7 @@ mod frame;
 mod gpu;
 mod lighting;
 mod mesh;
+mod overlay;
 mod palette;
 mod post;
 mod route;
@@ -16,6 +17,7 @@ mod sprite;
 mod target;
 mod terrain;
 mod test_scene;
+mod text;
 
 pub use camera::{
     Aspect, Camera, DEFAULT_YAW_OFFSET_DEG, Framing, Insets, PITCH_DEG, route_heading, view_heading,
@@ -28,9 +30,14 @@ pub use lighting::{
     AMBIENT, BANDS, FILL, SUN_AZIMUTH_DEG, SUN_COLOUR, SUN_ELEVATION_DEG, SunState,
 };
 pub use mesh::{Mesher, SmoothMesher, Surface, TerrainMesh, Vertex, VoxelMesher};
+pub use overlay::{
+    DEFAULT_STATS, DateFormat, OverlayStyle, OverlayText, Overlays, PANEL_TINT, PanelStyle,
+    SUBTEXT, Stat, StatKind, Subtitle, TEXT, TEXT_SHADOW, TitleSize, format_date,
+};
 pub use palette::{DEFAULT_PALETTE, MAX_COLOURS, Palette, PaletteError, srgb_to_oklab};
 pub use post::{Edges, Look, RouteStyle, SKY_BOTTOM, SKY_TOP};
 pub use route::{RouteLine, RouteVertex};
 pub use target::{OffscreenTarget, TARGET_FORMAT};
 pub use terrain::{GpuMesh, SHADOW_MAP_SIZE, Scene, TerrainRenderer};
 pub use test_scene::draw_test_scene;
+pub use text::{PixelFont, TextEffect};

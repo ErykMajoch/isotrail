@@ -26,14 +26,13 @@ mod reader;
 mod simplify;
 mod stats;
 mod timezone;
-mod units;
 
 pub use chrono_tz::Tz;
 pub use error::TrackError;
 pub use geodesy::{EARTH_RADIUS_M, haversine_m};
 pub use gpx::GpxReader;
+pub use isotrail_bundle::Units;
 pub use model::{MIN_SEGMENT_POINTS, Segment, Track, TrackPoint};
 pub use reader::TrackReader;
 pub use stats::{Bounds, GAIN_THRESHOLD_M, PAUSE_THRESHOLD, SMOOTHING_WINDOW_M, TrackStats};
 pub use timezone::timezone_at;
-pub use units::Units;

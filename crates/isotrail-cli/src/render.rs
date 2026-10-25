@@ -5,12 +5,13 @@ use clap::{Args, ValueEnum};
 use isotrail_bundle::SceneBundle;
 use isotrail_export::{DEFAULT_SCALE, render_still, upscale, write_png};
 use isotrail_render::{
-    Aspect, DEFAULT_PALETTE, DEFAULT_YAW_OFFSET_DEG, Gpu, Look, Mesher, Palette, SmoothMesher,
-    VoxelMesher,
+    Aspect, DEFAULT_PALETTE, DEFAULT_YAW_OFFSET_DEG, Gpu, Look, Mesher, Overlays, Palette,
+    SmoothMesher, VoxelMesher,
 };
 use tracing::info;
 
 use crate::bundle::DataArgs;
+use crate::overlay::OverlayArgs;
 
 #[derive(Debug, Args)]
 pub struct RenderArgs {
@@ -39,6 +40,9 @@ pub struct RenderArgs {
     /// none to keep the unquantised colours
     #[arg(long, value_name = "NAME|FILE", default_value = DEFAULT_PALETTE)]
     palette: String,
+
+    #[command(flatten)]
+    overlay: OverlayArgs,
 
     #[command(flatten)]
     data: DataArgs,
@@ -120,14 +124,17 @@ pub fn run(args: &RenderArgs) -> anyhow::Result<()> {
     let framing = aspect
         .framing(DEFAULT_SCALE)
         .context("the pixel scale doesn't divide the image size")?;
-    let frame = render_still(
+    let text = args.overlay.text(&bundle)?;
+    let overlays = Overlays::layout(&text, &args.overlay.style(), &framing);
+    let mut frame = render_still(
         &gpu,
         &bundle,
         mesher.as_ref(),
-        &framing,
+        &overlays.diorama_framing(),
         DEFAULT_YAW_OFFSET_DEG,
         &look,
     )?;
+    overlays.draw(&mut frame, look.palette.as_ref());
     let frame = upscale(&frame, DEFAULT_SCALE)?;
     write_png(&output, &frame)?;
 
