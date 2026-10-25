@@ -1134,6 +1134,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "directories",
  "isotrail-bundle",
  "isotrail-export",
  "isotrail-geo",
@@ -1144,6 +1145,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "toml",
  "tracing",
  "tracing-subscriber",
 ]

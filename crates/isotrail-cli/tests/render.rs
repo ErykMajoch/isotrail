@@ -7,7 +7,7 @@ use isotrail_geo::{
     Cache, CachedFetcher, Fetcher, Footprint, Grid, OVERPASS_URL, OverpassSource, RecordedFetcher,
     TerrariumSource, TileId,
 };
-use isotrail_testkit::diorama_bundle;
+use isotrail_testkit::{diorama_bundle, hike_bundle};
 use isotrail_track::{GpxReader, TrackReader};
 
 fn fixtures() -> PathBuf {
@@ -19,6 +19,7 @@ fn isotrail(cache_dir: &Path, current_dir: &Path, args: &[&str]) -> Output {
         .args(args)
         .current_dir(current_dir)
         .env("ISOTRAIL_CACHE_DIR", cache_dir)
+        .env("ISOTRAIL_CONFIG", current_dir.join("user-config.toml"))
         .env_remove("ISOTRAIL_OVERPASS_URL")
         .stdin(Stdio::null())
         .output()
@@ -33,6 +34,21 @@ fn png_size(path: &Path) -> (u32, u32) {
     let decoder = png::Decoder::new(std::io::BufReader::new(File::open(path).unwrap()));
     let info = decoder.read_info().unwrap();
     (info.info().width, info.info().height)
+}
+
+fn png_corner(path: &Path) -> [u8; 4] {
+    let decoder = png::Decoder::new(std::io::BufReader::new(File::open(path).unwrap()));
+    let mut reader = decoder.read_info().unwrap();
+    let mut rgba = vec![0; reader.output_buffer_size().unwrap()];
+    reader.next_frame(&mut rgba).unwrap();
+    [rgba[0], rgba[1], rgba[2], rgba[3]]
+}
+
+/// A temporary directory holding `hike.itb`
+fn with_hike() -> tempfile::TempDir {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("hike.itb"), hike_bundle().to_bytes()).unwrap();
+    temp
 }
 
 /// Copies the recorded Snowdon responses into a fresh cache
@@ -235,4 +251,177 @@ fn palettes_come_by_name_or_from_a_hex_file() {
     let stderr = text(&output.stderr);
     assert!(stderr.contains("line 2"), "{stderr}");
     assert!(!temp.path().join("x.png").exists());
+}
+
+#[test]
+fn every_aspect_gets_its_own_image() {
+    let temp = with_hike();
+    let output = isotrail(
+        &temp.path().join("cache"),
+        temp.path(),
+        &["render", "hike.itb", "--aspect", "story,feed,square,wide"],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let stdout = text(&output.stdout);
+    for (aspect, size, internal) in [
+        ("story", (1080, 1920), "360 × 640"),
+        ("feed", (1080, 1350), "360 × 450"),
+        ("square", (1080, 1080), "360 × 360"),
+        ("wide", (1920, 1080), "640 × 360"),
+    ] {
+        let image = temp.path().join(format!("hike-{aspect}.png"));
+        assert_eq!(png_size(&image), size, "{aspect}");
+        assert!(
+            stdout.contains(&format!("from {internal} pixels")),
+            "{stdout}"
+        );
+    }
+    assert!(!stdout.contains("Credit"), "{stdout}");
+    assert!(!temp.path().join("hike.png").exists());
+
+    let output = isotrail(
+        &temp.path().join("cache"),
+        temp.path(),
+        &["render", "hike.itb", "--aspect", "feed,story,feed"],
+    );
+    assert!(!output.status.success());
+    let stderr = text(&output.stderr);
+    assert!(stderr.contains("--aspect lists feed twice"), "{stderr}");
+}
+
+#[test]
+fn the_scale_must_divide_every_size() {
+    let temp = with_hike();
+    let cache = temp.path().join("cache");
+    let output = isotrail(&cache, temp.path(), &["render", "hike.itb", "--scale", "5"]);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert!(text(&output.stdout).starts_with(
+        "Rendered 1080 × 1920 from 216 × 384 pixels
+"
+    ));
+    let output = isotrail(&cache, temp.path(), &["render", "hike.itb", "--scale", "4"]);
+    assert!(!output.status.success());
+    let stderr = text(&output.stderr);
+    assert!(stderr.contains("must be 2, 3, 5, 6 or 10"), "{stderr}");
+}
+
+#[test]
+fn backgrounds_can_be_transparent_or_a_colour() {
+    let temp = with_hike();
+    let cache = temp.path().join("cache");
+    for (image, background, corner) in [
+        ("clear.png", "transparent", [0, 0, 0, 0]),
+        ("plum.png", "#5a2d4e", [0x5a, 0x2d, 0x4e, 255]),
+    ] {
+        let output = isotrail(
+            &cache,
+            temp.path(),
+            &[
+                "render",
+                "hike.itb",
+                "-o",
+                image,
+                "--background",
+                background,
+            ],
+        );
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        assert_eq!(png_corner(&temp.path().join(image)), corner, "{background}");
+    }
+    let output = isotrail(
+        &cache,
+        temp.path(),
+        &["render", "hike.itb", "--background", "plum"],
+    );
+    assert!(!output.status.success());
+}
+
+#[test]
+fn a_credit_left_off_the_image_is_printed_for_the_caption() {
+    let temp = with_hike();
+    let cache = temp.path().join("cache");
+    for flags in [&["--no-attribution"][..], &["--overlay", "none"][..]] {
+        let mut args = vec!["render", "hike.itb"];
+        args.extend_from_slice(flags);
+        let output = isotrail(&cache, temp.path(), &args);
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        let stdout = text(&output.stdout);
+        assert!(
+            stdout.ends_with(
+                "Credit for the caption: © Synthetic contributors · Made-up Tiles
+"
+            ),
+            "{stdout}"
+        );
+    }
+}
+
+#[test]
+fn settings_come_from_flags_then_the_given_file_then_the_user_file() {
+    let temp = with_hike();
+    let cache = temp.path().join("cache");
+    fs::write(
+        temp.path().join("user-config.toml"),
+        "[render]
+scale = 5
+aspect = \"wide\"
+background = \"transparent\"
+",
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("hike.toml"),
+        "[render]
+aspect = [\"square\"]
+no-attribution = true
+",
+    )
+    .unwrap();
+    let output = isotrail(
+        &cache,
+        temp.path(),
+        &[
+            "render",
+            "hike.itb",
+            "--config",
+            "hike.toml",
+            "--scale",
+            "6",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let stdout = text(&output.stdout);
+    assert!(
+        stdout.starts_with(
+            "Rendered 1080 × 1080 from 180 × 180 pixels
+"
+        ),
+        "{stdout}"
+    );
+    assert!(stdout.contains("Credit for the caption"), "{stdout}");
+    assert_eq!(png_corner(&temp.path().join("hike.png"))[3], 0);
+
+    // Only the user file
+    let output = isotrail(&cache, temp.path(), &["render", "hike.itb"]);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert!(text(&output.stdout).starts_with(
+        "Rendered 1920 × 1080 from 384 × 216 pixels
+"
+    ));
+
+    fs::write(
+        temp.path().join("bad.toml"),
+        "[render]
+pallete = \"apollo\"
+",
+    )
+    .unwrap();
+    let output = isotrail(
+        &cache,
+        temp.path(),
+        &["render", "hike.itb", "--config", "bad.toml"],
+    );
+    assert!(!output.status.success());
+    let stderr = text(&output.stderr);
+    assert!(stderr.contains("unknown setting \"pallete\""), "{stderr}");
 }

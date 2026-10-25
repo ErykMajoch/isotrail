@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use glam::IVec2;
 use isotrail_bundle::{HikeStats, SceneBundle, Units};
 
-use crate::{Frame, Framing, Insets, Palette, PixelFont, TextEffect};
+use crate::{Frame, Framing, Insets, Palette, PixelFont, RouteStyle, TextEffect};
 
 /// Text colour, and the softer colour of subtitles, dates and labels
 pub const TEXT: [u8; 3] = [235, 237, 233];
@@ -26,6 +26,12 @@ const BOX_TOP: u32 = 2;
 const BOX_ROWS: u32 = PixelFont::HEIGHT - BOX_TOP;
 /// The row under the capitals, where large figures and small units line up
 const BASELINE: u32 = PixelFont::CAP_TOP + 7;
+/// Height of the profile strip, in large text pixels
+const STRIP_ROWS: u32 = 12;
+/// The most of a landscape frame's width its side column takes
+const COLUMN_SHARE: f32 = 0.4;
+/// The profile ahead of the walked part, which takes the route's colour
+const PROFILE_AHEAD: [u8; 3] = [168, 181, 178];
 
 /// The words drawn over a render
 #[derive(Clone, Debug, PartialEq)]
@@ -36,6 +42,10 @@ pub struct OverlayText {
     /// Local start date, ready to print
     pub date: Option<String>,
     pub stats: Vec<Stat>,
+    /// Elevations evenly spaced along the route; fewer than two draw no profile
+    pub profile: Vec<f32>,
+    /// Credit for the map and elevation data
+    pub attribution: Option<String>,
 }
 
 /// What goes under the title
@@ -89,8 +99,8 @@ pub enum DateFormat {
 }
 
 impl OverlayText {
-    /// The bundle's title, start date and the chosen stats, leaving out
-    /// those the track didn't record
+    /// The bundle's title, start date, the chosen stats, leaving out those
+    /// the track didn't record, its profile and its data credits
     pub fn from_bundle(
         bundle: &SceneBundle,
         units: Units,
@@ -109,6 +119,8 @@ impl OverlayText {
                 .iter()
                 .filter_map(|kind| kind.stat(&meta.stats, units))
                 .collect(),
+            profile: bundle.profile.iter().map(|sample| sample.ele_m).collect(),
+            attribution: (!meta.attribution.is_empty()).then(|| meta.attribution.join(" · ")),
         }
     }
 }
@@ -269,6 +281,8 @@ pub struct OverlayStyle {
 enum Tone {
     Text,
     Subtext,
+    /// Outlined, as it sits straight on the scene
+    Credit,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -287,107 +301,121 @@ struct Rect {
     max: IVec2,
 }
 
-/// Where the title and stats panels and their lines sit in a frame
+/// Lines laid out around x = 0 from y = 0 down, and the space they take
+#[derive(Clone, Debug, Default)]
+struct Block {
+    lines: Vec<Line>,
+    width: i32,
+    height: i32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Metrics {
+    large: u32,
+    small: u32,
+    /// Between a panel's edge and what it holds
+    pad: IVec2,
+}
+
+impl Metrics {
+    /// Between the parts of a panel
+    fn gap(&self) -> i32 {
+        2 * self.pad.y
+    }
+
+    fn strip_height(&self) -> i32 {
+        (STRIP_ROWS * self.large) as i32
+    }
+}
+
+/// Where the panels, the profile strip and the lines sit in a frame
 #[derive(Clone, Debug, PartialEq)]
 pub struct Overlays {
     framing: Framing,
     style: OverlayStyle,
     panels: Vec<Rect>,
     lines: Vec<Line>,
-    /// Pixels the top and bottom panels take, counted from the frame's edges
+    strip: Option<Rect>,
+    profile: Vec<f32>,
+    /// Pixels the overlays take, counted from the frame's edges
     top_px: u32,
     bottom_px: u32,
+    left_px: u32,
 }
 
 impl Overlays {
-    /// The title block hangs from the top of the safe area and the stats
-    /// block stands on its bottom. Large text is two pixels per glyph pixel
-    /// in a 360-pixel-wide frame, and keeps that size on screen at other
-    /// pixel scales
+    /// Portrait and square frames hang the title block from the top of the
+    /// safe area and stand the stats block, with the profile and the credit
+    /// under it, on its bottom; landscape frames stack everything in one
+    /// column on the left. Large text is two pixels per glyph pixel in a
+    /// 360-pixel-wide frame, and keeps that size on screen at other pixel
+    /// scales
     pub fn layout(text: &OverlayText, style: &OverlayStyle, framing: &Framing) -> Overlays {
-        let font = PixelFont::monogram();
         let (width, height) = (framing.width, framing.height);
         let large = (width.min(height) / 180).clamp(1, 3);
-        let small = (large / 2).max(1);
-        let pad = IVec2::new(3 * large as i32, 2 * large as i32);
+        let metrics = Metrics {
+            large,
+            small: (large / 2).max(1),
+            pad: IVec2::new(3 * large as i32, 2 * large as i32),
+        };
         // Half the diorama's side margin: the sides of a story stay uncovered
         let margin = ((width as f32 * framing.safe.left / 2.0).round() as i32).max(2);
-        let max_width = (width as i32 - 2 * margin - 2 * pad.x).max(1) as u32;
         let mut layout = Overlays {
             framing: *framing,
             style: *style,
             panels: Vec::new(),
             lines: Vec::new(),
+            strip: None,
+            profile: if text.profile.len() >= 2 {
+                text.profile.clone()
+            } else {
+                Vec::new()
+            },
             top_px: 0,
             bottom_px: 0,
+            left_px: 0,
         };
-
-        let mut block = Vec::new();
-        let title = text.title.trim();
-        if !title.is_empty() {
-            let title_scale = match style.title_size {
-                TitleSize::Large => large,
-                TitleSize::Small => small,
-            };
-            let (head, tail) = match &text.subtitle {
-                Subtitle::Auto => split_title(font, title, title_scale, max_width),
-                Subtitle::Text(subtitle) => (title, subtitle.trim()),
-                Subtitle::None => (title, ""),
-            };
-            for line in font.wrap(head, title_scale, max_width, TITLE_LINES) {
-                block.push((line, title_scale, Tone::Text));
-            }
-            for line in font.wrap(tail, small, max_width, SUBTITLE_LINES) {
-                block.push((line, small, Tone::Subtext));
-            }
-        }
-        if let Some(date) = &text.date {
-            for line in font.wrap(date, small, max_width, 1) {
-                block.push((line, small, Tone::Subtext));
-            }
-        }
-        if !block.is_empty() {
-            let top = (height as f32 * framing.safe.top).round() as i32;
-            let bottom = layout.place_block(&block, top, pad, small);
-            layout.top_px = bottom.max(0) as u32;
-        }
-
-        if !text.stats.is_empty() {
-            let bottom = (height as f32 * (1.0 - framing.safe.bottom)).round() as i32;
-            let top = layout.place_stats(&text.stats, bottom, large, small, pad, max_width);
-            layout.bottom_px = (height as i32 - top).max(0) as u32;
+        if width > height {
+            let inner = (width as f32 * COLUMN_SHARE).round() as i32 - 2 * metrics.pad.x;
+            layout.place_column(text, &metrics, margin, inner.max(1));
+        } else {
+            let max_width = width as i32 - 2 * margin - 2 * metrics.pad.x;
+            layout.place_stacked(text, &metrics, max_width.max(1));
         }
         layout
     }
 
     /// The framing with its safe area grown to keep the diorama clear of
-    /// the panels
+    /// the overlays
     pub fn diorama_framing(&self) -> Framing {
         let gap = 4.0 * (self.framing.width.min(self.framing.height) / 180).max(1) as f32;
-        let height = self.framing.height as f32;
-        let share = |px: u32| {
+        let share = |px: u32, size: u32| {
             if px == 0 {
                 0.0
             } else {
-                (px as f32 + gap) / height
+                (px as f32 + gap) / size as f32
             }
         };
+        let (width, height) = (self.framing.width, self.framing.height);
         let safe = self.framing.safe;
         Framing {
             safe: Insets {
-                top: safe.top.max(share(self.top_px)),
-                bottom: safe.bottom.max(share(self.bottom_px)),
+                top: safe.top.max(share(self.top_px, height)),
+                bottom: safe.bottom.max(share(self.bottom_px, height)),
+                left: safe.left.max(share(self.left_px, width)),
                 ..safe
             },
             ..self.framing
         }
     }
 
-    /// Draws the panels, if the style has them, and the text, with every
-    /// colour moved to the nearest in `palette`
-    pub fn draw(&self, frame: &mut Frame, palette: Option<&Palette>) {
+    /// Draws the panels, if the style has them, the profile with its first
+    /// `progress` share walked, and the text, with every colour moved to the
+    /// nearest in `palette`
+    pub fn draw(&self, frame: &mut Frame, palette: Option<&Palette>, progress: f32) {
         let mut snap = Snap::new(palette);
         let shadow = snap.colour(TEXT_SHADOW);
+        let outline = TextEffect::Outline(shadow);
         let effect = match self.style.panel {
             PanelStyle::Frosted => {
                 for panel in &self.panels {
@@ -395,139 +423,346 @@ impl Overlays {
                 }
                 TextEffect::Shadow(shadow)
             }
-            PanelStyle::None => TextEffect::Outline(shadow),
+            PanelStyle::None => outline,
         };
+        if let Some(strip) = self.strip {
+            draw_profile(frame, strip, &self.profile, progress, &mut snap);
+        }
         let font = PixelFont::monogram();
         for line in &self.lines {
-            let colour = snap.colour(match line.tone {
-                Tone::Text => TEXT,
-                Tone::Subtext => SUBTEXT,
-            });
+            let (colour, effect) = match line.tone {
+                Tone::Text => (TEXT, effect),
+                Tone::Subtext => (SUBTEXT, effect),
+                Tone::Credit => (SUBTEXT, outline),
+            };
+            let colour = snap.colour(colour);
             font.draw(frame, &line.text, line.origin, line.scale, colour, effect);
         }
     }
 
-    /// Centres the lines in a panel whose top edge is at `top`, returning
-    /// the panel's bottom edge
-    fn place_block(
-        &mut self,
-        block: &[(String, u32, Tone)],
-        top: i32,
-        pad: IVec2,
-        small: u32,
-    ) -> i32 {
-        let font = PixelFont::monogram();
-        let width = self.framing.width as i32;
-        let inner = block
-            .iter()
-            .map(|(line, scale, _)| font.width(line, *scale))
-            .max()
-            .unwrap_or(0) as i32;
-        let mut y = top + pad.y;
-        let mut previous = None;
-        for (line, scale, tone) in block {
-            if previous.is_some_and(|(_, previous_tone)| previous_tone != *tone) {
-                y += small as i32;
-            }
-            let line_width = font.width(line, *scale) as i32;
-            self.lines.push(Line {
-                text: line.clone(),
-                origin: IVec2::new((width - line_width) / 2, y - (BOX_TOP * scale) as i32),
-                scale: *scale,
-                tone: *tone,
-            });
-            previous = Some((y + (BOX_ROWS * scale) as i32, *tone));
-            y += (PixelFont::LINE_HEIGHT * scale) as i32;
+    fn place_stacked(&mut self, text: &OverlayText, metrics: &Metrics, max_width: i32) {
+        let (width, height) = (self.framing.width as i32, self.framing.height as i32);
+        let safe = self.framing.safe;
+        let pad = metrics.pad;
+        let centre = width / 2;
+
+        let heading = heading(text, &self.style, metrics, max_width as u32);
+        if !heading.lines.is_empty() {
+            let top = (height as f32 * safe.top).round() as i32;
+            let bottom = top + heading.height + 2 * pad.y;
+            self.panels
+                .push(panel_rect(centre, heading.width, top, bottom, pad));
+            self.put(heading, IVec2::new(centre, top + pad.y));
+            self.top_px = bottom.max(0) as u32;
         }
-        let bottom = previous.map_or(y, |(bottom, _)| bottom) + pad.y;
-        let left = (width - inner) / 2 - pad.x;
-        self.panels.push(Rect {
-            min: IVec2::new(left, top),
-            max: IVec2::new(width - left, bottom),
-        });
-        bottom
-    }
 
-    /// Lays the stats out as values over labels in as few rows as fit, in
-    /// a panel whose bottom edge is at `bottom`; returns the panel's top edge
-    fn place_stats(
-        &mut self,
-        stats: &[Stat],
-        bottom: i32,
-        large: u32,
-        small: u32,
-        pad: IVec2,
-        max_width: u32,
-    ) -> i32 {
-        let font = PixelFont::monogram();
-        let gap = 8 * large as i32;
-        let cell_width = |stat: &Stat| {
-            value_runs(&stat.value, large, small)
-                .1
-                .max(font.width(&stat.label, small) as i32)
-        };
-        let columns_for = |per_row: usize| -> Vec<i32> {
-            (0..per_row)
-                .map(|column| {
-                    stats
-                        .iter()
-                        .skip(column)
-                        .step_by(per_row)
-                        .map(cell_width)
-                        .max()
-                        .unwrap_or(0)
-                })
-                .collect()
-        };
-        let total =
-            |columns: &[i32]| columns.iter().sum::<i32>() + gap * (columns.len() as i32 - 1);
-        let columns = (1..=stats.len())
-            .map(|rows| columns_for(stats.len().div_ceil(rows)))
-            .find(|columns| total(columns) <= max_width as i32)
-            .unwrap_or_else(|| columns_for(1));
-        let rows = stats.len().div_ceil(columns.len());
-        let label_gap = small as i32;
-        let cell_height = ((BOX_ROWS * large) as i32) + label_gap + (BOX_ROWS * small) as i32;
-        let row_gap = 2 * pad.y;
-        let inner_height = rows as i32 * cell_height + (rows as i32 - 1) * row_gap;
-        let top = bottom - inner_height - 2 * pad.y;
-
-        let width = self.framing.width as i32;
-        let inner_width = total(&columns);
-        let left = (width - inner_width) / 2;
-        for (i, stat) in stats.iter().enumerate() {
-            let (row, column) = (i / columns.len(), i % columns.len());
-            let x = left + columns[..column].iter().map(|w| w + gap).sum::<i32>();
-            let y = top + pad.y + row as i32 * (cell_height + row_gap);
-            let centred = |width: i32| x + (columns[column] - width) / 2;
-            let (runs, value_width) = value_runs(&stat.value, large, small);
-            let value_x = centred(value_width);
-            let baseline = y + ((BASELINE - BOX_TOP) * large) as i32;
-            for (text, scale, offset) in runs {
-                self.lines.push(Line {
-                    text,
-                    origin: IVec2::new(value_x + offset, baseline - (BASELINE * scale) as i32),
-                    scale,
-                    tone: Tone::Text,
+        let safe_bottom = (height as f32 * (1.0 - safe.bottom)).round() as i32;
+        let mut reached = safe_bottom;
+        let mut bottom = safe_bottom;
+        let credit = credit(text, metrics, max_width as u32);
+        if !credit.lines.is_empty() {
+            reached = bottom - credit.height;
+            self.put(credit, IVec2::new(centre, reached));
+            bottom = reached - pad.y;
+        }
+        let stats = stats_block(&text.stats, metrics, max_width);
+        let has_stats = !stats.lines.is_empty();
+        let has_strip = !self.profile.is_empty();
+        if has_stats || has_strip {
+            let inner_width = if has_stats {
+                stats.width
+            } else {
+                max_width * 3 / 4
+            };
+            let mut inner_height = stats.height;
+            if has_strip {
+                if has_stats {
+                    inner_height += metrics.gap();
+                }
+                inner_height += metrics.strip_height();
+                let half = (inner_width + 1) / 2;
+                self.strip = Some(Rect {
+                    min: IVec2::new(centre - half, bottom - pad.y - metrics.strip_height()),
+                    max: IVec2::new(centre + half, bottom - pad.y),
                 });
             }
-            let label_y = y + (BOX_ROWS * large) as i32 + label_gap;
-            self.lines.push(Line {
-                text: stat.label.clone(),
-                origin: IVec2::new(
-                    centred(font.width(&stat.label, small) as i32),
-                    label_y - (BOX_TOP * small) as i32,
-                ),
-                scale: small,
-                tone: Tone::Subtext,
+            reached = bottom - inner_height - 2 * pad.y;
+            self.panels
+                .push(panel_rect(centre, inner_width, reached, bottom, pad));
+            self.put(stats, IVec2::new(centre, reached + pad.y));
+        }
+        if reached < safe_bottom {
+            self.bottom_px = (height - reached).max(0) as u32;
+        }
+    }
+
+    /// One panel from the left margin holding the title, stats and profile,
+    /// centred in the safe area's height with the credit under it
+    fn place_column(&mut self, text: &OverlayText, metrics: &Metrics, margin: i32, inner: i32) {
+        let height = self.framing.height as i32;
+        let safe = self.framing.safe;
+        let pad = metrics.pad;
+        let outer = inner + 2 * pad.x;
+        let centre = margin + outer / 2;
+
+        let heading = heading(text, &self.style, metrics, inner as u32);
+        let stats = stats_block(&text.stats, metrics, inner);
+        let credit = credit(text, metrics, outer as u32);
+        let strip = (!self.profile.is_empty()).then(|| Block {
+            height: metrics.strip_height(),
+            ..Block::default()
+        });
+        let parts: Vec<Block> = [Some(heading), Some(stats), strip]
+            .into_iter()
+            .flatten()
+            .filter(|part| part.height > 0)
+            .collect();
+        let panel_height = if parts.is_empty() {
+            0
+        } else {
+            parts.iter().map(|part| part.height).sum::<i32>()
+                + (parts.len() as i32 - 1) * metrics.gap()
+                + 2 * pad.y
+        };
+        let credit_height = match (credit.lines.is_empty(), parts.is_empty()) {
+            (true, _) => 0,
+            (false, true) => credit.height,
+            (false, false) => credit.height + pad.y,
+        };
+        let safe_top = (height as f32 * safe.top).round() as i32;
+        let safe_bottom = (height as f32 * (1.0 - safe.bottom)).round() as i32;
+        let top = safe_top + ((safe_bottom - safe_top - panel_height - credit_height) / 2).max(0);
+
+        if !parts.is_empty() {
+            self.panels.push(Rect {
+                min: IVec2::new(margin, top),
+                max: IVec2::new(margin + outer, top + panel_height),
             });
         }
-        self.panels.push(Rect {
-            min: IVec2::new(left - pad.x, top),
-            max: IVec2::new(width - left + pad.x, bottom),
-        });
-        top
+        let mut y = top + pad.y;
+        for part in parts {
+            let part_height = part.height;
+            if part.lines.is_empty() {
+                self.strip = Some(Rect {
+                    min: IVec2::new(margin + pad.x, y),
+                    max: IVec2::new(margin + pad.x + inner, y + part_height),
+                });
+            } else {
+                self.put(part, IVec2::new(centre, y));
+            }
+            y += part_height + metrics.gap();
+        }
+        let credit_top = top + panel_height + credit_height - credit.height;
+        if !credit.lines.is_empty() {
+            self.put(credit, IVec2::new(centre, credit_top));
+        }
+        if panel_height + credit_height > 0 {
+            self.left_px = (margin + outer) as u32;
+        }
     }
+
+    /// Adds a block's lines with its top centre at `at`
+    fn put(&mut self, block: Block, at: IVec2) {
+        self.lines.extend(block.lines.into_iter().map(|line| Line {
+            origin: line.origin + at,
+            ..line
+        }));
+    }
+}
+
+/// A panel around content `inner_width` wide, centred on `centre`
+fn panel_rect(centre: i32, inner_width: i32, top: i32, bottom: i32, pad: IVec2) -> Rect {
+    let half = (inner_width + 1) / 2;
+    Rect {
+        min: IVec2::new(centre - half - pad.x, top),
+        max: IVec2::new(centre + half + pad.x, bottom),
+    }
+}
+
+/// The title, subtitle and date lines
+fn heading(text: &OverlayText, style: &OverlayStyle, metrics: &Metrics, max_width: u32) -> Block {
+    let font = PixelFont::monogram();
+    let (large, small) = (metrics.large, metrics.small);
+    let mut block = Vec::new();
+    let title = text.title.trim();
+    if !title.is_empty() {
+        let title_scale = match style.title_size {
+            TitleSize::Large => large,
+            TitleSize::Small => small,
+        };
+        let (head, tail) = match &text.subtitle {
+            Subtitle::Auto => split_title(font, title, title_scale, max_width),
+            Subtitle::Text(subtitle) => (title, subtitle.trim()),
+            Subtitle::None => (title, ""),
+        };
+        for line in font.wrap(head, title_scale, max_width, TITLE_LINES) {
+            block.push((line, title_scale, Tone::Text));
+        }
+        for line in font.wrap(tail, small, max_width, SUBTITLE_LINES) {
+            block.push((line, small, Tone::Subtext));
+        }
+    }
+    if let Some(date) = &text.date {
+        for line in font.wrap(date, small, max_width, 1) {
+            block.push((line, small, Tone::Subtext));
+        }
+    }
+    stack_lines(&block, small)
+}
+
+/// Wrapped but never cut short, as the data licences ask for it
+fn credit(text: &OverlayText, metrics: &Metrics, max_width: u32) -> Block {
+    let font = PixelFont::monogram();
+    let lines: Vec<(String, u32, Tone)> = text
+        .attribution
+        .iter()
+        .flat_map(|credit| font.wrap(credit, metrics.small, max_width, usize::MAX))
+        .map(|line| (line, metrics.small, Tone::Credit))
+        .collect();
+    stack_lines(&lines, metrics.small)
+}
+
+/// Centred lines, with a gap where the tone changes
+fn stack_lines(block: &[(String, u32, Tone)], small: u32) -> Block {
+    let font = PixelFont::monogram();
+    let mut lines = Vec::new();
+    let (mut y, mut bottom, mut width) = (0, 0, 0);
+    let mut previous = None;
+    for (text, scale, tone) in block {
+        if previous.is_some_and(|previous| previous != *tone) {
+            y += small as i32;
+        }
+        let line_width = font.width(text, *scale) as i32;
+        width = width.max(line_width);
+        lines.push(Line {
+            text: text.clone(),
+            origin: IVec2::new(-((line_width + 1) / 2), y - (BOX_TOP * scale) as i32),
+            scale: *scale,
+            tone: *tone,
+        });
+        bottom = y + (BOX_ROWS * scale) as i32;
+        previous = Some(*tone);
+        y += (PixelFont::LINE_HEIGHT * scale) as i32;
+    }
+    Block {
+        lines,
+        width,
+        height: bottom,
+    }
+}
+
+/// The stats as values over labels in as few rows as fit `max_width`
+fn stats_block(stats: &[Stat], metrics: &Metrics, max_width: i32) -> Block {
+    if stats.is_empty() {
+        return Block::default();
+    }
+    let font = PixelFont::monogram();
+    let (large, small) = (metrics.large, metrics.small);
+    let gap = 8 * large as i32;
+    let cell_width = |stat: &Stat| {
+        value_runs(&stat.value, large, small)
+            .1
+            .max(font.width(&stat.label, small) as i32)
+    };
+    let columns_for = |per_row: usize| -> Vec<i32> {
+        (0..per_row)
+            .map(|column| {
+                stats
+                    .iter()
+                    .skip(column)
+                    .step_by(per_row)
+                    .map(cell_width)
+                    .max()
+                    .unwrap_or(0)
+            })
+            .collect()
+    };
+    let total = |columns: &[i32]| columns.iter().sum::<i32>() + gap * (columns.len() as i32 - 1);
+    let columns = (1..=stats.len())
+        .map(|rows| columns_for(stats.len().div_ceil(rows)))
+        .find(|columns| total(columns) <= max_width)
+        .unwrap_or_else(|| columns_for(1));
+    let rows = stats.len().div_ceil(columns.len()) as i32;
+    let label_gap = small as i32;
+    let cell_height = ((BOX_ROWS * large) as i32) + label_gap + (BOX_ROWS * small) as i32;
+    let row_gap = metrics.gap();
+
+    let width = total(&columns);
+    let left = -((width + 1) / 2);
+    let mut lines = Vec::new();
+    for (i, stat) in stats.iter().enumerate() {
+        let (row, column) = (i / columns.len(), i % columns.len());
+        let x = left + columns[..column].iter().map(|w| w + gap).sum::<i32>();
+        let y = row as i32 * (cell_height + row_gap);
+        let centred = |width: i32| x + (columns[column] - width) / 2;
+        let (runs, value_width) = value_runs(&stat.value, large, small);
+        let value_x = centred(value_width);
+        let baseline = y + ((BASELINE - BOX_TOP) * large) as i32;
+        for (text, scale, offset) in runs {
+            lines.push(Line {
+                text,
+                origin: IVec2::new(value_x + offset, baseline - (BASELINE * scale) as i32),
+                scale,
+                tone: Tone::Text,
+            });
+        }
+        let label_y = y + (BOX_ROWS * large) as i32 + label_gap;
+        lines.push(Line {
+            text: stat.label.clone(),
+            origin: IVec2::new(
+                centred(font.width(&stat.label, small) as i32),
+                label_y - (BOX_TOP * small) as i32,
+            ),
+            scale: small,
+            tone: Tone::Subtext,
+        });
+    }
+    Block {
+        lines,
+        width,
+        height: rows * cell_height + (rows - 1) * row_gap,
+    }
+}
+
+/// An area chart of the profile filling `rect` from its bottom, the walked
+/// columns in the route's colour
+fn draw_profile(frame: &mut Frame, rect: Rect, profile: &[f32], progress: f32, snap: &mut Snap) {
+    let (low, high) = profile
+        .iter()
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(low, high), &e| {
+            (low.min(e), high.max(e))
+        });
+    let size = rect.max - rect.min;
+    let walked = snap.colour(RouteStyle::default().colour);
+    let ahead = snap.colour(PROFILE_AHEAD);
+    for x in 0..size.x {
+        let t = if size.x > 1 {
+            x as f32 / (size.x - 1) as f32
+        } else {
+            0.0
+        };
+        let share = if high > low {
+            (sample(profile, t) - low) / (high - low)
+        } else {
+            0.0
+        };
+        let rows = 1 + (share * (size.y - 1) as f32).round() as i32;
+        let [r, g, b] = if progress >= 1.0 || t < progress {
+            walked
+        } else {
+            ahead
+        };
+        for y in 0..rows {
+            frame.set_pixel(rect.min.x + x, rect.max.y - 1 - y, [r, g, b, 255]);
+        }
+    }
+}
+
+/// Linear between evenly spaced samples, `t` running from 0 to 1
+fn sample(profile: &[f32], t: f32) -> f32 {
+    let at = t.clamp(0.0, 1.0) * (profile.len() - 1) as f32;
+    let i = (at.floor() as usize).min(profile.len() - 2);
+    profile[i] + (profile[i + 1] - profile[i]) * (at - i as f32)
 }
 
 /// A stat's value as runs of large figures and small units, each with its
@@ -644,9 +879,14 @@ fn draw_panel(frame: &mut Frame, rect: Rect, snap: &mut Snap) {
 /// up to `radius` away, reaching outside the box but not the frame
 fn box_blur(frame: &Frame, min: IVec2, max: IVec2, radius: i32) -> Vec<[f32; 3]> {
     let (width, height) = (frame.width() as i32, frame.height() as i32);
+    // Transparent pixels blur as the tint, so panels over them stay solid
     let rgb = |x: i32, y: i32| {
         let p = frame.pixel(x.clamp(0, width - 1) as u32, y.clamp(0, height - 1) as u32);
-        [f32::from(p[0]), f32::from(p[1]), f32::from(p[2])]
+        if p[3] < 128 {
+            PANEL_TINT.map(f32::from)
+        } else {
+            [f32::from(p[0]), f32::from(p[1]), f32::from(p[2])]
+        }
     };
     let taps = (2 * radius + 1) as f32;
     // Rows first, over the box grown by the radius vertically
@@ -700,6 +940,8 @@ mod tests {
                 Stat::new("5h 02m", "time"),
                 Stat::new("1085 m", "high point"),
             ],
+            profile: Vec::new(),
+            attribution: None,
         }
     }
 
@@ -1019,6 +1261,8 @@ mod tests {
             subtitle: Subtitle::Text("not shown without a title".into()),
             date: None,
             stats: Vec::new(),
+            profile: vec![300.0],
+            attribution: None,
         };
         let overlays = layout(&empty);
         assert!(overlays.panels.is_empty() && overlays.lines.is_empty());
@@ -1043,7 +1287,7 @@ mod tests {
     fn panels_and_text_use_only_palette_colours() {
         let palette = Palette::builtin("apollo").unwrap();
         let mut frame = palette_frame(&palette);
-        layout(&text("Giewont")).draw(&mut frame, Some(&palette));
+        layout(&text("Giewont")).draw(&mut frame, Some(&palette), 1.0);
         assert!(
             frame
                 .rgba()
@@ -1062,7 +1306,7 @@ mod tests {
             ..OverlayStyle::default()
         };
         let overlays = Overlays::layout(&text("Giewont"), &style, &story());
-        overlays.draw(&mut frame, Some(&palette));
+        overlays.draw(&mut frame, Some(&palette), 1.0);
         let ink = [TEXT, SUBTEXT, TEXT_SHADOW].map(|c| palette.nearest(c));
         let mut changed = 0;
         for (now, was) in frame.rgba().chunks(4).zip(before.rgba().chunks(4)) {
@@ -1077,5 +1321,190 @@ mod tests {
             overlays.diorama_framing(),
             layout(&text("Giewont")).diorama_framing()
         );
+    }
+
+    const CREDIT: &str = "© OpenStreetMap contributors · Terrain Tiles (AWS)";
+
+    fn full_text() -> OverlayText {
+        OverlayText {
+            profile: (0..64)
+                .map(|i| 300.0 + (i as f32 / 6.0).sin() * 80.0)
+                .collect(),
+            attribution: Some(CREDIT.into()),
+            ..text("Przełęcz pod Łańcuchem | Zażółć gęślą jaźń")
+        }
+    }
+
+    fn blank(framing: &Framing, rgba: [u8; 4]) -> Frame {
+        Frame::new(
+            framing.width,
+            framing.height,
+            rgba.repeat((framing.width * framing.height) as usize),
+        )
+    }
+
+    fn line_box(line: &Line) -> Rect {
+        let font = PixelFont::monogram();
+        let (first, last) = font.ink_rows(&line.text).unwrap();
+        Rect {
+            min: IVec2::new(line.origin.x, line.origin.y + (first * line.scale) as i32),
+            max: IVec2::new(
+                line.origin.x + font.width(&line.text, line.scale) as i32,
+                line.origin.y + ((last + 1) * line.scale) as i32,
+            ),
+        }
+    }
+
+    fn inside(inner: Rect, outer: Rect) -> bool {
+        outer.min.x <= inner.min.x
+            && inner.max.x <= outer.max.x
+            && outer.min.y <= inner.min.y
+            && inner.max.y <= outer.max.y
+    }
+
+    #[test]
+    fn the_profile_sits_in_the_stats_panel_and_fills_up_to_the_progress() {
+        let framing = story();
+        let overlays = layout(&full_text());
+        let strip = overlays.strip.unwrap();
+        let stats = overlays.panels[1];
+        assert!(inside(strip, stats), "{strip:?} {stats:?}");
+        let labels = overlays.lines.iter().filter(|l| l.text == "distance");
+        assert!(labels.map(line_box).all(|label| label.max.y < strip.min.y));
+        assert_eq!(strip.max.y - strip.min.y, 24);
+
+        let mut frame = blank(&framing, [0, 0, 0, 255]);
+        overlays.draw(&mut frame, None, 0.5);
+        let route = RouteStyle::default().colour;
+        let bottom = strip.max.y as u32 - 1;
+        let colour = |x: i32| {
+            let p = frame.pixel(x as u32, bottom);
+            [p[0], p[1], p[2]]
+        };
+        let width = strip.max.x - strip.min.x;
+        assert_eq!(colour(strip.min.x), route);
+        assert_eq!(colour(strip.min.x + width / 2 - 2), route);
+        assert_eq!(colour(strip.min.x + width / 2 + 2), PROFILE_AHEAD);
+        assert_eq!(colour(strip.max.x - 1), PROFILE_AHEAD);
+        // The highest sample reaches the top of the strip, the lowest only its bottom row
+        let column = |x: i32| {
+            (strip.min.y..strip.max.y)
+                .filter(|&y| {
+                    let p = frame.pixel(x as u32, y as u32);
+                    [route, PROFILE_AHEAD].contains(&[p[0], p[1], p[2]])
+                })
+                .count()
+        };
+        let heights: Vec<usize> = (strip.min.x..strip.max.x).map(column).collect();
+        assert_eq!(heights.iter().max(), Some(&24));
+        assert_eq!(heights.iter().min(), Some(&1));
+    }
+
+    #[test]
+    fn a_flat_profile_is_a_single_row() {
+        let framing = story();
+        let flat = OverlayText {
+            profile: vec![500.0; 10],
+            ..text("Flat")
+        };
+        let overlays = layout(&flat);
+        let strip = overlays.strip.unwrap();
+        let mut frame = blank(&framing, [0, 0, 0, 255]);
+        overlays.draw(&mut frame, None, 1.0);
+        let route = RouteStyle::default().colour;
+        let row = |y: i32| {
+            (strip.min.x..strip.max.x)
+                .filter(|&x| frame.pixel(x as u32, y as u32)[..3] == route)
+                .count() as i32
+        };
+        assert_eq!(row(strip.max.y - 1), strip.max.x - strip.min.x);
+        assert_eq!(row(strip.max.y - 2), 0);
+    }
+
+    #[test]
+    fn the_credit_stands_on_the_safe_area_under_the_stats() {
+        let framing = story();
+        let overlays = layout(&full_text());
+        let credit: Vec<&Line> = overlays
+            .lines
+            .iter()
+            .filter(|line| line.tone == Tone::Credit)
+            .collect();
+        assert_eq!(credit.len(), 1);
+        let credit = line_box(credit[0]);
+        let safe_bottom = (640.0_f32 * (1.0 - framing.safe.bottom)).round() as i32;
+        assert!(credit.max.y <= safe_bottom && credit.max.y >= safe_bottom - 4);
+        assert!(overlays.panels[1].max.y < credit.min.y);
+        assert!(credit.min.x > 0 && credit.max.x < 360);
+        let diorama = overlays.diorama_framing();
+        assert!((1.0 - diorama.safe.bottom) * 640.0 <= overlays.panels[1].min.y as f32);
+
+        // A narrower frame wraps it at a space
+        let narrow = Overlays::layout(
+            &full_text(),
+            &OverlayStyle::default(),
+            &Aspect::Story.framing(5).unwrap(),
+        );
+        let credit: Vec<&str> = narrow
+            .lines
+            .iter()
+            .filter(|line| line.tone == Tone::Credit)
+            .map(|line| line.text.as_str())
+            .collect();
+        assert_eq!(credit.len(), 2);
+        assert_eq!(credit.join(" "), CREDIT);
+    }
+
+    #[test]
+    fn landscape_frames_put_everything_in_a_left_column() {
+        let framing = Aspect::Wide.framing(3).unwrap();
+        let overlays = Overlays::layout(&full_text(), &OverlayStyle::default(), &framing);
+        assert_eq!(overlays.panels.len(), 1);
+        let column = overlays.panels[0];
+        assert!(column.min.x >= 2 && column.max.x <= (640.0 * COLUMN_SHARE) as i32 + 16);
+        assert!(inside(overlays.strip.unwrap(), column));
+        let (credit, inner): (Vec<&Line>, Vec<&Line>) = overlays
+            .lines
+            .iter()
+            .partition(|line| line.tone == Tone::Credit);
+        assert!(inner.iter().all(|line| inside(line_box(line), column)));
+        assert!(credit.iter().all(|line| {
+            let credit = line_box(line);
+            credit.min.y > column.max.y && credit.max.y <= 342
+        }));
+        assert!(!credit.is_empty());
+        // Centred in the safe area's height
+        let lowest = credit
+            .iter()
+            .map(|line| line_box(line).max.y)
+            .max()
+            .unwrap();
+        assert!(
+            (column.min.y - 18 - (342 - lowest)).abs() <= 6,
+            "{column:?} {lowest}"
+        );
+
+        let diorama = overlays.diorama_framing();
+        assert!(diorama.safe.left * 640.0 >= column.max.x as f32);
+        assert_eq!(
+            (diorama.safe.top, diorama.safe.bottom, diorama.safe.right),
+            (framing.safe.top, framing.safe.bottom, framing.safe.right)
+        );
+    }
+
+    #[test]
+    fn panels_over_a_transparent_background_are_solid() {
+        let palette = Palette::builtin("apollo").unwrap();
+        let framing = story();
+        let mut frame = blank(&framing, [0, 0, 0, 0]);
+        let overlays = layout(&full_text());
+        overlays.draw(&mut frame, Some(&palette), 1.0);
+        for panel in &overlays.panels {
+            let (x, y) = (panel.min.x + 1, panel.max.y - 2);
+            let p = frame.pixel(x as u32, y as u32);
+            assert_eq!(p[3], 255);
+            assert!(palette.colours().contains(&[p[0], p[1], p[2]]), "{p:?}");
+        }
+        assert_eq!(frame.pixel(0, 0), [0, 0, 0, 0]);
     }
 }

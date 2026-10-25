@@ -1,6 +1,6 @@
 use isotrail_bundle::{
-    Bounds, GridInfo, HikeStats, Landcover, Metadata, Provenance, Route, RoutePoint, SceneBundle,
-    Terrain, WaterBody, line_mask,
+    Bounds, GridInfo, HikeStats, Landcover, Metadata, ProfileSample, Provenance, Route, RoutePoint,
+    SceneBundle, Terrain, WaterBody, line_mask,
 };
 
 /// An unrotated grid centred on the origin
@@ -160,6 +160,30 @@ pub fn diorama_bundle() -> SceneBundle {
         })
         .collect();
     bundle.prop_seed = bundle.content_seed();
+    bundle
+}
+
+/// [`diorama_bundle`] with a title, a date, stats, an elevation profile and
+/// data credits, keeping its prop seed so the terrain looks the same
+pub fn hike_bundle() -> SceneBundle {
+    let mut bundle = diorama_bundle();
+    let meta = &mut bundle.meta;
+    meta.title = "Zażółć gęślą jaźń | Łańcuch".into();
+    meta.local_date = Some("2025-06-14".into());
+    meta.attribution = vec!["© Synthetic contributors".into(), "Made-up Tiles".into()];
+    let stats = &mut meta.stats;
+    (stats.distance_m, stats.gain_m) = (7_420.0, Some(612.0));
+    (stats.moving_s, stats.max_ele_m) = (Some(9_000), Some(842.0));
+    let total = 7_420.0;
+    bundle.profile = (0..64)
+        .map(|i| {
+            let t = i as f32 / 63.0;
+            ProfileSample {
+                distance_m: t * total,
+                ele_m: 330.0 + 480.0 * t * t + 30.0 * (t * 19.0).sin(),
+            }
+        })
+        .collect();
     bundle
 }
 

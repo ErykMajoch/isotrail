@@ -3,6 +3,7 @@
 
 mod bundle;
 mod cache;
+mod config;
 mod overlay;
 mod render;
 mod stats;
@@ -47,7 +48,7 @@ enum Command {
 }
 
 fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+    let cli = config::parse()?;
     init_logging(cli.verbose);
     match cli.command {
         Command::Stats(args) => stats::run(&args),

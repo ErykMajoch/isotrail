@@ -1,11 +1,11 @@
 use isotrail_bundle::Units;
 use isotrail_export::{render_still, upscale};
 use isotrail_render::{
-    Aspect, DEFAULT_PALETTE, DEFAULT_STATS, DEFAULT_YAW_OFFSET_DEG, DateFormat, Gpu, Look, Mesher,
-    OffscreenTarget, OverlayStyle, OverlayText, Overlays, Palette, SmoothMesher, VoxelMesher,
-    draw_test_scene,
+    Aspect, Background, DEFAULT_PALETTE, DEFAULT_STATS, DEFAULT_YAW_OFFSET_DEG, DateFormat, Frame,
+    Gpu, Look, Mesher, OffscreenTarget, OverlayStyle, OverlayText, Overlays, Palette, SmoothMesher,
+    VoxelMesher, draw_test_scene,
 };
-use isotrail_testkit::{assert_golden, diorama_bundle};
+use isotrail_testkit::{assert_golden, diorama_bundle, hike_bundle};
 
 #[test]
 fn test_scene_matches_golden() {
@@ -81,11 +81,69 @@ fn overlays_on_the_diorama_match_golden() {
         &look,
     )
     .unwrap();
-    overlays.draw(&mut frame, look.palette.as_ref());
+    overlays.draw(&mut frame, look.palette.as_ref(), 1.0);
     assert_golden(
         "overlay-diorama",
         frame.width(),
         frame.height(),
         frame.rgba(),
     );
+}
+
+fn render_hike(gpu: &Gpu, aspect: Aspect, look: &Look) -> Frame {
+    let bundle = hike_bundle();
+    let framing = aspect.framing(6).unwrap();
+    let text = OverlayText::from_bundle(&bundle, Units::Metric, &DEFAULT_STATS, DateFormat::Long);
+    let overlays = Overlays::layout(&text, &OverlayStyle::default(), &framing);
+    let mut frame = render_still(
+        gpu,
+        &bundle,
+        &VoxelMesher::default(),
+        &overlays.diorama_framing(),
+        DEFAULT_YAW_OFFSET_DEG,
+        look,
+    )
+    .unwrap();
+    overlays.draw(&mut frame, look.palette.as_ref(), 1.0);
+    frame
+}
+
+#[test]
+fn every_preset_matches_its_golden() {
+    let gpu = Gpu::headless().unwrap();
+    for aspect in Aspect::ALL {
+        let frame = render_hike(&gpu, aspect, &Look::default());
+        let (width, height) = aspect.output_size();
+        assert_eq!((frame.width(), frame.height()), (width / 6, height / 6));
+        assert_golden(
+            &format!("preset-{}", aspect.name()),
+            frame.width(),
+            frame.height(),
+            frame.rgba(),
+        );
+    }
+}
+
+#[test]
+fn backgrounds_replace_only_the_sky() {
+    let gpu = Gpu::headless().unwrap();
+    let sky = render_hike(&gpu, Aspect::Square, &Look::default());
+    let render = |background| {
+        let look = Look {
+            background,
+            ..Look::default()
+        };
+        render_hike(&gpu, Aspect::Square, &look)
+    };
+    let transparent = render(Background::Transparent);
+    let colour = [12, 200, 99];
+    let flat = render(Background::Colour(colour));
+    // The corners are sky, and the diorama sits above the stats panel
+    for (x, y) in [(0, 0), (179, 0), (0, 179), (179, 179)] {
+        assert_eq!(transparent.pixel(x, y), [0, 0, 0, 0], "({x}, {y})");
+        assert_eq!(flat.pixel(x, y), [12, 200, 99, 255], "({x}, {y})");
+    }
+    assert_ne!(sky.pixel(90, 52), sky.pixel(90 % 4, 52));
+    assert_eq!(transparent.pixel(90, 52), sky.pixel(90, 52));
+    assert_eq!(flat.pixel(90, 52), sky.pixel(90, 52));
 }

@@ -12,7 +12,7 @@ use std::fs::{self, File};
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 
-pub use scene::{bundle, diorama_bundle, grid};
+pub use scene::{bundle, diorama_bundle, grid, hike_bundle};
 
 pub const UPDATE_ENV: &str = "UPDATE_GOLDENS";
 

@@ -35,7 +35,7 @@ pub use overlay::{
     SUBTEXT, Stat, StatKind, Subtitle, TEXT, TEXT_SHADOW, TitleSize, format_date,
 };
 pub use palette::{DEFAULT_PALETTE, MAX_COLOURS, Palette, PaletteError, srgb_to_oklab};
-pub use post::{Edges, Look, RouteStyle, SKY_BOTTOM, SKY_TOP};
+pub use post::{Background, Edges, Look, RouteStyle, SKY_BOTTOM, SKY_TOP};
 pub use route::{RouteLine, RouteVertex};
 pub use target::{OffscreenTarget, TARGET_FORMAT};
 pub use terrain::{GpuMesh, SHADOW_MAP_SIZE, Scene, TerrainRenderer};

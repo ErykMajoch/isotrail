@@ -11,15 +11,21 @@ use crate::UnitsArg;
 /// What the render prints over the diorama
 #[derive(Debug, Args)]
 pub struct OverlayArgs {
-    /// Text to print over the render, or none for the diorama alone
+    /// What to print over the render, or none for the diorama alone (the
+    /// data credit is then printed here, for the caption)
     #[arg(
         long,
         value_enum,
         value_delimiter = ',',
         value_name = "PARTS",
-        default_values_t = [Part::Title, Part::Date, Part::Stats]
+        default_values_t = [Part::Title, Part::Date, Part::Stats, Part::Profile]
     )]
     overlay: Vec<Part>,
+
+    /// Leave the map and elevation data credit off the image and print it
+    /// here instead, for the caption
+    #[arg(long)]
+    no_attribution: bool,
 
     /// Put the text on frosted panels, or with none straight on the scene
     /// with a dark outline
@@ -70,6 +76,7 @@ enum Part {
     Title,
     Date,
     Stats,
+    Profile,
     None,
 }
 
@@ -186,7 +193,23 @@ impl OverlayArgs {
         } else {
             text.stats.clear();
         }
+        if !show(Part::Profile) {
+            text.profile.clear();
+        }
+        if !self.shows_attribution() {
+            text.attribution = None;
+        }
         Ok(text)
+    }
+
+    /// The data credit to put in the caption, when the image leaves it out
+    pub fn caption_credit(&self, bundle: &SceneBundle) -> Option<String> {
+        let credits = &bundle.meta.attribution;
+        (!self.shows_attribution() && !credits.is_empty()).then(|| credits.join(" · "))
+    }
+
+    fn shows_attribution(&self) -> bool {
+        !self.no_attribution && !self.overlay.contains(&Part::None)
     }
 }
 
@@ -198,6 +221,7 @@ fn name(stat: StatArg) -> String {
 #[cfg(test)]
 mod tests {
     use clap::Parser;
+    use isotrail_bundle::ProfileSample;
     use isotrail_testkit::diorama_bundle;
 
     use super::*;
@@ -217,6 +241,13 @@ mod tests {
         let mut bundle = diorama_bundle();
         bundle.meta.title = "Ridge | Valley".into();
         bundle.meta.local_date = Some("2025-06-14".into());
+        bundle.meta.attribution = vec!["© Mappers".into(), "Tiles".into()];
+        bundle.profile = (0..4)
+            .map(|i| ProfileSample {
+                distance_m: i as f32 * 100.0,
+                ele_m: 400.0 + i as f32,
+            })
+            .collect();
         let stats = &mut bundle.meta.stats;
         (stats.distance_m, stats.gain_m) = (7_420.0, Some(612.0));
         (stats.moving_s, stats.max_ele_m) = (Some(9_000), Some(842.0));
@@ -232,7 +263,28 @@ mod tests {
         assert_eq!(text.date.as_deref(), Some("Saturday 14 June 2025"));
         let labels: Vec<&str> = text.stats.iter().map(|s| s.label.as_str()).collect();
         assert_eq!(labels, ["distance", "gain", "time", "high point"]);
+        assert_eq!(text.profile, [400.0, 401.0, 402.0, 403.0]);
+        assert_eq!(text.attribution.as_deref(), Some("© Mappers · Tiles"));
+        assert_eq!(args.caption_credit(&bundle()), None);
         assert_eq!(args.style(), OverlayStyle::default());
+    }
+
+    #[test]
+    fn the_credit_moves_to_the_caption_when_left_off() {
+        for flags in [&["--no-attribution"][..], &["--overlay", "none"][..]] {
+            let args = parse(flags).unwrap();
+            assert_eq!(args.text(&bundle()).unwrap().attribution, None);
+            assert_eq!(
+                args.caption_credit(&bundle()).as_deref(),
+                Some("© Mappers · Tiles")
+            );
+        }
+        let args = parse(&["--overlay", "title"]).unwrap();
+        assert!(args.text(&bundle()).unwrap().attribution.is_some());
+        let mut bare = bundle();
+        bare.meta.attribution.clear();
+        let args = parse(&["--no-attribution"]).unwrap();
+        assert_eq!(args.caption_credit(&bare), None);
     }
 
     #[test]
@@ -248,11 +300,18 @@ mod tests {
             .text(&bundle())
             .unwrap();
         assert!(!text.title.is_empty() && text.date.is_some() && text.stats.is_empty());
+        assert!(text.profile.is_empty());
+        let text = parse(&["--overlay", "profile"])
+            .unwrap()
+            .text(&bundle())
+            .unwrap();
+        assert!(text.stats.is_empty() && text.profile.len() == 4);
         let text = parse(&["--overlay", "none"])
             .unwrap()
             .text(&bundle())
             .unwrap();
         assert!(text.title.is_empty() && text.date.is_none() && text.stats.is_empty());
+        assert!(text.profile.is_empty());
     }
 
     #[test]

@@ -55,12 +55,14 @@ fn story_overlays_match_golden() {
             Stat::new("6h 05m", "time"),
             Stat::new("2301 m", "high point"),
         ],
+        profile: Vec::new(),
+        attribution: None,
     };
     let overlays = Overlays::layout(&text, &OverlayStyle::default(), &framing);
     // The diorama keeps clear of the stats panel as well as the safe area
     assert!(overlays.diorama_framing().safe.bottom * 640.0 > 128.0);
     let palette = Palette::builtin("apollo").unwrap();
-    overlays.draw(&mut frame, Some(&palette));
+    overlays.draw(&mut frame, Some(&palette), 1.0);
     assert_golden("overlay-story", frame.width(), frame.height(), frame.rgba());
 }
 
@@ -104,13 +106,15 @@ fn story_overlays_without_panels_match_golden() {
             Stat::new("19:56 /km", "pace"),
             Stat::new("1d 2h", "elapsed"),
         ],
+        profile: Vec::new(),
+        attribution: None,
     };
     let style = OverlayStyle {
         panel: PanelStyle::None,
         title_size: TitleSize::Small,
     };
     let palette = Palette::builtin("apollo").unwrap();
-    Overlays::layout(&text, &style, &framing).draw(&mut frame, Some(&palette));
+    Overlays::layout(&text, &style, &framing).draw(&mut frame, Some(&palette), 1.0);
     assert_golden(
         "overlay-story-plain",
         frame.width(),

@@ -82,11 +82,23 @@ impl Default for RouteStyle {
     }
 }
 
+/// What shows where there is no terrain
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Background {
+    /// A dithered gradient from [`SKY_TOP`] to [`SKY_BOTTOM`]
+    #[default]
+    Sky,
+    Transparent,
+    /// Kept exactly, outside the palette, so it can match a page
+    Colour([u8; 3]),
+}
+
 /// The finishing passes: sky, outlines, route and palette
 #[derive(Clone, Debug, PartialEq)]
 pub struct Look {
     /// `None` keeps the lit colours as they are
     pub palette: Option<Palette>,
+    pub background: Background,
     pub edges: Edges,
     /// How far ordered dithering moves the sky's colours before quantising,
     /// as a share of full brightness
@@ -99,6 +111,7 @@ impl Look {
     pub fn plain() -> Look {
         Look {
             palette: None,
+            background: Background::Sky,
             edges: Edges::NONE,
             sky_dither: 0.0,
             route: RouteStyle::default(),
@@ -110,6 +123,7 @@ impl Default for Look {
     fn default() -> Self {
         Look {
             palette: Palette::builtin(DEFAULT_PALETTE),
+            background: Background::Sky,
             edges: Edges::default(),
             sky_dither: 0.08,
             route: RouteStyle::default(),
@@ -276,10 +290,15 @@ impl PostPass {
         let metres_per_px = 2.0 * inv_view_proj.x_axis.truncate().length() / target.width() as f32;
         let colour =
             |rgb: [u8; 3]| Vec4::new(rgb[0].into(), rgb[1].into(), rgb[2].into(), 255.0) / 255.0;
+        let (sky_top, sky_bottom, background) = match look.background {
+            Background::Sky => (SKY_TOP, SKY_BOTTOM, 0),
+            Background::Colour(rgb) => (rgb, rgb, 1),
+            Background::Transparent => (SKY_TOP, SKY_BOTTOM, 2),
+        };
         let mut uniforms = Uniforms {
             inv_view_proj: inv_view_proj.to_cols_array(),
-            sky_top: colour(SKY_TOP).to_array(),
-            sky_bottom: colour(SKY_BOTTOM).to_array(),
+            sky_top: colour(sky_top).to_array(),
+            sky_bottom: colour(sky_bottom).to_array(),
             edges: [
                 look.edges.silhouette,
                 look.edges.depth,
@@ -299,7 +318,7 @@ impl PostPass {
             counts: [
                 look.route.width_px.clamp(1, 3),
                 sprites.len().min(MAX_SPRITES) as u32,
-                0,
+                background,
                 0,
             ],
             sprite_frame: [[0; 4]; MAX_SPRITES],

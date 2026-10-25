@@ -10,7 +10,8 @@ struct Uniforms {
     look: vec4<f32>,
     // rgb the route's colour, a its opacity where hidden
     route: vec4<f32>,
-    // x the route's width in pixels, y the sprite count
+    // x the route's width in pixels, y the sprite count, z the background:
+    // 0 sky, 1 a flat colour kept as it is, 2 transparent
     counts: vec4<u32>,
     // xy each sprite's top-left pixel, zw its size
     sprite_frame: array<vec4<i32>, 4>,
@@ -152,8 +153,15 @@ fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     if sprite.a > 0.5 {
         return vec4<f32>(quantise(sprite.rgb), 1.0);
     }
-    var colour = scene(pixel);
     let mark = route_at(pixel);
+    let background = uniforms.counts.z;
+    if background != 0u && mark == 0u && textureLoad(id_map, pixel, 0).r == 0u && !borders_route(pixel) {
+        if background == 2u {
+            return vec4<f32>(0.0);
+        }
+        return vec4<f32>(uniforms.sky_top.rgb, 1.0);
+    }
+    var colour = scene(pixel);
     if mark == 2u {
         colour = uniforms.route.rgb;
     } else {

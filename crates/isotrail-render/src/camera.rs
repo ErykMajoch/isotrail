@@ -29,17 +29,36 @@ pub struct Framing {
     pub safe: Insets,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Aspect {
     /// 9:16, for Instagram stories
     #[default]
     Story,
+    /// 4:5, for feed posts
+    Feed,
+    Square,
+    /// 16:9, for websites
+    Wide,
 }
 
 impl Aspect {
+    pub const ALL: [Aspect; 4] = [Aspect::Story, Aspect::Feed, Aspect::Square, Aspect::Wide];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Aspect::Story => "story",
+            Aspect::Feed => "feed",
+            Aspect::Square => "square",
+            Aspect::Wide => "wide",
+        }
+    }
+
     pub fn output_size(self) -> (u32, u32) {
         match self {
             Aspect::Story => (1080, 1920),
+            Aspect::Feed => (1080, 1350),
+            Aspect::Square => (1080, 1080),
+            Aspect::Wide => (1920, 1080),
         }
     }
 
@@ -49,6 +68,12 @@ impl Aspect {
             Aspect::Story => Insets {
                 top: 0.14,
                 bottom: 0.20,
+                left: 0.05,
+                right: 0.05,
+            },
+            Aspect::Feed | Aspect::Square | Aspect::Wide => Insets {
+                top: 0.05,
+                bottom: 0.05,
                 left: 0.05,
                 right: 0.05,
             },
@@ -244,6 +269,22 @@ mod tests {
         assert_eq!(Aspect::Story.framing(6).unwrap().width, 180);
         assert_eq!(Aspect::Story.framing(7), None);
         assert_eq!(Aspect::Story.framing(0), None);
+    }
+
+    #[test]
+    fn every_preset_divides_by_every_pixel_scale() {
+        for aspect in Aspect::ALL {
+            for scale in [2, 3, 5, 6, 10] {
+                let framing = aspect.framing(scale).unwrap();
+                let (width, height) = aspect.output_size();
+                assert_eq!(
+                    (framing.width * scale, framing.height * scale),
+                    (width, height)
+                );
+            }
+        }
+        assert_eq!(Aspect::Wide.framing(3).unwrap().width, 640);
+        assert_eq!(Aspect::Feed.framing(3).unwrap().height, 450);
     }
 
     #[test]
