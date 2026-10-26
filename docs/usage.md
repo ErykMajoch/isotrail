@@ -2,7 +2,7 @@
 
 isotrail has five commands. Each one prints its options with `--help`, for example `isotrail render --help`. The global flag `-v` (repeatable, up to `-vvv`) shows more log output.
 
-- [`render`](#render): render a hike as a PNG
+- [`render`](#render): render a hike as a PNG or an animated GIF
 - [`bundle`](#bundle): save a hike's scene as a `.itb` file
 - [`stats`](#stats): print a hike's statistics
 - [`style-lab`](#style-lab): compare every look on one contact sheet
@@ -16,15 +16,15 @@ isotrail reads GPX 1.0 and 1.1 files, with tracks (`<trk>`) or routes (`<rte>`).
 isotrail render <hike.gpx | hike.itb> [options]
 ```
 
-Renders the hike as a PNG. A GPX file is first prepared in the same way as [`bundle`](#bundle), with the same data options. A scene bundle is rendered as it is, without the network.
+Renders the hike as a PNG, or as an animated GIF when the output name ends in `.gif`. A GPX file is first prepared in the same way as [`bundle`](#bundle), with the same data options. A scene bundle is rendered as it is, without the network.
 
-Without `-o`, the image is named after the input and written to the current directory. When you ask for several aspects, each file gets the aspect added to its name: `-o hike.png --aspect story,wide` writes `hike-story.png` and `hike-wide.png`.
+Without `-o`, the image is a PNG named after the input and written to the current directory. When you ask for several aspects, each file gets the aspect added to its name: `-o hike.png --aspect story,wide` writes `hike-story.png` and `hike-wide.png`.
 
 ### Image
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `-o, --output IMAGE` | `<input>.png` | Where to write the image. Only `.png` is supported so far |
+| `-o, --output FILE` | `<input>.png` | Where to write the image: `.png` for a still image, `.gif` for an [animation](#animation) |
 | `--aspect LIST` | `story` | One or more of `story` (1080 x 1920), `feed` (1080 x 1350), `square` (1080 x 1080) and `wide` (1920 x 1080), separated by commas |
 | `--scale N` | `3` | Output pixels per drawn pixel: `2`, `3`, `5`, `6` or `10`. Lower values give finer detail; higher values give chunkier pixels |
 | `--background VALUE` | `sky` | `sky` for a dithered gradient, `transparent` to place the diorama over a photo, or an exact colour such as `#1e2a33` to match a web page |
@@ -79,6 +79,22 @@ The data credit under the stats is required by the map and elevation data licenc
 ```text
 Credit for the caption: © OpenStreetMap contributors · Terrain Tiles (AWS)
 ```
+
+### Animation
+
+A `.gif` output renders an animation in three parts. It opens on the scene with only the start flag (the first 5%). Then the route draws itself with a marker at its head, while the elevation profile fills in and the stats count up (80%). It ends on the finished hike (15%). The camera starts turned away by `--orbit` and eases round to the same view as the PNG by the time the route reaches the finish.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--duration SECONDS` | `10s` | Length of the animation, from `1s` to `60s`, such as `8s` or `2.5` |
+| `--fps N` | `30` | Frames per second, up to `50` |
+| `--step-fps N` | off | Different images per second, fewer than `--fps`, for choppy, game-like motion |
+| `--orbit DEG` | `30` | How far the camera turns, from `0` (a still camera) to `360` (a full turn) |
+| `--pace distance\|time` | `distance` | Draw the route at an even speed, or follow the recorded times, so slow climbs take longer than quick descents. Stops, and nights between the days of a trek, are cut to a minute. Without timestamps, the route draws at an even speed |
+
+GIFs loop forever and use the render's palette, so `--palette none` can't be used with them. They are the same size as the PNG and store only what changes from one frame to the next. A turning camera changes nearly every pixel, so a 10-second story is several megabytes, while `--orbit 0` makes it a fraction of that.
+
+The animation options only apply to `.gif` output. PNG renders ignore them, so they can sit in a [config file](configuration.md) that you use for both.
 
 ### Data
 

@@ -4,6 +4,10 @@ All notable changes to `isotrail` are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **Animated GIFs:** `isotrail render hike.gpx -o hike.gif` renders a looping animation. The route draws itself with a marker at its head, the elevation profile fills in and the stats count up, while the camera eases round to the still image's view. `--duration`, `--fps`, `--step-fps`, `--orbit` and `--pace distance|time` control the motion, and time pacing cuts long stops short.
+
 ## [1.0.0] - 2026-10-25
 
 The first release: render any recorded hike as a pixel-art diorama PNG.

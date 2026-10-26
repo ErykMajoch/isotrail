@@ -167,6 +167,26 @@ impl StatKind {
         };
         Some(Stat::new(value, label))
     }
+
+    /// The stat part-way along the hike, with `walked` holding the figures
+    /// so far; speed and pace stay averaged over the whole hike. `None` when
+    /// [`StatKind::stat`] is
+    pub fn stat_walked(self, stats: &HikeStats, walked: &HikeStats, units: Units) -> Option<Stat> {
+        let total = self.stat(stats, units)?;
+        match self {
+            StatKind::Speed | StatKind::Pace => Some(total),
+            StatKind::Time => {
+                let moving = stats.moving_s.is_some_and(|s| s > 0);
+                let time = if moving {
+                    walked.moving_s
+                } else {
+                    walked.elapsed_s
+                };
+                Some(Stat::new(format_duration(time.unwrap_or(0)), total.label))
+            }
+            _ => self.stat(walked, units).or(Some(total)),
+        }
+    }
 }
 
 /// One decimal below 100, whole units above
@@ -292,6 +312,18 @@ struct Line {
     origin: IVec2,
     scale: u32,
     tone: Tone,
+    /// Index of the stat whose value this is
+    stat: Option<usize>,
+}
+
+/// Where a stat's value is centred, so a changing value keeps its place
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Slot {
+    left: i32,
+    width: i32,
+    baseline: i32,
+    large: u32,
+    small: u32,
 }
 
 /// Inclusive-exclusive pixel bounds
@@ -305,6 +337,7 @@ struct Rect {
 #[derive(Clone, Debug, Default)]
 struct Block {
     lines: Vec<Line>,
+    slots: Vec<Slot>,
     width: i32,
     height: i32,
 }
@@ -335,6 +368,7 @@ pub struct Overlays {
     style: OverlayStyle,
     panels: Vec<Rect>,
     lines: Vec<Line>,
+    slots: Vec<Slot>,
     strip: Option<Rect>,
     profile: Vec<f32>,
     /// Pixels the overlays take, counted from the frame's edges
@@ -365,6 +399,7 @@ impl Overlays {
             style: *style,
             panels: Vec::new(),
             lines: Vec::new(),
+            slots: Vec::new(),
             strip: None,
             profile: if text.profile.len() >= 2 {
                 text.profile.clone()
@@ -406,6 +441,29 @@ impl Overlays {
                 ..safe
             },
             ..self.framing
+        }
+    }
+
+    /// The same layout with other stat values, each centred where the laid
+    /// out one was, as when the stats count up during an animation
+    pub fn with_stats(&self, stats: &[Stat]) -> Overlays {
+        let mut placed = vec![false; self.slots.len()];
+        let mut lines = Vec::with_capacity(self.lines.len());
+        for line in &self.lines {
+            match line.stat {
+                None => lines.push(line.clone()),
+                Some(i) if !placed[i] => {
+                    placed[i] = true;
+                    if let Some(stat) = stats.get(i) {
+                        lines.extend(value_lines(&stat.value, &self.slots[i], i));
+                    }
+                }
+                Some(_) => {}
+            }
+        }
+        Overlays {
+            lines,
+            ..self.clone()
         }
     }
 
@@ -567,6 +625,11 @@ impl Overlays {
             origin: line.origin + at,
             ..line
         }));
+        self.slots.extend(block.slots.into_iter().map(|slot| Slot {
+            left: slot.left + at.x,
+            baseline: slot.baseline + at.y,
+            ..slot
+        }));
     }
 }
 
@@ -639,6 +702,7 @@ fn stack_lines(block: &[(String, u32, Tone)], small: u32) -> Block {
             origin: IVec2::new(-((line_width + 1) / 2), y - (BOX_TOP * scale) as i32),
             scale: *scale,
             tone: *tone,
+            stat: None,
         });
         bottom = y + (BOX_ROWS * scale) as i32;
         previous = Some(*tone);
@@ -646,6 +710,7 @@ fn stack_lines(block: &[(String, u32, Tone)], small: u32) -> Block {
     }
     Block {
         lines,
+        slots: Vec::new(),
         width,
         height: bottom,
     }
@@ -690,38 +755,54 @@ fn stats_block(stats: &[Stat], metrics: &Metrics, max_width: i32) -> Block {
     let width = total(&columns);
     let left = -((width + 1) / 2);
     let mut lines = Vec::new();
+    let mut slots = Vec::new();
     for (i, stat) in stats.iter().enumerate() {
         let (row, column) = (i / columns.len(), i % columns.len());
         let x = left + columns[..column].iter().map(|w| w + gap).sum::<i32>();
         let y = row as i32 * (cell_height + row_gap);
-        let centred = |width: i32| x + (columns[column] - width) / 2;
-        let (runs, value_width) = value_runs(&stat.value, large, small);
-        let value_x = centred(value_width);
-        let baseline = y + ((BASELINE - BOX_TOP) * large) as i32;
-        for (text, scale, offset) in runs {
-            lines.push(Line {
-                text,
-                origin: IVec2::new(value_x + offset, baseline - (BASELINE * scale) as i32),
-                scale,
-                tone: Tone::Text,
-            });
-        }
+        let slot = Slot {
+            left: x,
+            width: columns[column],
+            baseline: y + ((BASELINE - BOX_TOP) * large) as i32,
+            large,
+            small,
+        };
+        lines.extend(value_lines(&stat.value, &slot, i));
+        slots.push(slot);
         let label_y = y + (BOX_ROWS * large) as i32 + label_gap;
+        let label_width = font.width(&stat.label, small) as i32;
         lines.push(Line {
             text: stat.label.clone(),
             origin: IVec2::new(
-                centred(font.width(&stat.label, small) as i32),
+                x + (columns[column] - label_width) / 2,
                 label_y - (BOX_TOP * small) as i32,
             ),
             scale: small,
             tone: Tone::Subtext,
+            stat: None,
         });
     }
     Block {
         lines,
+        slots,
         width,
         height: rows * cell_height + (rows - 1) * row_gap,
     }
+}
+
+/// The value of stat `index`, centred in its slot
+fn value_lines(value: &str, slot: &Slot, index: usize) -> Vec<Line> {
+    let (runs, width) = value_runs(value, slot.large, slot.small);
+    let x = slot.left + (slot.width - width) / 2;
+    runs.into_iter()
+        .map(|(text, scale, offset)| Line {
+            text,
+            origin: IVec2::new(x + offset, slot.baseline - (BASELINE * scale) as i32),
+            scale,
+            tone: Tone::Text,
+            stat: Some(index),
+        })
+        .collect()
 }
 
 /// An area chart of the profile filling `rect` from its bottom, the walked
@@ -1506,5 +1587,70 @@ mod tests {
             assert!(palette.colours().contains(&[p[0], p[1], p[2]]), "{p:?}");
         }
         assert_eq!(frame.pixel(0, 0), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn counting_stats_keep_their_places_and_the_panels() {
+        let overlays = layout(&text("Ridge walk"));
+        assert_eq!(overlays.with_stats(&text("Ridge walk").stats), overlays);
+        let counting = overlays.with_stats(&[
+            Stat::new("0.0 km", "distance"),
+            Stat::new("12 m", "gain"),
+            Stat::new("0m", "time"),
+            Stat::new("980 m", "high point"),
+        ]);
+        assert_eq!(counting.panels, overlays.panels);
+        assert_eq!(counting.diorama_framing(), overlays.diorama_framing());
+        assert_eq!(
+            texts_of(&counting, Tone::Subtext),
+            texts_of(&overlays, Tone::Subtext)
+        );
+        let figures = |overlays: &Overlays, stat: usize| -> Vec<(String, IVec2)> {
+            overlays
+                .lines
+                .iter()
+                .filter(|line| line.stat == Some(stat))
+                .map(|line| (line.text.clone(), line.origin))
+                .collect()
+        };
+        let (before, after) = (figures(&overlays, 1), figures(&counting, 1));
+        assert_eq!(before[0].0, "846");
+        assert_eq!(after[0].0, "12");
+        // Narrower, so it moves right to stay centred on the same baseline
+        assert!(after[0].1.x > before[0].1.x);
+        assert_eq!(after[0].1.y, before[0].1.y);
+    }
+
+    #[test]
+    fn walked_stats_keep_speed_and_pace_whole() {
+        let stats = hike_stats();
+        let walked = HikeStats {
+            distance_m: 3_000.0,
+            gain_m: Some(100.0),
+            moving_s: Some(0),
+            ..hike_stats()
+        };
+        let value = |kind: StatKind| {
+            kind.stat_walked(&stats, &walked, Units::Metric)
+                .unwrap()
+                .value
+        };
+        assert_eq!(value(StatKind::Distance), "3.0 km");
+        assert_eq!(value(StatKind::Gain), "100 m");
+        assert_eq!(value(StatKind::Time), "0m");
+        assert_eq!(value(StatKind::Speed), "3.0 km/h");
+        assert_eq!(
+            value(StatKind::Pace),
+            StatKind::Pace.stat(&stats, Units::Metric).unwrap().value
+        );
+        let untimed = HikeStats {
+            moving_s: None,
+            elapsed_s: None,
+            ..hike_stats()
+        };
+        assert_eq!(
+            StatKind::Time.stat_walked(&untimed, &walked, Units::Metric),
+            None
+        );
     }
 }

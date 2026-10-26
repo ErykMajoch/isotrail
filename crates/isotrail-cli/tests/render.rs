@@ -7,7 +7,7 @@ use isotrail_geo::{
     Cache, CachedFetcher, Fetcher, Footprint, Grid, OVERPASS_URL, OverpassSource, RecordedFetcher,
     TerrariumSource, TileId,
 };
-use isotrail_testkit::{diorama_bundle, hike_bundle};
+use isotrail_testkit::{decode_gif, diorama_bundle, hike_bundle};
 use isotrail_track::{GpxReader, TrackReader};
 
 fn fixtures() -> PathBuf {
@@ -127,11 +127,78 @@ fn other_image_formats_are_refused_before_any_work() {
     let output = isotrail(
         &temp.path().join("cache"),
         temp.path(),
-        &["render", "missing.gpx", "-o", "hike.gif"],
+        &["render", "missing.gpx", "-o", "hike.mp4"],
     );
     assert!(!output.status.success());
     let stderr = text(&output.stderr);
-    assert!(stderr.contains("only .png output is supported"), "{stderr}");
+    assert!(
+        stderr.contains("only .png and .gif output are supported"),
+        "{stderr}"
+    );
+    assert!(!temp.path().join("hike.mp4").exists());
+}
+
+#[test]
+fn renders_an_animated_gif() {
+    let temp = with_hike();
+    let output = isotrail(
+        &temp.path().join("cache"),
+        temp.path(),
+        &[
+            "render",
+            "hike.itb",
+            "-o",
+            "hike.gif",
+            "--aspect",
+            "square",
+            "--scale",
+            "10",
+            "--duration",
+            "1s",
+            "--fps",
+            "5",
+            "--pace",
+            "time",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let stdout = text(&output.stdout);
+    assert!(
+        stdout.starts_with("Rendered 5 frames of 1080 × 1080 from 108 × 108 pixels\n"),
+        "{stdout}"
+    );
+    // The synthetic hike has no times to pace by
+    assert!(text(&output.stderr).contains("no times"));
+    let frames = decode_gif(&fs::read(temp.path().join("hike.gif")).unwrap());
+    assert_eq!(frames.len(), 5);
+    assert_eq!((frames[0].width, frames[0].height), (1080, 1080));
+    assert_eq!(frames.iter().map(|f| f.delay_cs).sum::<u16>(), 100);
+    assert_ne!(frames[0].rgba, frames[4].rgba);
+}
+
+#[test]
+fn animation_settings_are_checked_before_any_work() {
+    let temp = with_hike();
+    let refused = |args: &[&str]| {
+        let mut line = vec!["render", "hike.itb", "-o", "hike.gif"];
+        line.extend(args);
+        let output = isotrail(&temp.path().join("cache"), temp.path(), &line);
+        assert!(!output.status.success(), "{args:?}");
+        text(&output.stderr)
+    };
+    let stderr = refused(&["--fps", "12", "--step-fps", "20"]);
+    assert!(
+        stderr.contains("--step-fps 20 is more than --fps 12"),
+        "{stderr}"
+    );
+    let stderr = refused(&["--duration", "0.5s"]);
+    assert!(stderr.contains("between 1s and 60s"), "{stderr}");
+    let stderr = refused(&["--fps", "60"]);
+    assert!(stderr.contains("60"), "{stderr}");
+    let stderr = refused(&["--orbit", "400"]);
+    assert!(stderr.contains("between 0 and 360"), "{stderr}");
+    let stderr = refused(&["--palette", "none"]);
+    assert!(stderr.contains("GIF output needs a palette"), "{stderr}");
     assert!(!temp.path().join("hike.gif").exists());
 }
 

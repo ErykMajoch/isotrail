@@ -1,6 +1,7 @@
 //! The `isotrail` command-line tool: turns a recorded hike into a pixel-art
 //! diorama render
 
+mod animation;
 mod bundle;
 mod cache;
 mod config;
@@ -39,7 +40,7 @@ enum Command {
     /// a scene bundle (.itb)
     Bundle(bundle::BundleArgs),
     /// Render a GPX file or scene bundle as a diorama image
-    Render(render::RenderArgs),
+    Render(Box<render::RenderArgs>),
     /// Render a hike with every mesher, pixel scale and built-in palette, and
     /// lay the images out on a labelled contact sheet
     StyleLab(style_lab::StyleLabArgs),

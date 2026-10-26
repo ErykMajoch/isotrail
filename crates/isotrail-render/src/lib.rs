@@ -18,6 +18,7 @@ mod target;
 mod terrain;
 mod test_scene;
 mod text;
+mod timeline;
 
 pub use camera::{
     Aspect, Camera, DEFAULT_YAW_OFFSET_DEG, Framing, Insets, PITCH_DEG, route_heading, view_heading,
@@ -41,3 +42,7 @@ pub use target::{OffscreenTarget, TARGET_FORMAT};
 pub use terrain::{GpuMesh, SHADOW_MAP_SIZE, Scene, TerrainRenderer};
 pub use test_scene::draw_test_scene;
 pub use text::{PixelFont, TextEffect};
+pub use timeline::{
+    DEFAULT_DURATION_S, DEFAULT_FPS, DEFAULT_ORBIT_DEG, DRAW_SHARE, INTRO_SHARE, Moment, Motion,
+    Orbit, Pace, Timeline, Walk,
+};

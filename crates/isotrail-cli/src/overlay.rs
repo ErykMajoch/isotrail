@@ -1,8 +1,8 @@
 use anyhow::bail;
 use clap::{Args, ValueEnum};
-use isotrail_bundle::SceneBundle;
+use isotrail_bundle::{HikeStats, SceneBundle};
 use isotrail_render::{
-    DateFormat, OverlayStyle, OverlayText, PanelStyle, StatKind, Subtitle, TitleSize,
+    DateFormat, OverlayStyle, OverlayText, PanelStyle, Stat, StatKind, Subtitle, TitleSize,
 };
 use tracing::warn;
 
@@ -200,6 +200,19 @@ impl OverlayArgs {
             text.attribution = None;
         }
         Ok(text)
+    }
+
+    /// The stats of [`OverlayArgs::text`] part-way along the hike, with
+    /// `walked` holding the figures so far
+    pub fn walked_stats(&self, bundle: &SceneBundle, walked: &HikeStats) -> Vec<Stat> {
+        if !self.overlay.contains(&Part::Stats) {
+            return Vec::new();
+        }
+        let units = self.units.into();
+        self.stats
+            .iter()
+            .filter_map(|&stat| StatKind::from(stat).stat_walked(&bundle.meta.stats, walked, units))
+            .collect()
     }
 
     /// The data credit to put in the caption, when the image leaves it out

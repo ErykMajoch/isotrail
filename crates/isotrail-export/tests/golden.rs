@@ -1,11 +1,11 @@
 use isotrail_bundle::Units;
-use isotrail_export::{render_still, upscale};
+use isotrail_export::{ExportError, GifWriter, render_clip, render_still, upscale};
 use isotrail_render::{
     Aspect, Background, DEFAULT_PALETTE, DEFAULT_STATS, DEFAULT_YAW_OFFSET_DEG, DateFormat, Frame,
-    Gpu, Look, Mesher, OffscreenTarget, OverlayStyle, OverlayText, Overlays, Palette, SmoothMesher,
-    VoxelMesher, draw_test_scene,
+    Gpu, Look, Mesher, Motion, OffscreenTarget, OverlayStyle, OverlayText, Overlays, Pace, Palette,
+    SmoothMesher, Timeline, VoxelMesher, Walk, draw_test_scene,
 };
-use isotrail_testkit::{assert_golden, diorama_bundle, hike_bundle};
+use isotrail_testkit::{assert_golden, decode_gif, diorama_bundle, hike_bundle};
 
 #[test]
 fn test_scene_matches_golden() {
@@ -146,4 +146,73 @@ fn backgrounds_replace_only_the_sky() {
     assert_ne!(sky.pixel(90, 52), sky.pixel(90 % 4, 52));
     assert_eq!(transparent.pixel(90, 52), sky.pixel(90, 52));
     assert_eq!(flat.pixel(90, 52), sky.pixel(90, 52));
+}
+
+/// A one-second, seven-frame square clip of the synthetic hike, paced by its
+/// times, with the stats counting up, decoded back from the GIF
+#[test]
+fn animation_frames_match_goldens() {
+    let gpu = Gpu::headless().unwrap();
+    let mut bundle = hike_bundle();
+    // Ten minutes between points, with an hour's stop at the fourth
+    for (i, point) in bundle.route.points.iter_mut().enumerate() {
+        let stop = if i >= 4 { 3_600 } else { 0 };
+        point.time = Some(1_750_000_000 + i as i64 * 600 + stop);
+    }
+    let framing = Aspect::Square.framing(6).unwrap();
+    let units = Units::Metric;
+    let text = OverlayText::from_bundle(&bundle, units, &DEFAULT_STATS, DateFormat::Long);
+    let overlays = Overlays::layout(&text, &OverlayStyle::default(), &framing);
+    let look = Look::default();
+    let motion = Motion {
+        timeline: Timeline {
+            duration_s: 1.0,
+            fps: 7,
+            step_fps: None,
+        },
+        pace: Pace::Time,
+        ..Motion::default()
+    };
+    let walk = Walk::new(&bundle);
+    assert!(walk.is_timed());
+    let diorama = overlays.diorama_framing();
+    let mut gif = GifWriter::new(Vec::new(), diorama.width, diorama.height, 1, &look, 7).unwrap();
+    render_clip(
+        &gpu,
+        &bundle,
+        &VoxelMesher::default(),
+        &diorama,
+        &look,
+        &motion,
+        |moment, frame| -> Result<(), ExportError> {
+            let walked = walk.stats(moment.progress);
+            let stats: Vec<_> = DEFAULT_STATS
+                .iter()
+                .filter_map(|kind| kind.stat_walked(&bundle.meta.stats, &walked, units))
+                .collect();
+            let mut frame = frame.clone();
+            overlays
+                .with_stats(&stats)
+                .draw(&mut frame, look.palette.as_ref(), moment.progress);
+            gif.push(&frame)
+        },
+    )
+    .unwrap();
+    let frames = decode_gif(&gif.finish().unwrap());
+    assert_eq!(frames.len(), 7);
+    assert_eq!(
+        frames.iter().map(|f| u32::from(f.delay_cs)).sum::<u32>(),
+        100
+    );
+    // The last frame is in the hold
+    for (name, i) in [("first", 0), ("middle", 3), ("last", 6)] {
+        let frame = &frames[i];
+        assert_eq!((frame.width, frame.height), (180, 180));
+        assert_golden(
+            &format!("animation-{name}"),
+            frame.width,
+            frame.height,
+            &frame.rgba,
+        );
+    }
 }

@@ -7,6 +7,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+gif.workspace = true
+glam.workspace = true
 isotrail-bundle = { path = "../isotrail-bundle" }
 isotrail-render = { path = "../isotrail-render" }
 png.workspace = true

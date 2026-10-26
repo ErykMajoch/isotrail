@@ -109,6 +109,43 @@ impl Camera {
         points: impl IntoIterator<Item = Vec3>,
         framing: &Framing,
     ) -> Camera {
+        let fit = Fit::new(heading, points);
+        let per_pixel = fit.scale(framing);
+        fit.camera(framing, per_pixel, false)
+    }
+
+    /// Like [`Camera::diorama`] at a set `metres_per_px`, as an animation
+    /// keeps the same scale while it turns, and moved to whole internal
+    /// pixels so that the terrain doesn't shimmer
+    pub fn at_scale(
+        heading: f32,
+        points: impl IntoIterator<Item = Vec3>,
+        framing: &Framing,
+        metres_per_px: f32,
+    ) -> Camera {
+        Fit::new(heading, points).camera(framing, metres_per_px.max(f32::EPSILON), true)
+    }
+
+    /// The `metres_per_px` at which `points` fit the framing's safe area
+    /// from every one of `headings`
+    pub fn fit_scale(headings: &[f32], points: &[Vec3], framing: &Framing) -> f32 {
+        headings
+            .iter()
+            .map(|&heading| Fit::new(heading, points.iter().copied()).scale(framing))
+            .fold(f32::EPSILON, f32::max)
+    }
+}
+
+/// Points seen from a heading, in view space
+struct Fit {
+    view: Mat4,
+    forward: Vec3,
+    min: Vec3,
+    max: Vec3,
+}
+
+impl Fit {
+    fn new(heading: f32, points: impl IntoIterator<Item = Vec3>) -> Fit {
         let pitch = PITCH_DEG.to_radians();
         let forward = Vec3::new(
             heading.cos() * pitch.cos(),
@@ -125,21 +162,40 @@ impl Camera {
         if min.x > max.x {
             (min, max) = (Vec3::splat(-1.0), Vec3::ONE);
         }
+        Fit {
+            view,
+            forward,
+            min,
+            max,
+        }
+    }
 
+    fn scale(&self, framing: &Framing) -> f32 {
         let (width, height) = (framing.width as f32, framing.height as f32);
         let safe = framing.safe;
         let safe_width = width * (1.0 - safe.left - safe.right);
         let safe_height = height * (1.0 - safe.top - safe.bottom);
-        let extent = max - min;
-        let per_pixel = (extent.x / safe_width)
+        let extent = self.max - self.min;
+        (extent.x / safe_width)
             .max(extent.y / safe_height)
-            .max(f32::EPSILON);
+            .max(f32::EPSILON)
+    }
+
+    fn camera(&self, framing: &Framing, per_pixel: f32, snap: bool) -> Camera {
+        let (min, max) = (self.min, self.max);
+        let (width, height) = (framing.width as f32, framing.height as f32);
+        let safe = framing.safe;
+        let extent = max - min;
 
         // Pixel position of the safe area's centre, from the top-left corner
         let centre_x = width * (safe.left + (1.0 - safe.left - safe.right) / 2.0);
         let centre_y = height * (safe.top + (1.0 - safe.top - safe.bottom) / 2.0);
-        let left = (min.x + max.x) / 2.0 - centre_x * per_pixel;
-        let top = (min.y + max.y) / 2.0 + centre_y * per_pixel;
+        let mut left = (min.x + max.x) / 2.0 - centre_x * per_pixel;
+        let mut top = (min.y + max.y) / 2.0 + centre_y * per_pixel;
+        if snap {
+            left = (left / per_pixel).round() * per_pixel;
+            top = (top / per_pixel).round() * per_pixel;
+        }
         let depth_pad = extent.z * 0.01 + 1.0;
         // wgpu's clip space has y up and depth in [0, 1], like Direct3D
         let projection = proj::directx::orthographic(
@@ -151,8 +207,8 @@ impl Camera {
             -min.z + depth_pad,
         );
         Camera {
-            view_proj: projection * view,
-            forward,
+            view_proj: projection * self.view,
+            forward: self.forward,
             metres_per_px: per_pixel,
         }
     }
@@ -374,6 +430,52 @@ mod tests {
         // Up is up
         let up = pixel(Vec3::Z * 100.0) - pixel(Vec3::ZERO);
         assert!(up.x.abs() < 1e-3 && up.y < 0.0);
+    }
+
+    #[test]
+    fn one_scale_fits_every_heading() {
+        let grid = grid(200, 100, 30.0);
+        let framing = Aspect::Story.framing(3).unwrap();
+        let points = slab_corners(&grid, 800.0);
+        let headings = [0.2, 0.5, 0.9];
+        let scale = Camera::fit_scale(&headings, &points, &framing);
+        let fits: Vec<f32> = headings
+            .iter()
+            .map(|&h| Camera::diorama(h, points.clone(), &framing).metres_per_px)
+            .collect();
+        assert!(fits.iter().all(|&fit| fit <= scale));
+        assert!(fits.contains(&scale));
+    }
+
+    #[test]
+    fn fixed_scale_cameras_sit_on_whole_pixels() {
+        let grid = grid(200, 100, 30.0);
+        let framing = Aspect::Story.framing(3).unwrap();
+        let points = slab_corners(&grid, 800.0);
+        for heading in [0.1, 0.37, 1.3] {
+            let camera = Camera::at_scale(heading, points.clone(), &framing, 9.3);
+            assert_eq!(camera.metres_per_px, 9.3);
+            let origin = to_pixels(&camera, &framing, Vec3::ZERO);
+            assert!((origin.x - origin.x.round()).abs() < 1e-3, "{origin}");
+            assert!((origin.y - origin.y.round()).abs() < 1e-3, "{origin}");
+            // Still centred on the safe area, to within a pixel
+            let pixels: Vec<Vec3> = points
+                .iter()
+                .map(|&p| to_pixels(&camera, &framing, p))
+                .collect();
+            let (min, max) = pixels
+                .iter()
+                .fold((Vec3::INFINITY, Vec3::NEG_INFINITY), |(min, max), &p| {
+                    (min.min(p), max.max(p))
+                });
+            let centre = (min + max) / 2.0;
+            let safe = framing.safe;
+            let (w, h) = (framing.width as f32, framing.height as f32);
+            let safe_x = w * (safe.left + (1.0 - safe.left - safe.right) / 2.0);
+            let safe_y = h * (safe.top + (1.0 - safe.top - safe.bottom) / 2.0);
+            assert!((centre.x - safe_x).abs() <= 0.5 + 1e-3, "{centre}");
+            assert!((centre.y - safe_y).abs() <= 0.5 + 1e-3, "{centre}");
+        }
     }
 
     #[test]

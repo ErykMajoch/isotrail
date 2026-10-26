@@ -1,15 +1,19 @@
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
 use clap::{Args, ValueEnum};
 use isotrail_bundle::SceneBundle;
-use isotrail_export::{DEFAULT_SCALE, render_still, upscale, write_png};
-use isotrail_render::{
-    Aspect, Background, DEFAULT_PALETTE, DEFAULT_YAW_OFFSET_DEG, Gpu, Look, Mesher, Overlays,
-    Palette, SmoothMesher, VoxelMesher,
+use isotrail_export::{
+    DEFAULT_SCALE, ExportError, GifWriter, render_clip, render_still, upscale, write_png,
 };
-use tracing::info;
+use isotrail_render::{
+    Aspect, Background, DEFAULT_PALETTE, DEFAULT_YAW_OFFSET_DEG, Gpu, Look, Mesher, Motion,
+    Overlays, Pace, Palette, SmoothMesher, VoxelMesher, Walk,
+};
+use tracing::{info, warn};
 
+use crate::animation::AnimationArgs;
 use crate::bundle::DataArgs;
 use crate::overlay::OverlayArgs;
 
@@ -18,10 +22,10 @@ pub struct RenderArgs {
     /// GPX file or scene bundle (.itb) to render
     file: PathBuf,
 
-    /// Where to write the image (.png); defaults to the input's name in the
-    /// current directory. With several aspects, each name gets the aspect
-    /// added: hike-story.png, hike-feed.png
-    #[arg(short, long, value_name = "IMAGE")]
+    /// Where to write the image (.png) or animation (.gif); defaults to a
+    /// PNG named after the input in the current directory. With several
+    /// aspects, each name gets the aspect added: hike-story.png, hike-feed.png
+    #[arg(short, long, value_name = "FILE")]
     output: Option<PathBuf>,
 
     /// Image shapes to render: story (1080 × 1920), feed (1080 × 1350),
@@ -72,6 +76,9 @@ pub struct RenderArgs {
     overlay: OverlayArgs,
 
     #[command(flatten)]
+    animation: AnimationArgs,
+
+    #[command(flatten)]
     data: DataArgs,
 }
 
@@ -79,6 +86,12 @@ pub struct RenderArgs {
 enum MesherArg {
     Voxel,
     Smooth,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Format {
+    Png,
+    Gif,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -191,13 +204,20 @@ fn parse_block_height(value: &str) -> Result<f32, String> {
 
 pub fn run(args: &RenderArgs) -> anyhow::Result<()> {
     let aspects = args.aspects()?;
-    let outputs = output_paths(&args.file, args.output.as_deref(), &aspects)?;
+    let (outputs, format) = output_paths(&args.file, args.output.as_deref(), &aspects)?;
+    let motion = match format {
+        Format::Png => None,
+        Format::Gif => Some(args.animation.motion()?),
+    };
     let mesher = args.mesher()?;
     let look = Look {
         palette: read_palette(&args.palette)?,
         background: args.background,
         ..Look::default()
     };
+    if motion.is_some() && look.palette.is_none() {
+        return Err(ExportError::GifPalette.into());
+    }
     let mut bundle = read_scene(&args.file, &args.data)?;
     if let Some(exaggeration) = args.exaggeration {
         bundle.grid.exaggeration = exaggeration;
@@ -205,6 +225,9 @@ pub fn run(args: &RenderArgs) -> anyhow::Result<()> {
     info!(exaggeration = bundle.grid.exaggeration, "terrain");
     let text = args.overlay.text(&bundle)?;
     let style = args.overlay.style();
+    if motion.is_some_and(|motion| motion.pace == Pace::Time) && !Walk::new(&bundle).is_timed() {
+        warn!("the track has no times to pace the route by, so it draws at an even speed");
+    }
 
     let gpu = Gpu::headless()?;
     for (&aspect, output) in aspects.iter().zip(&outputs) {
@@ -212,30 +235,90 @@ pub fn run(args: &RenderArgs) -> anyhow::Result<()> {
             .framing(args.scale)
             .context("the pixel scale doesn't divide the image size")?;
         let overlays = Overlays::layout(&text, &style, &framing);
-        let mut frame = render_still(
-            &gpu,
-            &bundle,
-            mesher.as_ref(),
-            &overlays.diorama_framing(),
-            DEFAULT_YAW_OFFSET_DEG,
-            &look,
-        )?;
-        overlays.draw(&mut frame, look.palette.as_ref(), 1.0);
-        let frame = upscale(&frame, args.scale)?;
-        write_png(output, &frame)?;
-        println!(
-            "Rendered {} × {} from {} × {} pixels",
-            frame.width(),
-            frame.height(),
-            framing.width,
-            framing.height
+        let (width, height) = (framing.width * args.scale, framing.height * args.scale);
+        let size = format!(
+            "{width} × {height} from {} × {} pixels",
+            framing.width, framing.height
         );
+        if let Some(motion) = &motion {
+            let clip = Clip {
+                gpu: &gpu,
+                bundle: &bundle,
+                mesher: mesher.as_ref(),
+                overlays: &overlays,
+                look: &look,
+                motion,
+            };
+            let frames = write_gif(args, &clip, output)
+                .with_context(|| format!("could not write {}", output.display()))?;
+            println!("Rendered {frames} frames of {size}");
+        } else {
+            let mut frame = render_still(
+                &gpu,
+                &bundle,
+                mesher.as_ref(),
+                &overlays.diorama_framing(),
+                DEFAULT_YAW_OFFSET_DEG,
+                &look,
+            )?;
+            overlays.draw(&mut frame, look.palette.as_ref(), 1.0);
+            write_png(output, &upscale(&frame, args.scale)?)?;
+            println!("Rendered {size}");
+        }
         println!("Wrote {}", output.display());
     }
     if let Some(credit) = args.overlay.caption_credit(&bundle) {
         println!("Credit for the caption: {credit}");
     }
     Ok(())
+}
+
+struct Clip<'a> {
+    gpu: &'a Gpu,
+    bundle: &'a SceneBundle,
+    mesher: &'a dyn Mesher,
+    overlays: &'a Overlays,
+    look: &'a Look,
+    motion: &'a Motion,
+}
+
+/// Renders the animation with its stats counting up, and returns how many
+/// frames it has
+fn write_gif(args: &RenderArgs, clip: &Clip, output: &Path) -> anyhow::Result<u32> {
+    let framing = clip.overlays.diorama_framing();
+    let walk = Walk::new(clip.bundle);
+    let palette = clip.look.palette.as_ref();
+    let fps = clip.motion.timeline.fps;
+    let mut gif = GifWriter::create(
+        output,
+        framing.width,
+        framing.height,
+        args.scale,
+        clip.look,
+        fps,
+    )?;
+    let mut frames = 0;
+    render_clip(
+        clip.gpu,
+        clip.bundle,
+        clip.mesher,
+        &framing,
+        clip.look,
+        clip.motion,
+        |moment, frame| -> anyhow::Result<()> {
+            let mut frame = frame.clone();
+            let walked = walk.stats(moment.progress);
+            let stats = args.overlay.walked_stats(clip.bundle, &walked);
+            clip.overlays
+                .with_stats(&stats)
+                .draw(&mut frame, palette, moment.progress);
+            gif.push(&frame)?;
+            frames += 1;
+            Ok(())
+        },
+    )?;
+    gif.finish()?.flush()?;
+    Ok(frames)
 }
 
 pub(crate) fn read_scene(path: &Path, data: &DataArgs) -> anyhow::Result<SceneBundle> {
@@ -247,12 +330,13 @@ pub(crate) fn read_scene(path: &Path, data: &DataArgs) -> anyhow::Result<SceneBu
     Ok(crate::bundle::prepare(path, data)?.bundle)
 }
 
-/// One image per aspect, named after the aspect when there are several
+/// One file per aspect, named after the aspect when there are several, and
+/// the format their extension asks for
 fn output_paths(
     input: &Path,
     output: Option<&Path>,
     aspects: &[Aspect],
-) -> anyhow::Result<Vec<PathBuf>> {
+) -> anyhow::Result<(Vec<PathBuf>, Format)> {
     let output = match output {
         Some(path) => path.to_owned(),
         None => {
@@ -264,30 +348,33 @@ fn output_paths(
             PathBuf::from(name)
         }
     };
-    let Some(extension) = output
-        .extension()
-        .filter(|ext| ext.eq_ignore_ascii_case("png"))
-    else {
+    let extension = output.extension().unwrap_or_default().to_owned();
+    let format = if extension.eq_ignore_ascii_case("png") {
+        Format::Png
+    } else if extension.eq_ignore_ascii_case("gif") {
+        Format::Gif
+    } else {
         bail!(
-            "cannot write {}: only .png output is supported so far",
+            "cannot write {}: only .png and .gif output are supported so far",
             output.display()
         );
     };
     if aspects.len() == 1 {
-        return Ok(vec![output]);
+        return Ok((vec![output], format));
     }
     let stem = output
         .file_stem()
         .with_context(|| format!("{} has no file name", output.display()))?;
-    Ok(aspects
+    let paths = aspects
         .iter()
         .map(|aspect| {
             let mut name = stem.to_owned();
             name.push(format!("-{}.", aspect.name()));
-            name.push(extension);
+            name.push(&extension);
             output.with_file_name(name)
         })
-        .collect())
+        .collect();
+    Ok((paths, format))
 }
 
 #[cfg(test)]
@@ -295,7 +382,7 @@ mod tests {
     use super::*;
 
     fn output_path(input: &Path, output: Option<&Path>) -> anyhow::Result<PathBuf> {
-        Ok(output_paths(input, output, &[Aspect::Story])?.remove(0))
+        Ok(output_paths(input, output, &[Aspect::Story])?.0.remove(0))
     }
 
     #[test]
@@ -310,7 +397,8 @@ mod tests {
     fn several_aspects_name_their_images() {
         let aspects = [Aspect::Story, Aspect::Wide];
         let output = Some(Path::new("out/a.v2.PNG"));
-        let paths = output_paths(Path::new("hike.gpx"), output, &aspects).unwrap();
+        let (paths, format) = output_paths(Path::new("hike.gpx"), output, &aspects).unwrap();
+        assert_eq!(format, Format::Png);
         assert_eq!(
             paths,
             [
@@ -318,7 +406,7 @@ mod tests {
                 Path::new("out/a.v2-wide.PNG")
             ]
         );
-        let paths = output_paths(Path::new("hikes/ridge.itb"), None, &aspects).unwrap();
+        let (paths, _) = output_paths(Path::new("hikes/ridge.itb"), None, &aspects).unwrap();
         assert_eq!(
             paths,
             [Path::new("ridge-story.png"), Path::new("ridge-wide.png")]
@@ -345,14 +433,17 @@ mod tests {
     }
 
     #[test]
-    fn only_png_output_is_accepted() {
+    fn png_and_gif_output_are_accepted() {
         let input = Path::new("hike.gpx");
-        assert!(output_path(input, Some(Path::new("out/a.PNG"))).is_ok());
-        for bad in ["a.gif", "a.mp4", "a"] {
-            let message = output_path(input, Some(Path::new(bad)))
-                .unwrap_err()
-                .to_string();
-            assert!(message.contains("only .png"), "{message}");
+        let format = |output: &str| output_paths(input, Some(Path::new(output)), &[Aspect::Feed]);
+        assert_eq!(format("out/a.PNG").unwrap().1, Format::Png);
+        assert_eq!(format("a.gif").unwrap().1, Format::Gif);
+        let aspects = [Aspect::Story, Aspect::Wide];
+        let (paths, _) = output_paths(input, Some(Path::new("a.Gif")), &aspects).unwrap();
+        assert_eq!(paths, [Path::new("a-story.Gif"), Path::new("a-wide.Gif")]);
+        for bad in ["a.mp4", "a"] {
+            let message = format(bad).unwrap_err().to_string();
+            assert!(message.contains("only .png and .gif"), "{message}");
         }
     }
 }

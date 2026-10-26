@@ -34,6 +34,12 @@ The scene is drawn with [wgpu](https://wgpu.rs/) at a small internal resolution:
 7. **Text.** The title, date, stats and elevation profile are drawn in the [monogram](https://datagoblin.itch.io/monogram) pixel font, on frosted panels that blur and tint the scene behind them. The panels are laid out around Instagram's interface.
 8. **Enlarge.** The frame is scaled up by a whole number without smoothing, so every drawn pixel becomes a crisp square.
 
+## Animation
+
+An animation renders the same scene once per frame. The mesh, trees and route are built once, and the camera keeps one scale for the whole clip, wide enough to fit the slab from every angle of its turn, so the diorama never grows or shrinks. The camera's position is rounded to whole pixels, so the terrain doesn't shimmer as it moves.
+
+Each frame draws the route up to a point: by distance, or by the recorded time with long stops cut short (`--pace time`). The same point fills the profile and sets the stats, which count up from what the hike had covered so far. The finished frames are written to the GIF one by one, each keeping only the area that changed since the frame before. Frames that look the same as the one before are merged into one longer frame.
+
 ## Styles
 
 The meshers and palettes can be mixed freely. `isotrail style-lab` renders every combination for your hike on one contact sheet.
