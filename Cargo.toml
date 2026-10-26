@@ -14,6 +14,7 @@ bytemuck = { version = "1.25.2", features = ["derive"] }
 chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 chrono-tz = "0.10.4"
 clap = { version = "4.6.7", features = ["derive", "env"] }
+console_error_panic_hook = "0.1.7"
 directories = "6.0.0"
 geo = { version = "0.33.1", default-features = false }
 gif = { version = "0.14.2", default-features = false, features = ["raii_no_panic", "std"] }
@@ -33,6 +34,9 @@ toml = "1.1.6"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["ansi", "fmt", "std"] }
 tzf-rs = { version = "2.1.3", default-features = false, features = ["bundled"] }
+wasm-bindgen = "0.2.129"
+wasm-bindgen-futures = "0.4.79"
+web-sys = "0.3.106"
 wgpu = "30.0.1"
 
 [workspace.lints.rust]

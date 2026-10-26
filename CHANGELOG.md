@@ -4,6 +4,10 @@ All notable changes to `isotrail` are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **Renderer in the browser:** the renderer compiles to WebAssembly and draws a scene bundle into a canvas, on WebGPU with a WebGL2 fallback. A JavaScript API sets the route's progress and the viewing angle, and a demo page in `web/demo/` shows it working. See [`web/README.md`](web/README.md).
+
 ## [1.1.0] - 2026-10-26
 
 Hikes come to life: render any hike as a looping GIF or an MP4 video for stories.

@@ -19,6 +19,10 @@ wgpu.workspace = true
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 pollster.workspace = true
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { workspace = true, features = ["HtmlCanvasElement"] }
+wgpu = { workspace = true, features = ["webgl"] }
+
 [dev-dependencies]
 isotrail-testkit = { path = "../isotrail-testkit" }
 

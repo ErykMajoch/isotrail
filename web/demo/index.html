@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>isotrail renderer demo</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f4f1ea;
+      --fg: #202e37;
+      --muted: #577277;
+      --panel: #ffffff;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #151d24;
+        --fg: #ebede9;
+        --muted: #a4dddb;
+        --panel: #202e37;
+      }
+    }
+    body {
+      margin: 0;
+      padding: 24px 16px;
+      background: var(--bg);
+      color: var(--fg);
+      font: 15px/1.5 system-ui, sans-serif;
+    }
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+    }
+    h1 {
+      font-size: 20px;
+      margin: 0 0 4px;
+    }
+    p {
+      margin: 0 0 16px;
+      color: var(--muted);
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: var(--panel);
+      border-radius: 6px;
+    }
+    form {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 8px 16px;
+      align-items: center;
+      margin-top: 16px;
+    }
+    input[type="range"] {
+      width: 100%;
+    }
+    output {
+      font-variant-numeric: tabular-nums;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>isotrail renderer demo</h1>
+    <p id="status" role="status">Loading…</p>
+    <canvas aria-label="Diorama of a synthetic hike"></canvas>
+    <form>
+      <label for="progress">Route</label>
+      <input id="progress" type="range" min="0" max="1000" value="1000">
+      <label for="yaw">Turn</label>
+      <input id="yaw" type="range" min="-180" max="180" value="0">
+      <label for="backend">Graphics</label>
+      <select id="backend">
+        <option value="auto">WebGPU, or WebGL2 without it</option>
+        <option value="webgl">WebGL2 only</option>
+      </select>
+    </form>
+  </main>
+  <script type="module" src="demo.js"></script>
+</body>
+</html>

@@ -51,6 +51,7 @@ jobs:
           path: target/golden-failures/
           if-no-files-found: ignore
 
-      - name: Check wasm32 build of wasm-safe crates
+      # Clippy rather than check, as the web crate's code only exists on wasm32
+      - name: Check wasm32 build of the wasm-safe and web crates
         if: runner.os == 'Linux'
-        run: cargo check --target wasm32-unknown-unknown -p isotrail-track -p isotrail-bundle -p isotrail-render
+        run: cargo clippy --target wasm32-unknown-unknown -p isotrail-track -p isotrail-bundle -p isotrail-render -p isotrail-web -- -D warnings

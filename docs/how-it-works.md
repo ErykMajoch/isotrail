@@ -40,6 +40,10 @@ An animation renders the same scene once per frame. The mesh, trees and route ar
 
 Each frame draws the route up to a point: by distance, or by the recorded time with long stops cut short (`--pace time`). The same point fills the profile and sets the stats, which count up from what the hike had covered so far. The finished frames are written to the GIF one by one, each keeping only the area that changed since the frame before. Frames that look the same as the one before are merged into one longer frame. For an MP4, each frame is enlarged to the full output size and piped to ffmpeg, which encodes it as H.264.
 
+## In the browser
+
+The same renderer compiles to WebAssembly and draws into a web page's canvas: with WebGPU where the browser has it, and WebGL2 otherwise. It loads a scene bundle, builds the mesh once, and redraws when the route's progress or the viewing angle changes. Its pixels are as large as keep the frame's long side within 640 pixels, matching a still at `--scale 3`, and one scale fits the slab from every angle, so the diorama can be turned all the way round. Building it is described in [`web/README.md`](../web/README.md).
+
 ## Styles
 
 The meshers and palettes can be mixed freely. `isotrail style-lab` renders every combination for your hike on one contact sheet.

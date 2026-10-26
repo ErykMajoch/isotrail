@@ -10,6 +10,12 @@ pub enum RenderError {
     #[error("no {mode} GPU adapter found; set ISOTRAIL_GPU=software to use a software renderer")]
     NoAdapter { mode: AdapterMode },
 
+    #[error("this browser offers neither WebGPU nor WebGL2")]
+    NoBrowserAdapter,
+
+    #[error("could not draw into the canvas")]
+    Surface(#[from] wgpu::CreateSurfaceError),
+
     #[error("could not open the GPU device")]
     Device(#[from] wgpu::RequestDeviceError),
 

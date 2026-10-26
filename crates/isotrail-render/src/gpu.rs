@@ -49,6 +49,7 @@ impl fmt::Display for AdapterMode {
 }
 
 pub struct Gpu {
+    adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
     adapter_info: wgpu::AdapterInfo,
@@ -58,7 +59,33 @@ impl Gpu {
     pub async fn new(mode: AdapterMode) -> Result<Self, RenderError> {
         let instance =
             wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-        let adapter = request_adapter(&instance, mode).await?;
+        let adapter = request_adapter(&instance, mode, None).await?;
+        Self::open(adapter).await
+    }
+
+    /// Opens the GPU that draws into `canvas`, on WebGPU where the browser
+    /// offers it and WebGL2 otherwise, or on WebGL2 alone with `webgl_only`
+    #[cfg(target_arch = "wasm32")]
+    pub async fn for_canvas(
+        canvas: web_sys::HtmlCanvasElement,
+        webgl_only: bool,
+    ) -> Result<(Self, wgpu::Surface<'static>), RenderError> {
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        descriptor.backends = if webgl_only {
+            wgpu::Backends::GL
+        } else {
+            wgpu::Backends::BROWSER_WEBGPU | wgpu::Backends::GL
+        };
+        let instance = wgpu::util::new_instance_with_webgpu_detection(descriptor).await;
+        // WebGL2 ties the adapter to the canvas, so the surface comes first
+        let surface = instance.create_surface(wgpu::SurfaceTarget::Canvas(canvas))?;
+        let adapter = request_adapter(&instance, AdapterMode::Auto, Some(&surface))
+            .await
+            .map_err(|_| RenderError::NoBrowserAdapter)?;
+        Ok((Self::open(adapter).await?, surface))
+    }
+
+    async fn open(adapter: wgpu::Adapter) -> Result<Self, RenderError> {
         let adapter_info = adapter.get_info();
         tracing::info!(
             adapter = %adapter_info.name,
@@ -69,12 +96,14 @@ impl Gpu {
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("isotrail"),
-                required_limits: wgpu::Limits::downlevel_defaults()
+                // The same limits everywhere, so native runs catch what WebGL2 can't do
+                required_limits: wgpu::Limits::downlevel_webgl2_defaults()
                     .using_resolution(adapter.limits()),
                 ..Default::default()
             })
             .await?;
         Ok(Self {
+            adapter,
             device,
             queue,
             adapter_info,
@@ -85,6 +114,10 @@ impl Gpu {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn headless() -> Result<Self, RenderError> {
         pollster::block_on(Self::new(AdapterMode::from_env()?))
+    }
+
+    pub fn adapter(&self) -> &wgpu::Adapter {
+        &self.adapter
     }
 
     pub fn device(&self) -> &wgpu::Device {
@@ -103,11 +136,13 @@ impl Gpu {
 async fn request_adapter(
     instance: &wgpu::Instance,
     mode: AdapterMode,
+    compatible_surface: Option<&wgpu::Surface<'_>>,
 ) -> Result<wgpu::Adapter, RenderError> {
     let request = |force_fallback_adapter| {
         instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             force_fallback_adapter,
+            compatible_surface,
             ..Default::default()
         })
     };

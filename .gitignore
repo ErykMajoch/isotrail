@@ -1,3 +1,5 @@
 /target
 /out/
 /input/
+/web/pkg/
+/web/demo/*.itb

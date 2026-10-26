@@ -27,10 +27,14 @@ struct Uniforms {
 @group(0) @binding(1) var colour_map: texture_2d<f32>;
 @group(0) @binding(2) var normal_map: texture_2d<f32>;
 @group(0) @binding(3) var id_map: texture_2d<u32>;
-@group(0) @binding(4) var depth_map: texture_depth_2d;
+// A plain float texture read through a nearest sampler: GLSL can't load
+// texels from depth textures, and WebGL2 reads zeros from one without a
+// sampler that turns filtering off
+@group(0) @binding(4) var depth_map: texture_2d<f32>;
 // 0 no route, 1 hidden, 2 visible
 @group(0) @binding(5) var route_map: texture_2d<u32>;
 @group(0) @binding(6) var sprite_map: texture_2d<f32>;
+@group(0) @binding(7) var depth_sampler: sampler;
 
 @vertex
 fn vs_main(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
@@ -51,7 +55,7 @@ fn load(pixel: vec2<i32>) -> Sample {
     var s: Sample;
     s.id = textureLoad(id_map, p, 0).r;
     s.normal = normalize(textureLoad(normal_map, p, 0).xyz * 2.0 - 1.0);
-    s.depth = textureLoad(depth_map, p, 0);
+    s.depth = textureSampleLevel(depth_map, depth_sampler, (vec2<f32>(p) + 0.5) / vec2<f32>(size), 0.0).r;
     let ndc = vec2<f32>(
         (f32(p.x) + 0.5) / f32(size.x) * 2.0 - 1.0,
         1.0 - (f32(p.y) + 0.5) / f32(size.y) * 2.0,

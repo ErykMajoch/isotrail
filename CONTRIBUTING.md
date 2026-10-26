@@ -25,7 +25,7 @@ The workspace is split into crates:
 | `isotrail-render` | The wgpu renderer. Meshers, camera, lighting, post-processing, text and overlays |
 | `isotrail-export` | Rendering frames without a window, and PNG, GIF and MP4 output |
 | `isotrail-cli` | The `isotrail` command |
-| `isotrail-web` | The future web embed |
+| `isotrail-web` | The WebAssembly build of the renderer for web pages ([`web/README.md`](web/README.md)) |
 | `isotrail-testkit` | Synthetic scenes, golden-image, GIF and video helpers for tests |
 
 `isotrail-track`, `isotrail-bundle` and `isotrail-render` must stay WebAssembly-safe, meaning no filesystem, network or threads.
@@ -38,8 +38,10 @@ Pull requests must pass the same checks as CI:
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-cargo check --target wasm32-unknown-unknown -p isotrail-track -p isotrail-bundle -p isotrail-render
+cargo clippy --target wasm32-unknown-unknown -p isotrail-track -p isotrail-bundle -p isotrail-render -p isotrail-web -- -D warnings
 ```
+
+The device limits are WebGL2's on every platform, so the native tests also catch anything the browser fallback couldn't draw.
 
 Please don't add real recordings to the repository.
 

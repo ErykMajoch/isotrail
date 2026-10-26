@@ -198,6 +198,7 @@ pub(crate) struct PostPass {
     device: wgpu::Device,
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
+    depth_sampler: wgpu::Sampler,
     sprites: SpriteAtlas,
 }
 
@@ -232,9 +233,15 @@ impl PostPass {
                 texture(1, unfiltered),
                 texture(2, unfiltered),
                 texture(3, wgpu::TextureSampleType::Uint),
-                texture(4, wgpu::TextureSampleType::Depth),
+                texture(4, unfiltered),
                 texture(5, wgpu::TextureSampleType::Uint),
                 texture(6, unfiltered),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -267,6 +274,10 @@ impl PostPass {
             device: device.clone(),
             pipeline,
             layout,
+            depth_sampler: device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("depth"),
+                ..Default::default()
+            }),
             sprites: SpriteAtlas::new(gpu),
         }
     }
@@ -358,6 +369,10 @@ impl PostPass {
                 view(4, &gbuffer.depth),
                 view(5, &gbuffer.route),
                 view(6, &self.sprites.view),
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::Sampler(&self.depth_sampler),
+                },
             ],
         });
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

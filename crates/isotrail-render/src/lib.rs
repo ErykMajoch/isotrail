@@ -4,6 +4,7 @@
 //! This crate is wasm-safe: no filesystem, network or thread access
 
 mod camera;
+mod diorama;
 mod error;
 mod frame;
 mod gpu;
@@ -12,6 +13,7 @@ mod mesh;
 mod overlay;
 mod palette;
 mod post;
+mod present;
 mod route;
 mod sprite;
 mod target;
@@ -23,7 +25,7 @@ mod timeline;
 pub use camera::{
     Aspect, Camera, DEFAULT_YAW_OFFSET_DEG, Framing, Insets, PITCH_DEG, route_heading, view_heading,
 };
-
+pub use diorama::Diorama;
 pub use error::RenderError;
 pub use frame::Frame;
 pub use gpu::{ADAPTER_ENV, AdapterMode, Gpu};
@@ -37,6 +39,7 @@ pub use overlay::{
 };
 pub use palette::{DEFAULT_PALETTE, MAX_COLOURS, Palette, PaletteError, srgb_to_oklab};
 pub use post::{Background, Edges, Look, RouteStyle, SKY_BOTTOM, SKY_TOP};
+pub use present::{MAX_CANVAS_FRAME_PX, PixelGrid, Present};
 pub use route::{RouteLine, RouteVertex};
 pub use target::{OffscreenTarget, TARGET_FORMAT};
 pub use terrain::{GpuMesh, SHADOW_MAP_SIZE, Scene, TerrainRenderer};
