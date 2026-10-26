@@ -17,6 +17,7 @@ thiserror.workspace = true
 [dev-dependencies]
 anyhow.workspace = true
 isotrail-testkit = { path = "../isotrail-testkit" }
+tempfile.workspace = true
 
 [lints]
 workspace = true

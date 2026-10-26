@@ -33,7 +33,7 @@
 - **Real terrain**: elevation from open terrain tiles, with forests, moorland, rock, lakes, rivers and paths from OpenStreetMap
 - **Diorama look**: stepped voxel or smooth low-poly terrain, layered cut faces, cel shading with shadows, and outlines
 - **Pixel-art finish**: every pixel snapped to a hand-made palette (three built in, or any Lospec `.hex` file)
-- **Animated**: looping GIFs where the route draws itself, the camera turns and the stats count up
+- **Animated**: looping GIFs and MP4 videos where the route draws itself, the camera turns and the stats count up
 - **Ready to share**: story, feed, square and wide presets, with the title, date, stats and elevation profile laid out around Instagram's interface
 - **Your style**: choose the stats, units, date format and panels, or use a transparent background to place the diorama over a photo
 - **Offline and repeatable**: map data is cached, and a scene bundle (`.itb`) re-renders a hike without the network
@@ -67,6 +67,8 @@ cargo install --git https://github.com/ErykMajoch/isotrail isotrail-cli
 
 `isotrail` renders on the GPU through Vulkan, Metal or Direct3D 12. When no GPU is available, it falls back to a software renderer. On Linux, this needs a Vulkan driver, such as `mesa-vulkan-drivers`.
 
+MP4 videos are encoded by [ffmpeg](https://ffmpeg.org/download.html), which needs to be on your `PATH` (`winget install Gyan.FFmpeg`, `brew install ffmpeg` or `sudo apt install ffmpeg`). PNGs and GIFs don't need it.
+
 ## Quick start
 
 Export your hike as a GPX file and run:
@@ -84,6 +86,9 @@ isotrail render hike.gpx --aspect story,feed,wide
 # An animated story: the route draws itself while the stats count up
 isotrail render hike.gpx -o hike.gif
 
+# The same as a video, ready to post as a story
+isotrail render hike.gpx -o hike.mp4
+
 # The diorama alone on a transparent background, to place over a photo
 isotrail render hike.gpx --background transparent --overlay none
 
@@ -99,7 +104,7 @@ isotrail render hike.itb --palette aap-64 --mesher smooth
 
 | Command | What it does |
 | --- | --- |
-| [`render`](docs/usage.md#render) | Render a GPX file or scene bundle as a PNG or an animated GIF |
+| [`render`](docs/usage.md#render) | Render a GPX file or scene bundle as a PNG, an animated GIF or an MP4 video |
 | [`bundle`](docs/usage.md#bundle) | Download the terrain around a route and save everything the render needs as a `.itb` file |
 | [`stats`](docs/usage.md#stats) | Print distance, elevation gain and loss, moving and elapsed time |
 | [`style-lab`](docs/usage.md#style-lab) | Render every mesher, pixel scale and palette on one contact sheet |
@@ -123,7 +128,6 @@ See [Configuration](docs/configuration.md) for file locations, precedence and en
 
 ## Roadmap
 
-- MP4 video for stories
 - An `<isotrail-hike>` web component to embed interactive dioramas on a static site
 - Lighting from the real time of day of the hike
 - Historical weather and a seasonal look

@@ -7,7 +7,7 @@ use isotrail_geo::{
     Cache, CachedFetcher, Fetcher, Footprint, Grid, OVERPASS_URL, OverpassSource, RecordedFetcher,
     TerrariumSource, TileId,
 };
-use isotrail_testkit::{decode_gif, diorama_bundle, hike_bundle};
+use isotrail_testkit::{decode_gif, diorama_bundle, has_ffmpeg, hike_bundle, probe_video};
 use isotrail_track::{GpxReader, TrackReader};
 
 fn fixtures() -> PathBuf {
@@ -127,15 +127,15 @@ fn other_image_formats_are_refused_before_any_work() {
     let output = isotrail(
         &temp.path().join("cache"),
         temp.path(),
-        &["render", "missing.gpx", "-o", "hike.mp4"],
+        &["render", "missing.gpx", "-o", "hike.webm"],
     );
     assert!(!output.status.success());
     let stderr = text(&output.stderr);
     assert!(
-        stderr.contains("only .png and .gif output are supported"),
+        stderr.contains("only .png, .gif and .mp4 output are supported"),
         "{stderr}"
     );
-    assert!(!temp.path().join("hike.mp4").exists());
+    assert!(!temp.path().join("hike.webm").exists());
 }
 
 #[test]
@@ -174,6 +174,73 @@ fn renders_an_animated_gif() {
     assert_eq!((frames[0].width, frames[0].height), (1080, 1080));
     assert_eq!(frames.iter().map(|f| f.delay_cs).sum::<u16>(), 100);
     assert_ne!(frames[0].rgba, frames[4].rgba);
+}
+
+#[test]
+fn renders_an_mp4() {
+    if !has_ffmpeg() {
+        return;
+    }
+    let temp = with_hike();
+    let output = isotrail(
+        &temp.path().join("cache"),
+        temp.path(),
+        &[
+            "render",
+            "hike.itb",
+            "-o",
+            "hike.mp4",
+            "--aspect",
+            "square",
+            "--scale",
+            "10",
+            "--duration",
+            "1s",
+            "--fps",
+            "5",
+            "--palette",
+            "none",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let stdout = text(&output.stdout);
+    assert!(
+        stdout.starts_with(
+            "Rendered 5 frames of 1080 × 1080 from 108 × 108 pixels
+"
+        ),
+        "{stdout}"
+    );
+    let info = probe_video(&temp.path().join("hike.mp4"));
+    assert_eq!(info.codec, "h264");
+    assert_eq!(info.pixel_format, "yuv420p");
+    assert_eq!((info.width, info.height), (1080, 1080));
+    assert_eq!(info.frames, 5);
+    assert_eq!(info.frame_rate, "5/1");
+}
+
+#[test]
+fn transparent_mp4s_are_refused_before_any_work() {
+    let temp = with_hike();
+    let output = isotrail(
+        &temp.path().join("cache"),
+        temp.path(),
+        &[
+            "render",
+            "hike.itb",
+            "-o",
+            "hike.mp4",
+            "--background",
+            "transparent",
+        ],
+    );
+    assert!(!output.status.success());
+    let stderr = text(&output.stderr);
+    assert!(
+        stderr.contains("MP4 output can't be transparent"),
+        "{stderr}"
+    );
+    assert!(!temp.path().join("hike.mp4").exists());
 }
 
 #[test]

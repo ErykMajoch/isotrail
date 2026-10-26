@@ -1170,6 +1170,7 @@ dependencies = [
  "isotrail-render",
  "isotrail-testkit",
  "png",
+ "tempfile",
  "thiserror",
 ]
 

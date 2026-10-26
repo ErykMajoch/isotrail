@@ -35,9 +35,10 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Install software Vulkan driver
+      # ffmpeg runs the MP4 tests, which pass with a note where it's missing
+      - name: Install software Vulkan driver and ffmpeg
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers ffmpeg
 
       - name: Test
         run: cargo test --workspace

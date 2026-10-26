@@ -14,7 +14,7 @@ date-format = "short"
 stats = ["distance", "gain", "elapsed"]
 no-attribution = true          # switches are true or false
 background = "#1e2a33"
-orbit = 0                      # animation settings only apply to .gif output
+orbit = 0                      # animation settings only apply to .gif and .mp4 output
 ```
 
 isotrail reads two files, if they exist:

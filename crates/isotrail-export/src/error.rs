@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::process::ExitStatus;
 
 /// Why a frame could not be exported
 #[derive(Debug, thiserror::Error)]
@@ -27,6 +28,22 @@ pub enum ExportError {
 
     #[error("a GIF can be at most 65535 pixels wide and high, not {width} × {height}")]
     GifSize { width: u32, height: u32 },
+
+    #[error(
+        "MP4 output needs ffmpeg, which wasn't found on PATH; install it from \
+         https://ffmpeg.org/download.html or with winget install Gyan.FFmpeg, \
+         brew install ffmpeg or sudo apt install ffmpeg"
+    )]
+    FfmpegMissing,
+
+    #[error("ffmpeg failed ({status}): {stderr}")]
+    Ffmpeg { status: ExitStatus, stderr: String },
+
+    #[error("an MP4 must be an even number of pixels wide and high, not {width} × {height}")]
+    Mp4Size { width: u32, height: u32 },
+
+    #[error("MP4 output can't be transparent; use --background sky or a colour such as #1e2a33")]
+    Mp4Transparent,
 
     #[error("expected a {} × {} frame, got {} × {}", expected.0, expected.1, actual.0, actual.1)]
     FrameSize {

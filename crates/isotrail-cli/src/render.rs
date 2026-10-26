@@ -1,14 +1,16 @@
-use std::io::Write;
+use std::fs::File;
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
 use clap::{Args, ValueEnum};
 use isotrail_bundle::SceneBundle;
 use isotrail_export::{
-    DEFAULT_SCALE, ExportError, GifWriter, render_clip, render_still, upscale, write_png,
+    DEFAULT_SCALE, ExportError, Ffmpeg, GifWriter, Mp4Writer, render_clip, render_still, upscale,
+    write_png,
 };
 use isotrail_render::{
-    Aspect, Background, DEFAULT_PALETTE, DEFAULT_YAW_OFFSET_DEG, Gpu, Look, Mesher, Motion,
+    Aspect, Background, DEFAULT_PALETTE, DEFAULT_YAW_OFFSET_DEG, Frame, Gpu, Look, Mesher, Motion,
     Overlays, Pace, Palette, SmoothMesher, VoxelMesher, Walk,
 };
 use tracing::{info, warn};
@@ -22,8 +24,8 @@ pub struct RenderArgs {
     /// GPX file or scene bundle (.itb) to render
     file: PathBuf,
 
-    /// Where to write the image (.png) or animation (.gif); defaults to a
-    /// PNG named after the input in the current directory. With several
+    /// Where to write the image (.png) or animation (.gif or .mp4); defaults
+    /// to a PNG named after the input in the current directory. With several
     /// aspects, each name gets the aspect added: hike-story.png, hike-feed.png
     #[arg(short, long, value_name = "FILE")]
     output: Option<PathBuf>,
@@ -92,6 +94,7 @@ enum MesherArg {
 enum Format {
     Png,
     Gif,
+    Mp4,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -207,7 +210,7 @@ pub fn run(args: &RenderArgs) -> anyhow::Result<()> {
     let (outputs, format) = output_paths(&args.file, args.output.as_deref(), &aspects)?;
     let motion = match format {
         Format::Png => None,
-        Format::Gif => Some(args.animation.motion()?),
+        Format::Gif | Format::Mp4 => Some(args.animation.motion()?),
     };
     let mesher = args.mesher()?;
     let look = Look {
@@ -215,9 +218,17 @@ pub fn run(args: &RenderArgs) -> anyhow::Result<()> {
         background: args.background,
         ..Look::default()
     };
-    if motion.is_some() && look.palette.is_none() {
+    if format == Format::Gif && look.palette.is_none() {
         return Err(ExportError::GifPalette.into());
     }
+    let ffmpeg = if format == Format::Mp4 {
+        if look.background == Background::Transparent {
+            return Err(ExportError::Mp4Transparent.into());
+        }
+        Some(Ffmpeg::find()?)
+    } else {
+        None
+    };
     let mut bundle = read_scene(&args.file, &args.data)?;
     if let Some(exaggeration) = args.exaggeration {
         bundle.grid.exaggeration = exaggeration;
@@ -249,7 +260,7 @@ pub fn run(args: &RenderArgs) -> anyhow::Result<()> {
                 look: &look,
                 motion,
             };
-            let frames = write_gif(args, &clip, output)
+            let frames = write_clip(args, &clip, output, ffmpeg.as_ref())
                 .with_context(|| format!("could not write {}", output.display()))?;
             println!("Rendered {frames} frames of {size}");
         } else {
@@ -282,21 +293,49 @@ struct Clip<'a> {
     motion: &'a Motion,
 }
 
-/// Renders the animation with its stats counting up, and returns how many
-/// frames it has
-fn write_gif(args: &RenderArgs, clip: &Clip, output: &Path) -> anyhow::Result<u32> {
+enum ClipWriter {
+    Gif(GifWriter<BufWriter<File>>),
+    Mp4(Mp4Writer),
+}
+
+impl ClipWriter {
+    fn push(&mut self, frame: &Frame) -> Result<(), ExportError> {
+        match self {
+            ClipWriter::Gif(gif) => gif.push(frame),
+            ClipWriter::Mp4(mp4) => mp4.push(frame),
+        }
+    }
+
+    fn finish(self) -> anyhow::Result<()> {
+        match self {
+            ClipWriter::Gif(gif) => gif.finish()?.flush()?,
+            ClipWriter::Mp4(mp4) => mp4.finish()?,
+        }
+        Ok(())
+    }
+}
+
+/// Renders the animation with its stats counting up, as an MP4 when given
+/// ffmpeg and a GIF otherwise, and returns how many frames it has
+fn write_clip(
+    args: &RenderArgs,
+    clip: &Clip,
+    output: &Path,
+    ffmpeg: Option<&Ffmpeg>,
+) -> anyhow::Result<u32> {
     let framing = clip.overlays.diorama_framing();
+    let (width, height) = (framing.width, framing.height);
+    let fps = clip.motion.timeline.fps;
+    let mut writer = match ffmpeg {
+        Some(ffmpeg) => ClipWriter::Mp4(Mp4Writer::create(
+            ffmpeg, output, width, height, args.scale, fps,
+        )?),
+        None => ClipWriter::Gif(GifWriter::create(
+            output, width, height, args.scale, clip.look, fps,
+        )?),
+    };
     let walk = Walk::new(clip.bundle);
     let palette = clip.look.palette.as_ref();
-    let fps = clip.motion.timeline.fps;
-    let mut gif = GifWriter::create(
-        output,
-        framing.width,
-        framing.height,
-        args.scale,
-        clip.look,
-        fps,
-    )?;
     let mut frames = 0;
     render_clip(
         clip.gpu,
@@ -312,12 +351,12 @@ fn write_gif(args: &RenderArgs, clip: &Clip, output: &Path) -> anyhow::Result<u3
             clip.overlays
                 .with_stats(&stats)
                 .draw(&mut frame, palette, moment.progress);
-            gif.push(&frame)?;
+            writer.push(&frame)?;
             frames += 1;
             Ok(())
         },
     )?;
-    gif.finish()?.flush()?;
+    writer.finish()?;
     Ok(frames)
 }
 
@@ -353,9 +392,11 @@ fn output_paths(
         Format::Png
     } else if extension.eq_ignore_ascii_case("gif") {
         Format::Gif
+    } else if extension.eq_ignore_ascii_case("mp4") {
+        Format::Mp4
     } else {
         bail!(
-            "cannot write {}: only .png and .gif output are supported so far",
+            "cannot write {}: only .png, .gif and .mp4 output are supported",
             output.display()
         );
     };
@@ -433,17 +474,18 @@ mod tests {
     }
 
     #[test]
-    fn png_and_gif_output_are_accepted() {
+    fn png_gif_and_mp4_output_are_accepted() {
         let input = Path::new("hike.gpx");
         let format = |output: &str| output_paths(input, Some(Path::new(output)), &[Aspect::Feed]);
         assert_eq!(format("out/a.PNG").unwrap().1, Format::Png);
         assert_eq!(format("a.gif").unwrap().1, Format::Gif);
+        assert_eq!(format("a.MP4").unwrap().1, Format::Mp4);
         let aspects = [Aspect::Story, Aspect::Wide];
         let (paths, _) = output_paths(input, Some(Path::new("a.Gif")), &aspects).unwrap();
         assert_eq!(paths, [Path::new("a-story.Gif"), Path::new("a-wide.Gif")]);
-        for bad in ["a.mp4", "a"] {
+        for bad in ["a.webm", "a"] {
             let message = format(bad).unwrap_err().to_string();
-            assert!(message.contains("only .png and .gif"), "{message}");
+            assert!(message.contains("only .png, .gif and .mp4"), "{message}");
         }
     }
 }

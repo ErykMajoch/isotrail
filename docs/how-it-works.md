@@ -38,7 +38,7 @@ The scene is drawn with [wgpu](https://wgpu.rs/) at a small internal resolution:
 
 An animation renders the same scene once per frame. The mesh, trees and route are built once, and the camera keeps one scale for the whole clip, wide enough to fit the slab from every angle of its turn, so the diorama never grows or shrinks. The camera's position is rounded to whole pixels, so the terrain doesn't shimmer as it moves.
 
-Each frame draws the route up to a point: by distance, or by the recorded time with long stops cut short (`--pace time`). The same point fills the profile and sets the stats, which count up from what the hike had covered so far. The finished frames are written to the GIF one by one, each keeping only the area that changed since the frame before. Frames that look the same as the one before are merged into one longer frame.
+Each frame draws the route up to a point: by distance, or by the recorded time with long stops cut short (`--pace time`). The same point fills the profile and sets the stats, which count up from what the hike had covered so far. The finished frames are written to the GIF one by one, each keeping only the area that changed since the frame before. Frames that look the same as the one before are merged into one longer frame. For an MP4, each frame is enlarged to the full output size and piped to ffmpeg, which encodes it as H.264.
 
 ## Styles
 

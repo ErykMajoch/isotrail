@@ -1,5 +1,6 @@
 //! Test helpers for isotrail: golden-image comparison with a tolerance, GIF
-//! decoding, and synthetic scene bundles built in code
+//! decoding, video probing with ffmpeg, and synthetic scene bundles built in
+//! code
 //!
 //! Goldens live in `fixtures/golden/<name>.png`. Run the tests with
 //! `UPDATE_GOLDENS=1` to create or refresh them. When a comparison fails, the
@@ -8,6 +9,7 @@
 
 mod gif;
 mod scene;
+mod video;
 
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter};
@@ -15,6 +17,7 @@ use std::path::{Path, PathBuf};
 
 pub use gif::{GifFrame, decode_gif};
 pub use scene::{bundle, diorama_bundle, grid, hike_bundle};
+pub use video::{VideoInfo, first_video_frame, has_ffmpeg, probe_video};
 
 pub const UPDATE_ENV: &str = "UPDATE_GOLDENS";
 

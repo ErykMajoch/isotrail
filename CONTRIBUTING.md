@@ -23,10 +23,10 @@ The workspace is split into crates:
 | `isotrail-bundle` | The scene bundle (`.itb`) types and file format |
 | `isotrail-geo` | Projection, slab and grid, elevation and OpenStreetMap sources, landcover, caching |
 | `isotrail-render` | The wgpu renderer. Meshers, camera, lighting, post-processing, text and overlays |
-| `isotrail-export` | Rendering frames without a window and PNG output |
+| `isotrail-export` | Rendering frames without a window, and PNG, GIF and MP4 output |
 | `isotrail-cli` | The `isotrail` command |
 | `isotrail-web` | The future web embed |
-| `isotrail-testkit` | Synthetic scenes and golden-image helpers for tests |
+| `isotrail-testkit` | Synthetic scenes, golden-image, GIF and video helpers for tests |
 
 `isotrail-track`, `isotrail-bundle` and `isotrail-render` must stay WebAssembly-safe, meaning no filesystem, network or threads.
 
@@ -52,3 +52,5 @@ Render tests compare their output with golden images in `fixtures/golden/`, and 
 ```bash
 UPDATE_GOLDENS=1 cargo test
 ```
+
+The MP4 tests need `ffmpeg` and `ffprobe` on your `PATH`. Without them, they print a note and pass. CI installs ffmpeg on Linux.
