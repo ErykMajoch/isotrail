@@ -11,7 +11,7 @@ body:
     attributes:
       label: isotrail version
       description: The output of `isotrail --version`
-      placeholder: isotrail 1.0.0
+      placeholder: isotrail 1.1.0
     validations:
       required: true
   - type: dropdown

@@ -4,6 +4,10 @@ All notable changes to `isotrail` are documented here.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-26
+
+Hikes come to life: render any hike as a looping GIF or an MP4 video for stories.
+
 ### Added
 
 - **Animated GIFs:** `isotrail render hike.gpx -o hike.gif` renders a looping animation. The route draws itself with a marker at its head, the elevation profile fills in and the stats count up, while the camera eases round to the still image's view. `--duration`, `--fps`, `--step-fps`, `--orbit` and `--pace distance|time` control the motion, and time pacing cuts long stops short.
@@ -29,5 +33,6 @@ The first release: render any recorded hike as a pixel-art diorama PNG.
 - **Style lab:** `isotrail style-lab` renders every mesher, scale and palette on one labelled contact sheet.
 - Prebuilt binaries for Windows, Linux and macOS.
 
-[Unreleased]: https://github.com/ErykMajoch/isotrail/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/ErykMajoch/isotrail/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/ErykMajoch/isotrail/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/ErykMajoch/isotrail/releases/tag/v1.0.0
