@@ -4,8 +4,8 @@ use glam::Vec3;
 use isotrail_bundle::SceneBundle;
 
 use crate::{
-    Camera, DEFAULT_YAW_OFFSET_DEG, Framing, Gpu, GpuMesh, Look, OffscreenTarget, RouteLine, Scene,
-    SunState, TerrainMesh, TerrainRenderer, view_heading,
+    DEFAULT_YAW_OFFSET_DEG, Framing, Gpu, GpuMesh, Look, OffscreenTarget, RouteLine, Scene,
+    SunState, TerrainMesh, TerrainRenderer, Turntable, View, view_heading,
 };
 
 /// A bundle's terrain and route on the GPU, at one scale that fits the slab
@@ -13,11 +13,8 @@ use crate::{
 /// changing size
 pub struct Diorama {
     mesh: GpuMesh,
-    outline: Vec<Vec3>,
     route: RouteLine,
-    framing: Framing,
-    metres_per_px: f32,
-    heading: f32,
+    turntable: Turntable,
     sun: SunState,
 }
 
@@ -34,43 +31,35 @@ impl Diorama {
     ) -> Diorama {
         let outline = outline(&mesh, bundle.grid.cell_size_m as f32);
         let heading = view_heading(bundle, DEFAULT_YAW_OFFSET_DEG);
-        let mut headings: Vec<f32> = yaw_offsets_deg
-            .iter()
-            .map(|offset| heading + offset.to_radians())
-            .collect();
-        headings.dedup();
-        let metres_per_px = Camera::fit_scale(&headings, &outline, framing);
+        let turntable = Turntable::new(heading, outline, framing, yaw_offsets_deg);
+        let metres_per_px = turntable.metres_per_px();
         mesh.add_props(bundle, metres_per_px);
         // About one point per internal pixel
         let route = RouteLine::drape(bundle, &mesh.surface, metres_per_px / 2.0);
         Diorama {
             mesh: renderer.upload(gpu, &mesh),
-            outline,
             route,
-            framing: *framing,
-            metres_per_px,
-            heading,
+            turntable,
             sun: SunState::late_morning(&bundle.grid),
         }
     }
 
-    /// Draws the diorama turned `yaw_offset_deg` from the still's view, with
-    /// `progress` of the route walked, into a target of the framing's size
+    pub fn turntable(&self) -> &Turntable {
+        &self.turntable
+    }
+
+    /// Draws the diorama as `view` shows it, with `progress` of the route
+    /// walked, into a target of the framing's size
     pub fn draw(
         &self,
         gpu: &Gpu,
         renderer: &TerrainRenderer,
         target: &OffscreenTarget,
-        yaw_offset_deg: f32,
+        view: &View,
         progress: f32,
         look: &Look,
     ) {
-        let camera = Camera::at_scale(
-            self.heading + yaw_offset_deg.to_radians(),
-            self.outline.iter().copied(),
-            &self.framing,
-            self.metres_per_px,
-        );
+        let camera = self.turntable.camera(view);
         let scene = Scene {
             mesh: &self.mesh,
             route: Some(&self.route),

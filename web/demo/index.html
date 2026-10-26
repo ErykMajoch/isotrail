@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>isotrail renderer demo</title>
+  <title>isotrail embed demo</title>
   <link rel="icon" href="data:,">
   <style>
     :root {
@@ -11,19 +11,17 @@
       --bg: #f4f1ea;
       --fg: #202e37;
       --muted: #577277;
-      --panel: #ffffff;
     }
     @media (prefers-color-scheme: dark) {
       :root {
         --bg: #151d24;
         --fg: #ebede9;
         --muted: #a4dddb;
-        --panel: #202e37;
       }
     }
     body {
       margin: 0;
-      padding: 24px 16px;
+      padding: 24px 16px 48px;
       background: var(--bg);
       color: var(--fg);
       font: 15px/1.5 system-ui, sans-serif;
@@ -36,49 +34,43 @@
       font-size: 20px;
       margin: 0 0 4px;
     }
+    h2 {
+      font-size: 16px;
+      margin: 32px 0 8px;
+    }
     p {
       margin: 0 0 16px;
       color: var(--muted);
     }
-    canvas {
-      display: block;
-      width: 100%;
-      aspect-ratio: 16 / 9;
-      background: var(--panel);
+    a {
+      color: inherit;
+    }
+    isotrail-hike {
       border-radius: 6px;
     }
-    form {
-      display: grid;
-      grid-template-columns: auto 1fr;
-      gap: 8px 16px;
-      align-items: center;
-      margin-top: 16px;
-    }
-    input[type="range"] {
-      width: 100%;
-    }
-    output {
-      font-variant-numeric: tabular-nums;
+    .square {
+      max-width: 420px;
     }
   </style>
+  <script type="module" src="demo.js"></script>
+  <script type="module" src="../isotrail-embed.js"></script>
 </head>
 <body>
   <main>
-    <h1>isotrail renderer demo</h1>
-    <p id="status" role="status">Loading…</p>
-    <canvas aria-label="Diorama of a synthetic hike"></canvas>
-    <form>
-      <label for="progress">Route</label>
-      <input id="progress" type="range" min="0" max="1000" value="1000">
-      <label for="yaw">Turn</label>
-      <input id="yaw" type="range" min="-180" max="180" value="0">
-      <label for="backend">Graphics</label>
-      <select id="backend">
-        <option value="auto">WebGPU, or WebGL2 without it</option>
-        <option value="webgl">WebGL2 only</option>
-      </select>
-    </form>
+    <h1>isotrail embed demo</h1>
+    <p>
+      A synthetic hike in two <code>&lt;isotrail-hike&gt;</code> elements. Drag to turn it, pinch or hold
+      Ctrl (⌘ on a Mac) and scroll to zoom, and press play to watch the route draw itself.
+      <a id="backend" href="?backend=webgl">Try the WebGL2 fallback</a>
+    </p>
+
+    <h2>Wide, with a poster</h2>
+    <isotrail-hike src="hike.itb" poster="hike.png" aspect="wide"></isotrail-hike>
+
+    <h2>Square, playing on its own</h2>
+    <div class="square">
+      <isotrail-hike src="hike.itb" aspect="square" autoplay></isotrail-hike>
+    </div>
   </main>
-  <script type="module" src="demo.js"></script>
 </body>
 </html>

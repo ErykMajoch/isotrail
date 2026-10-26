@@ -7,6 +7,7 @@ All notable changes to `isotrail` are documented here.
 ### Added
 
 - **Renderer in the browser:** the renderer compiles to WebAssembly and draws a scene bundle into a canvas, on WebGPU with a WebGL2 fallback. A JavaScript API sets the route's progress and the viewing angle, and a demo page in `web/demo/` shows it working. See [`web/README.md`](web/README.md).
+- **`<isotrail-hike>` web component:** a drop-in element for any web page, with `src`, `poster`, `aspect` and `autoplay` attributes. The poster shows at once and the renderer loads when the element comes into view. Visitors can drag to turn the diorama, zoom up to 3× toward the pointer (Ctrl/⌘ + scroll, pinch or buttons) and move around, and play or scrub the route as it draws itself. It works from the keyboard, plays nothing on its own for visitors who prefer reduced motion, and keeps the poster in browsers without WebGPU or WebGL2.
 
 ## [1.1.0] - 2026-10-26
 

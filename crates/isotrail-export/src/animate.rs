@@ -1,7 +1,7 @@
 use isotrail_bundle::SceneBundle;
 use isotrail_render::{
     Diorama, Frame, Framing, Gpu, Look, Mesher, Moment, Motion, OffscreenTarget, TerrainRenderer,
-    Walk,
+    View, Walk,
 };
 
 use crate::ExportError;
@@ -44,7 +44,7 @@ pub fn render_clip<E: From<ExportError>>(
                     gpu,
                     &renderer,
                     &target,
-                    moment.yaw_offset_deg,
+                    &View::turned(moment.yaw_offset_deg),
                     moment.progress,
                     look,
                 );

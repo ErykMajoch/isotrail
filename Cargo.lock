@@ -1249,6 +1249,7 @@ name = "isotrail-web"
 version = "1.1.0"
 dependencies = [
  "console_error_panic_hook",
+ "glam",
  "isotrail-bundle",
  "isotrail-render",
  "wasm-bindgen",

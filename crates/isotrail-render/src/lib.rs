@@ -23,7 +23,8 @@ mod text;
 mod timeline;
 
 pub use camera::{
-    Aspect, Camera, DEFAULT_YAW_OFFSET_DEG, Framing, Insets, PITCH_DEG, route_heading, view_heading,
+    Aspect, Camera, DEFAULT_YAW_OFFSET_DEG, Framing, Insets, MAX_ZOOM, PITCH_DEG, Turntable, View,
+    route_heading, view_heading,
 };
 pub use diorama::Diorama;
 pub use error::RenderError;

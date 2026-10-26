@@ -1,5 +1,5 @@
 use glam::camera::rh::{proj, view};
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Vec2, Vec3};
 use isotrail_bundle::{GridInfo, SceneBundle};
 
 use crate::mesh::slab_position;
@@ -11,6 +11,7 @@ pub const DEFAULT_YAW_OFFSET_DEG: f32 = 20.0;
 /// A hike that ends closer to its start than this share of its furthest
 /// reach counts as a loop
 const LOOP_SHARE: f32 = 0.25;
+pub const MAX_ZOOM: f32 = 3.0;
 
 /// Shares of the frame, per side, that the diorama must stay out of
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -111,7 +112,7 @@ impl Camera {
     ) -> Camera {
         let fit = Fit::new(heading, points);
         let per_pixel = fit.scale(framing);
-        fit.camera(framing, per_pixel, false)
+        fit.camera(framing, per_pixel, Vec2::ZERO, false)
     }
 
     /// Like [`Camera::diorama`] at a set `metres_per_px`, as an animation
@@ -123,7 +124,7 @@ impl Camera {
         framing: &Framing,
         metres_per_px: f32,
     ) -> Camera {
-        Fit::new(heading, points).camera(framing, metres_per_px.max(f32::EPSILON), true)
+        Fit::new(heading, points).camera(framing, metres_per_px.max(f32::EPSILON), Vec2::ZERO, true)
     }
 
     /// The `metres_per_px` at which `points` fit the framing's safe area
@@ -181,17 +182,16 @@ impl Fit {
             .max(f32::EPSILON)
     }
 
-    fn camera(&self, framing: &Framing, per_pixel: f32, snap: bool) -> Camera {
+    /// `shift` moves the view-space point shown at the safe area's centre
+    /// away from the middle of the points
+    fn camera(&self, framing: &Framing, per_pixel: f32, shift: Vec2, snap: bool) -> Camera {
         let (min, max) = (self.min, self.max);
         let (width, height) = (framing.width as f32, framing.height as f32);
-        let safe = framing.safe;
         let extent = max - min;
 
-        // Pixel position of the safe area's centre, from the top-left corner
-        let centre_x = width * (safe.left + (1.0 - safe.left - safe.right) / 2.0);
-        let centre_y = height * (safe.top + (1.0 - safe.top - safe.bottom) / 2.0);
-        let mut left = (min.x + max.x) / 2.0 - centre_x * per_pixel;
-        let mut top = (min.y + max.y) / 2.0 + centre_y * per_pixel;
+        let centre = safe_centre(framing);
+        let mut left = (min.x + max.x) / 2.0 + shift.x - centre.x * per_pixel;
+        let mut top = (min.y + max.y) / 2.0 + shift.y + centre.y * per_pixel;
         if snap {
             left = (left / per_pixel).round() * per_pixel;
             top = (top / per_pixel).round() * per_pixel;
@@ -211,6 +211,162 @@ impl Fit {
             forward: self.forward,
             metres_per_px: per_pixel,
         }
+    }
+
+    /// Where a ground offset in the slab frame moves on screen, in view-space
+    /// metres
+    fn to_screen(&self, ground: Vec2) -> Vec2 {
+        self.view.transform_vector3(ground.extend(0.0)).truncate()
+    }
+
+    fn to_ground(&self, screen: Vec2) -> Vec2 {
+        let along = self.forward.truncate().normalize_or(Vec2::X);
+        let right = Vec2::new(along.y, -along.x);
+        right * screen.x + along * (screen.y / PITCH_DEG.to_radians().sin())
+    }
+}
+
+/// Pixel position of the safe area's centre, from the top-left corner
+fn safe_centre(framing: &Framing) -> Vec2 {
+    let safe = framing.safe;
+    Vec2::new(
+        framing.width as f32 * (safe.left + (1.0 - safe.left - safe.right) / 2.0),
+        framing.height as f32 * (safe.top + (1.0 - safe.top - safe.bottom) / 2.0),
+    )
+}
+
+/// How a viewer has turned, magnified and moved the diorama
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct View {
+    /// Added to the still's camera turn
+    pub yaw_offset_deg: f32,
+    /// 1 shows the whole slab, up to [`MAX_ZOOM`]
+    pub zoom: f32,
+    /// Slab-frame metres across the ground from the middle of the whole-slab
+    /// view to the middle of this one, so it turns with the slab
+    pub focus: Vec2,
+}
+
+impl Default for View {
+    fn default() -> Self {
+        View::turned(0.0)
+    }
+}
+
+impl View {
+    pub fn turned(yaw_offset_deg: f32) -> View {
+        View {
+            yaw_offset_deg,
+            zoom: 1.0,
+            focus: Vec2::ZERO,
+        }
+    }
+}
+
+/// A slab seen at one scale from any heading, as a viewer turns, zooms and
+/// pans it without ever seeing past the whole-slab view
+#[derive(Clone, Debug)]
+pub struct Turntable {
+    heading: f32,
+    points: Vec<Vec3>,
+    framing: Framing,
+    metres_per_px: f32,
+}
+
+impl Turntable {
+    /// `heading` is the still's, and the scale fits `points` from every turn
+    /// of `yaw_offsets_deg` from it
+    pub fn new(
+        heading: f32,
+        points: Vec<Vec3>,
+        framing: &Framing,
+        yaw_offsets_deg: &[f32],
+    ) -> Turntable {
+        let mut headings: Vec<f32> = yaw_offsets_deg
+            .iter()
+            .map(|offset| heading + offset.to_radians())
+            .collect();
+        headings.dedup();
+        let metres_per_px = Camera::fit_scale(&headings, &points, framing);
+        Turntable {
+            heading,
+            points,
+            framing: *framing,
+            metres_per_px,
+        }
+    }
+
+    /// At 1×
+    pub fn metres_per_px(&self) -> f32 {
+        self.metres_per_px
+    }
+
+    /// Moved to whole internal pixels at the view's zoom, like
+    /// [`Camera::at_scale`]
+    pub fn camera(&self, view: &View) -> Camera {
+        let fit = self.fit(view);
+        fit.camera(
+            &self.framing,
+            self.metres_per_px / view.zoom.max(1.0),
+            fit.to_screen(view.focus),
+            true,
+        )
+    }
+
+    /// Magnified `factor` times, keeping the ground under internal pixel
+    /// `pixel` (from the top-left) where it is
+    pub fn zoom_at(&self, view: View, factor: f32, pixel: Vec2) -> View {
+        let zoom = (view.zoom * factor).clamp(1.0, MAX_ZOOM);
+        let fit = self.fit(&view);
+        let (before, after) = (
+            self.metres_per_px / view.zoom.max(1.0),
+            self.metres_per_px / zoom,
+        );
+        let centre = safe_centre(&self.framing);
+        let towards = Vec2::new(pixel.x - centre.x, centre.y - pixel.y);
+        let shift = fit.to_screen(view.focus) + towards * (before - after);
+        self.clamp(View {
+            zoom,
+            focus: fit.to_ground(shift),
+            ..view
+        })
+    }
+
+    /// Dragged `pixels` internal pixels, right and down
+    pub fn pan(&self, view: View, pixels: Vec2) -> View {
+        let fit = self.fit(&view);
+        let per_pixel = self.metres_per_px / view.zoom.max(1.0);
+        let shift = fit.to_screen(view.focus) + Vec2::new(-pixels.x, pixels.y) * per_pixel;
+        self.clamp(View {
+            focus: fit.to_ground(shift),
+            ..view
+        })
+    }
+
+    /// Moved back inside the whole-slab view, as a turn can push it out
+    pub fn clamp(&self, view: View) -> View {
+        let zoom = view.zoom.clamp(1.0, MAX_ZOOM);
+        let fit = self.fit(&view);
+        let centre = safe_centre(&self.framing);
+        let (width, height) = (self.framing.width as f32, self.framing.height as f32);
+        let room = self.metres_per_px * (1.0 - 1.0 / zoom);
+        let shift = fit.to_screen(view.focus);
+        let shift = Vec2::new(
+            shift.x.clamp(-centre.x * room, (width - centre.x) * room),
+            shift.y.clamp(-(height - centre.y) * room, centre.y * room),
+        );
+        View {
+            zoom,
+            focus: fit.to_ground(shift),
+            ..view
+        }
+    }
+
+    fn fit(&self, view: &View) -> Fit {
+        Fit::new(
+            self.heading + view.yaw_offset_deg.to_radians(),
+            self.points.iter().copied(),
+        )
     }
 }
 
@@ -475,6 +631,111 @@ mod tests {
             let safe_y = h * (safe.top + (1.0 - safe.top - safe.bottom) / 2.0);
             assert!((centre.x - safe_x).abs() <= 0.5 + 1e-3, "{centre}");
             assert!((centre.y - safe_y).abs() <= 0.5 + 1e-3, "{centre}");
+        }
+    }
+
+    fn turntable() -> (Turntable, Framing) {
+        let framing = Aspect::Wide.framing(3).unwrap();
+        let points = slab_corners(&grid(200, 100, 30.0), 800.0);
+        let turn: Vec<f32> = (0..360).step_by(5).map(|d| d as f32).collect();
+        (Turntable::new(0.4, points, &framing, &turn), framing)
+    }
+
+    /// Where the window shown at `view` sits in the whole-slab view, in its
+    /// pixels, from a point seen in both
+    fn window_corner(turntable: &Turntable, framing: &Framing, view: &View) -> Vec2 {
+        let whole = turntable.camera(&View::turned(view.yaw_offset_deg));
+        let zoomed = turntable.camera(view);
+        let point = Vec3::new(120.0, -40.0, 300.0);
+        let (a, b) = (
+            to_pixels(&whole, framing, point),
+            to_pixels(&zoomed, framing, point),
+        );
+        a.truncate() - b.truncate() / view.zoom
+    }
+
+    #[test]
+    fn unzoomed_turntables_match_fixed_scale_cameras() {
+        let (turntable, framing) = turntable();
+        for yaw in [0.0, 37.0, -120.0] {
+            let camera = Camera::at_scale(
+                0.4 + f32::to_radians(yaw),
+                turntable.points.iter().copied(),
+                &framing,
+                turntable.metres_per_px(),
+            );
+            assert_eq!(turntable.camera(&View::turned(yaw)), camera);
+        }
+    }
+
+    #[test]
+    fn zooming_keeps_the_ground_under_the_pointer() {
+        let (turntable, framing) = turntable();
+        let point = Vec3::new(500.0, 300.0, 0.0);
+        let mut view = View::turned(15.0);
+        for factor in [1.5, 1.6, 0.8] {
+            let pixel = to_pixels(&turntable.camera(&view), &framing, point).truncate();
+            view = turntable.zoom_at(view, factor, pixel);
+            let after = to_pixels(&turntable.camera(&view), &framing, point).truncate();
+            assert!(pixel.distance(after) <= 0.75, "{pixel} vs {after}");
+        }
+        assert!((view.zoom - 1.92).abs() < 1e-4, "{}", view.zoom);
+    }
+
+    #[test]
+    fn zoom_stays_between_the_whole_slab_and_its_limit() {
+        let (turntable, _) = turntable();
+        let centre = Vec2::new(320.0, 180.0);
+        let close = turntable.zoom_at(View::default(), 10.0, centre);
+        assert_eq!(close.zoom, MAX_ZOOM);
+        let whole = turntable.zoom_at(close, 0.01, Vec2::new(10.0, 10.0));
+        assert_eq!(whole.zoom, 1.0);
+        assert!(whole.focus.length() < 1e-3, "{}", whole.focus);
+    }
+
+    #[test]
+    fn whole_slab_views_do_not_pan() {
+        let (turntable, _) = turntable();
+        let view = turntable.pan(View::default(), Vec2::new(40.0, -25.0));
+        assert!(view.focus.length() < 1e-3, "{}", view.focus);
+    }
+
+    #[test]
+    fn panning_stops_at_the_edges_of_the_whole_slab_view() {
+        let (turntable, framing) = turntable();
+        let (width, height) = (framing.width as f32, framing.height as f32);
+        let zoomed = turntable.zoom_at(View::turned(-30.0), 2.0, Vec2::new(320.0, 180.0));
+        let middle = window_corner(&turntable, &framing, &zoomed);
+        assert!(
+            middle.distance(Vec2::new(width, height) / 4.0) < 1.0,
+            "{middle}"
+        );
+
+        for (drag, corner) in [
+            (Vec2::new(5000.0, 5000.0), Vec2::ZERO),
+            (Vec2::new(-5000.0, -5000.0), Vec2::new(width, height) / 2.0),
+        ] {
+            let view = turntable.pan(zoomed, drag);
+            let actual = window_corner(&turntable, &framing, &view);
+            assert!(actual.distance(corner) < 1.0, "{actual} vs {corner}");
+        }
+    }
+
+    #[test]
+    fn the_middle_of_the_view_turns_with_the_slab() {
+        let (turntable, framing) = turntable();
+        let view = turntable.zoom_at(View::default(), 3.0, Vec2::new(300.0, 170.0));
+        let view = turntable.pan(view, Vec2::new(30.0, 12.0));
+        assert!(view.focus.length() > 50.0, "{}", view.focus);
+        let middle = view.focus.extend(400.0);
+        let centre = safe_centre(&framing);
+        for yaw in [0.0, 25.0, 60.0] {
+            let turned = View {
+                yaw_offset_deg: yaw,
+                ..view
+            };
+            let pixel = to_pixels(&turntable.camera(&turned), &framing, middle).truncate();
+            assert!(pixel.distance(centre) <= 0.75, "{yaw}°: {pixel}");
         }
     }
 

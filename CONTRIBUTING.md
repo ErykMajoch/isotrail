@@ -25,7 +25,7 @@ The workspace is split into crates:
 | `isotrail-render` | The wgpu renderer. Meshers, camera, lighting, post-processing, text and overlays |
 | `isotrail-export` | Rendering frames without a window, and PNG, GIF and MP4 output |
 | `isotrail-cli` | The `isotrail` command |
-| `isotrail-web` | The WebAssembly build of the renderer for web pages ([`web/README.md`](web/README.md)) |
+| `isotrail-web` | The WebAssembly build of the renderer for web pages, driven by the `<isotrail-hike>` element in `web/` ([`web/README.md`](web/README.md)) |
 | `isotrail-testkit` | Synthetic scenes, golden-image, GIF and video helpers for tests |
 
 `isotrail-track`, `isotrail-bundle` and `isotrail-render` must stay WebAssembly-safe, meaning no filesystem, network or threads.

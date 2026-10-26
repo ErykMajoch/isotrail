@@ -1,7 +1,8 @@
+use glam::Vec2;
 use isotrail_bundle::SceneBundle;
 use isotrail_render::{
     Diorama, Framing, Gpu, Insets, Look, Mesher, OffscreenTarget, PixelGrid, Present, TerrainMesh,
-    TerrainRenderer, VoxelMesher,
+    TerrainRenderer, View, VoxelMesher,
 };
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
@@ -27,7 +28,7 @@ pub struct Viewer {
     mesh: TerrainMesh,
     look: Look,
     stage: Option<Stage>,
-    yaw_offset_deg: f32,
+    view: View,
     progress: f32,
 }
 
@@ -89,7 +90,7 @@ impl Viewer {
             mesh,
             look: Look::default(),
             stage: None,
-            yaw_offset_deg: 0.0,
+            view: View::default(),
             progress: 1.0,
         })
     }
@@ -98,6 +99,18 @@ impl Viewer {
     #[wasm_bindgen(getter)]
     pub fn backend(&self) -> String {
         self.gpu.adapter_info().backend.to_string()
+    }
+
+    /// The hike's title from the bundle
+    #[wasm_bindgen(getter)]
+    pub fn title(&self) -> String {
+        self.bundle.meta.title.clone()
+    }
+
+    /// Magnification, from 1 (the whole slab) to 3
+    #[wasm_bindgen(getter)]
+    pub fn zoom(&self) -> f32 {
+        self.view.zoom
     }
 
     /// Sets the canvas's drawing buffer size in device pixels, and the pixel
@@ -128,6 +141,8 @@ impl Viewer {
             &turn,
         );
         let frame = OffscreenTarget::new(&self.gpu, grid.width, grid.height);
+        // At the new scale the focus can fall outside the whole-slab view
+        self.view = diorama.turntable().clamp(self.view);
         self.stage = Some(Stage {
             grid,
             diorama,
@@ -144,7 +159,34 @@ impl Viewer {
     /// Degrees the view turns from the still's
     #[wasm_bindgen(js_name = setYaw)]
     pub fn set_yaw(&mut self, degrees: f32) {
-        self.yaw_offset_deg = degrees;
+        self.view.yaw_offset_deg = degrees;
+        if let Some(stage) = &self.stage {
+            self.view = stage.diorama.turntable().clamp(self.view);
+        }
+    }
+
+    /// Magnifies `factor` times, keeping what is under canvas pixel `x`, `y`
+    /// in place
+    #[wasm_bindgen(js_name = zoomBy)]
+    pub fn zoom_by(&mut self, factor: f32, x: f32, y: f32) {
+        if let Some(stage) = &self.stage {
+            let pixel = self.frame_point(stage, x, y);
+            self.view = stage.diorama.turntable().zoom_at(self.view, factor, pixel);
+        }
+    }
+
+    /// Moves the view with a drag of `dx`, `dy` canvas pixels, once zoomed in
+    pub fn pan(&mut self, dx: f32, dy: f32) {
+        if let Some(stage) = &self.stage {
+            let pixels = Vec2::new(dx, dy) / stage.grid.scale as f32;
+            self.view = stage.diorama.turntable().pan(self.view, pixels);
+        }
+    }
+
+    /// Back to the whole slab from the still's heading
+    #[wasm_bindgen(js_name = resetView)]
+    pub fn reset_view(&mut self) {
+        self.view = View::default();
     }
 
     /// Draws a frame into the canvas
@@ -165,7 +207,7 @@ impl Viewer {
             &self.gpu,
             &self.renderer,
             &stage.frame,
-            self.yaw_offset_deg,
+            &self.view,
             self.progress,
             &self.look,
         );
@@ -180,5 +222,18 @@ impl Viewer {
             stage.grid.scale,
         );
         self.gpu.queue().present(texture);
+    }
+}
+
+impl Viewer {
+    /// Canvas pixel to internal pixel, with the frame centred as `Present`
+    /// draws it
+    fn frame_point(&self, stage: &Stage, x: f32, y: f32) -> Vec2 {
+        let grid = stage.grid;
+        let origin = |canvas: u32, frame: u32| (canvas as f32 - (frame * grid.scale) as f32) / 2.0;
+        Vec2::new(
+            x - origin(self.config.width, grid.width),
+            y - origin(self.config.height, grid.height),
+        ) / grid.scale as f32
     }
 }
