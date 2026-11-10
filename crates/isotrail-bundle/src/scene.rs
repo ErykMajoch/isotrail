@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::Weather;
+
 /// Everything a renderer needs, with no further downloads
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SceneBundle {
@@ -15,6 +17,8 @@ pub struct SceneBundle {
     pub sun: Vec<SunSample>,
     /// The moon at the same times as `sun`
     pub moon: Vec<MoonSample>,
+    /// None when it wasn't looked up or couldn't be found
+    pub weather: Option<Weather>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -61,6 +65,7 @@ pub struct Provenance {
     pub generator: String,
     pub elevation: String,
     pub map_data: String,
+    pub weather: Option<String>,
 }
 
 /// Square cells over a slab turned by `rotation_rad` (from east,

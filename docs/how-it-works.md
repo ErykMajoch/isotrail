@@ -19,7 +19,11 @@
   <img src="images/debug-landcover.png" alt="Landcover of the slab with the route" width="45%">
 </p>
 
-The route is then draped onto the terrain. The sun's position over the slab is worked out every five minutes from the start of the hike to its end, with the [NOAA solar calculator](https://gml.noaa.gov/grad/solcalc/) equations, which follow Jean Meeus's *Astronomical Algorithms*. The moon's position and phase come from the main terms of Meeus's lunar theory, good to a few tenths of a degree. Everything is saved together as a scene bundle: a compact, versioned binary file of about 100 KB.
+The route is then draped onto the terrain. The sun's position over the slab is worked out every five minutes from the start of the hike to its end, with the [NOAA solar calculator](https://gml.noaa.gov/grad/solcalc/) equations, which follow Jean Meeus's *Astronomical Algorithms*. The moon's position and phase come from the main terms of Meeus's lunar theory, good to a few tenths of a degree.
+
+**Weather.** The hourly weather during the hike comes from [Open-Meteo](https://open-meteo.com/): temperature, the WMO weather code, cloud cover at low, middle and high levels, rain, snowfall, snow depth and wind, from the hour before the start to the hour after the end. Hikes that ended at least five days ago use the historical archive (ERA5 reanalysis and related models); more recent ones, or any the archive hasn't filled in yet, use the forecast models' own past hours. The weather is read in the middle of the route, at the track's mean height, so the temperature is for the height walked. Long routes are split into stretches of about 20 km (at most eight), and each hour reads the weather on the stretch the hiker was on. In between hours, values are interpolated; rain, snow and the weather code hold through the hour they were measured over.
+
+Everything is saved together as a scene bundle: a compact, versioned binary file of about 100 KB.
 
 ## Rendering
 

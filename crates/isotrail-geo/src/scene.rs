@@ -68,6 +68,7 @@ pub fn scene_bundle(
         profile,
         sun: Vec::new(),
         moon: Vec::new(),
+        weather: None,
     };
     (bundle.sun, bundle.moon) = sky_track(&stats, origin_lat, origin_lon);
     bundle.prop_seed = bundle.content_seed();
@@ -226,6 +227,7 @@ mod tests {
             generator: "test".into(),
             elevation: "synthetic".into(),
             map_data: "none".into(),
+            weather: None,
         }
     }
 

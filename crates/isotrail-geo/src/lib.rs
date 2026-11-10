@@ -29,6 +29,7 @@ mod osm;
 mod projection;
 mod relief;
 mod scene;
+mod weather;
 
 pub use dem::{
     DemError, DemSource, Heightmap, MAX_MERCATOR_LAT, TERRARIUM_URL, TILE_SIZE, TerrariumSource,
@@ -55,4 +56,9 @@ pub use relief::{EXAGGERATION_FACTOR, MAX_EXAGGERATION, MIN_EXAGGERATION, vertic
 pub use scene::{
     DEM_ATTRIBUTION, OSM_ATTRIBUTION, PROFILE_SAMPLES, ROUTE_BREAK_M, ROUTE_TOLERANCE_CELLS,
     scene_bundle,
+};
+pub use weather::{
+    ARCHIVE_LAG_S, LOCATION_SPACING_M, MAX_LOCATIONS, OPEN_METEO_ARCHIVE_URL,
+    OPEN_METEO_FORECAST_URL, OpenMeteoSource, WeatherError, WeatherLocation, WeatherRequest,
+    WeatherSource,
 };

@@ -1,6 +1,6 @@
 use anyhow::bail;
 use clap::{Args, ValueEnum};
-use isotrail_bundle::{HikeStats, SceneBundle};
+use isotrail_bundle::{HikeStats, SceneBundle, WEATHER_ATTRIBUTION};
 use isotrail_render::{
     DateFormat, OverlayStyle, OverlayText, PanelStyle, Stat, StatKind, Subtitle, TitleSize,
 };
@@ -217,7 +217,10 @@ impl OverlayArgs {
 
     /// The data credit to put in the caption, when the image leaves it out
     pub fn caption_credit(&self, bundle: &SceneBundle) -> Option<String> {
-        let credits = &bundle.meta.attribution;
+        let mut credits: Vec<&str> = bundle.meta.attribution.iter().map(String::as_str).collect();
+        if bundle.weather.is_some() {
+            credits.push(WEATHER_ATTRIBUTION);
+        }
         (!self.shows_attribution() && !credits.is_empty()).then(|| credits.join(" · "))
     }
 
@@ -235,7 +238,7 @@ fn name(stat: StatArg) -> String {
 mod tests {
     use clap::Parser;
     use isotrail_bundle::ProfileSample;
-    use isotrail_testkit::diorama_bundle;
+    use isotrail_testkit::{diorama_bundle, synthetic_weather};
 
     use super::*;
 
@@ -298,6 +301,14 @@ mod tests {
         bare.meta.attribution.clear();
         let args = parse(&["--no-attribution"]).unwrap();
         assert_eq!(args.caption_credit(&bare), None);
+        let mut with_weather = bundle();
+        with_weather.weather = Some(synthetic_weather(1_750_064_400, 3));
+        assert_eq!(
+            args.caption_credit(&with_weather).as_deref(),
+            Some("© Mappers · Tiles · Weather data by Open-Meteo.com")
+        );
+        let drawn = parse(&[]).unwrap().text(&with_weather).unwrap().attribution;
+        assert_eq!(drawn.as_deref(), Some("© Mappers · Tiles"));
     }
 
     #[test]

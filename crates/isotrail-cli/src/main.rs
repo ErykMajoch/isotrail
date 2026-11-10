@@ -11,6 +11,7 @@ mod render;
 mod stats;
 mod style_lab;
 mod sun;
+mod weather;
 
 use std::fs;
 use std::io::IsTerminal;

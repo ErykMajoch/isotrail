@@ -4,11 +4,12 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use chrono::{DateTime, SecondsFormat, TimeDelta, TimeZone, Utc};
 use clap::Args;
-use isotrail_bundle::{HikeStats, SceneBundle};
+use isotrail_bundle::{HikeStats, SceneBundle, Weather};
 use isotrail_track::{Bounds, TrackStats, Units};
 use serde::Serialize;
+use tracing::warn;
 
-use crate::UnitsArg;
+use crate::{UnitsArg, weather};
 
 #[derive(Debug, Args)]
 pub struct StatsArgs {
@@ -22,16 +23,32 @@ pub struct StatsArgs {
     /// Units for the human-readable table
     #[arg(long, value_enum, default_value_t = UnitsArg::Metric)]
     units: UnitsArg,
+
+    /// Also show the weather hour by hour: from the bundle, or looked up on
+    /// Open-Meteo for a GPX file
+    #[arg(long)]
+    weather: bool,
+
+    /// Only use weather that is already in the cache
+    #[arg(long, requires = "weather")]
+    offline: bool,
 }
 
 pub fn run(args: &StatsArgs) -> anyhow::Result<()> {
-    let summary = Summary::read(&args.file)?;
+    let summary = Summary::read(&args.file, args.weather.then_some(args.offline))?;
     let mut out = io::stdout().lock();
     if args.json {
         serde_json::to_writer_pretty(&mut out, &Report::new(&summary))?;
         writeln!(out)?;
     } else {
-        write_table(&mut out, &summary.title, &summary.stats, args.units.into())?;
+        let units = args.units.into();
+        write_table(&mut out, &summary.title, &summary.stats, units)?;
+        if let (Some(weather), Some(start), Some(end)) =
+            (&summary.weather, summary.stats.start, summary.stats.end)
+        {
+            let span = (start.timestamp(), end.timestamp());
+            weather::write_table(&mut out, weather, span, summary.stats.timezone, units)?;
+        }
     }
     Ok(())
 }
@@ -41,28 +58,41 @@ struct Summary {
     name: Option<String>,
     desc: Option<String>,
     stats: TrackStats,
+    weather: Option<Weather>,
 }
 
 impl Summary {
-    fn read(path: &Path) -> anyhow::Result<Summary> {
+    /// `weather` is `Some(offline)` to include the weather
+    fn read(path: &Path, weather: Option<bool>) -> anyhow::Result<Summary> {
         let bytes = crate::read_file(path)?;
         if crate::is_bundle_file(path, &bytes) {
-            let meta = SceneBundle::from_bytes(&bytes)
-                .with_context(|| format!("could not read {}", path.display()))?
-                .meta;
+            let bundle = SceneBundle::from_bytes(&bytes)
+                .with_context(|| format!("could not read {}", path.display()))?;
+            if weather.is_some() && bundle.weather.is_none() {
+                warn!("the bundle has no weather");
+            }
+            let meta = bundle.meta;
             return Ok(Summary {
                 stats: track_stats(&meta.stats, meta.timezone.as_deref()),
                 title: meta.title,
                 name: meta.name,
                 desc: meta.desc,
+                weather: bundle.weather.filter(|_| weather.is_some()),
             });
         }
         let track = crate::parse_track(&bytes, path)?;
+        let weather = match weather {
+            Some(offline) => {
+                weather::look_up(&track, crate::bundle::fetcher(offline)?).map(|(w, _)| w)
+            }
+            None => None,
+        };
         Ok(Summary {
             stats: track.stats()?,
             title: crate::title(&track, path),
             name: track.name,
             desc: track.desc,
+            weather,
         })
     }
 }
@@ -204,6 +234,8 @@ struct Report<'a> {
     end_local: Option<String>,
     timezone: Option<&'static str>,
     bounds: BoundsReport,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    weather: Option<weather::Report>,
 }
 
 #[derive(Serialize)]
@@ -246,6 +278,7 @@ impl<'a> Report<'a> {
                 max_lat: stats.bounds.max_lat,
                 max_lon: stats.bounds.max_lon,
             },
+            weather: summary.weather.as_ref().map(weather::Report::new),
         }
     }
 }

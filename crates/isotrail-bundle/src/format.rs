@@ -5,7 +5,7 @@ use crate::{BundleError, Landcover, SceneBundle};
 
 pub const MAGIC: [u8; 4] = *b"ITB1";
 /// Bumped whenever the payload layout changes
-pub const FORMAT_VERSION: u16 = 3;
+pub const FORMAT_VERSION: u16 = 4;
 const HEADER_LEN: usize = MAGIC.len() + 2;
 const COMPRESSION_LEVEL: u8 = 9;
 const MAX_PAYLOAD_BYTES: usize = 256 << 20;
@@ -120,6 +120,38 @@ impl SceneBundle {
         {
             return corrupt("moon samples don't match the sun's".into());
         }
+        if let Some(weather) = &self.weather {
+            if weather.samples.is_empty() {
+                return corrupt("weather without samples".into());
+            }
+            let percent = 0.0..=100.0;
+            if let Some(sample) = weather.samples.iter().find(|s| {
+                !(s.temperature_c.is_finite()
+                    && [
+                        s.cloud_cover_pct,
+                        s.cloud_low_pct,
+                        s.cloud_mid_pct,
+                        s.cloud_high_pct,
+                    ]
+                    .iter()
+                    .all(|c| percent.contains(c))
+                    && [
+                        s.precipitation_mm,
+                        s.rain_mm,
+                        s.snowfall_cm,
+                        s.snow_depth_m,
+                        s.wind_speed_m_s,
+                    ]
+                    .iter()
+                    .all(|v| v.is_finite() && *v >= 0.0)
+                    && (0.0..=360.0).contains(&s.wind_direction_deg))
+            }) {
+                return corrupt(format!("weather sample {sample:?}"));
+            }
+            if weather.samples.windows(2).any(|w| w[0].time >= w[1].time) {
+                return corrupt("weather samples out of order".into());
+            }
+        }
         Ok(())
     }
 }
@@ -135,7 +167,8 @@ mod tests {
     use super::*;
     use crate::{
         Bounds, GridInfo, HikeStats, Metadata, MoonSample, ProfileSample, Provenance, Route,
-        RoutePoint, SunSample, Terrain, WaterBody, line_mask,
+        RoutePoint, SunSample, Terrain, WaterBody, Weather, WeatherDataset, WeatherSample,
+        line_mask,
     };
 
     fn bundle() -> SceneBundle {
@@ -184,6 +217,7 @@ mod tests {
                     generator: "isotrail test".into(),
                     elevation: "synthetic".into(),
                     map_data: "synthetic".into(),
+                    weather: Some("synthetic".into()),
                 },
             },
             grid: GridInfo {
@@ -231,6 +265,26 @@ mod tests {
                     illuminated: 0.62,
                 })
                 .collect(),
+            weather: Some(Weather {
+                dataset: WeatherDataset::Archive,
+                samples: (0..2)
+                    .map(|i| WeatherSample {
+                        time: 1_749_999_600 + i * 3600,
+                        temperature_c: -1.5 + i as f32,
+                        weather_code: 73,
+                        cloud_cover_pct: 100.0,
+                        cloud_low_pct: 90.0,
+                        cloud_mid_pct: 40.0,
+                        cloud_high_pct: 0.0,
+                        precipitation_mm: 1.4,
+                        rain_mm: 0.0,
+                        snowfall_cm: 0.98,
+                        snow_depth_m: 0.31,
+                        wind_speed_m_s: 6.5,
+                        wind_direction_deg: 275.0,
+                    })
+                    .collect(),
+            }),
         }
     }
 
@@ -239,7 +293,7 @@ mod tests {
         let bundle = bundle();
         let bytes = bundle.to_bytes();
         assert!(is_bundle(&bytes));
-        assert_eq!(&bytes[..6], b"ITB1\x03\x00");
+        assert_eq!(&bytes[..6], b"ITB1\x04\x00");
         assert_eq!(SceneBundle::from_bytes(&bytes).unwrap(), bundle);
         assert_eq!(bundle.to_bytes(), bytes, "encoding is deterministic");
     }
@@ -281,13 +335,13 @@ mod tests {
     }
 
     #[test]
-    fn bundles_from_before_the_sky_tracks_ask_to_be_made_again() {
-        for old in [1u16, 2] {
+    fn bundles_from_older_versions_ask_to_be_made_again() {
+        for old in [1u16, 2, 3] {
             let mut bytes = bundle().to_bytes();
             bytes[4..6].copy_from_slice(&old.to_le_bytes());
             let message = SceneBundle::from_bytes(&bytes).unwrap_err().to_string();
             assert!(
-                message.contains(&format!("version {old}")) && message.contains("reads version 3"),
+                message.contains(&format!("version {old}")) && message.contains("reads version 4"),
                 "{message}"
             );
             assert!(message.contains("`isotrail bundle`"), "{message}");
@@ -345,6 +399,21 @@ mod tests {
         let mut b = bundle();
         b.moon[2].time += 1;
         cases.push((b, "moon samples don't match the sun's"));
+        let mut b = bundle();
+        b.weather.as_mut().unwrap().samples[1].cloud_low_pct = 101.0;
+        cases.push((b, "weather sample"));
+        let mut b = bundle();
+        b.weather.as_mut().unwrap().samples[0].rain_mm = -0.1;
+        cases.push((b, "weather sample"));
+        let mut b = bundle();
+        b.weather.as_mut().unwrap().samples[0].wind_direction_deg = f32::NAN;
+        cases.push((b, "weather sample"));
+        let mut b = bundle();
+        b.weather.as_mut().unwrap().samples[1].time -= 3600;
+        cases.push((b, "weather samples out of order"));
+        let mut b = bundle();
+        b.weather.as_mut().unwrap().samples.clear();
+        cases.push((b, "weather without samples"));
         for (bundle, expected) in cases {
             let message = SceneBundle::from_bytes(&bundle.to_bytes())
                 .unwrap_err()

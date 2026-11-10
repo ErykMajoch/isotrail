@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 use isotrail_geo::{
-    Cache, CachedFetcher, Fetcher, Footprint, Grid, OVERPASS_URL, OverpassSource, RecordedFetcher,
-    TerrariumSource, TileId,
+    Cache, CachedFetcher, Fetcher, Footprint, Grid, OPEN_METEO_ARCHIVE_URL, OVERPASS_URL,
+    OpenMeteoSource, OverpassSource, RecordedFetcher, TerrariumSource, TileId, WeatherRequest,
 };
 use isotrail_testkit::{decode_gif, diorama_bundle, has_ffmpeg, hike_bundle, probe_video};
 use isotrail_track::{GpxReader, TrackReader};
@@ -73,6 +73,13 @@ fn warm(cache_dir: &Path) {
     );
     let body = OverpassSource::<RecordedFetcher>::request_body(&grid);
     osm.post(OVERPASS_URL, &body).unwrap();
+    let weather = CachedFetcher::new(
+        RecordedFetcher::new(fixtures().join("weather")),
+        Cache::new(cache_dir),
+    );
+    let request = WeatherRequest::from_track(&track, 0).unwrap();
+    let url = OpenMeteoSource::<RecordedFetcher>::url(OPEN_METEO_ARCHIVE_URL, &request);
+    weather.get(&url).unwrap();
 }
 
 #[test]

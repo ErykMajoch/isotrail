@@ -9,11 +9,15 @@ All notable changes to `isotrail` are documented here.
 - **Time-of-day lighting:** hikes are lit by the sun as it stood when they started, worked out from the time and place of the track. Midday is white and bright, evenings turn golden and orange, and dusk and night go deep blue, with the sky changing to match. Animations and the web embed use the same light.
 - **`--time HH:MM`** on `render` relights the scene at another local time on the day of the hike, such as `--time 20:30` for a sunset.
 - **Night sky:** after dusk, stars come out and the moon rises, in its real place and phase for the date. A bright moon lights the terrain with a cool light and casts shadows; on a moonless night the scene is lit by a dim blue glow.
+- **Weather during the hike:** `bundle`, `render` and `embed` look up the hour-by-hour weather on [Open-Meteo](https://open-meteo.com/) (temperature, conditions, cloud at three heights, rain, snow, snow depth and wind) and keep it in the scene bundle, ready to be drawn. If it can't be found, the bundle is made without it; `--no-weather` skips it.
+- **`stats --weather`** prints the weather during the hike, as a summary and hour by hour in local time, and adds it to `--json`.
 - **The sun moves in animations:** GIFs, MP4s and the web embed light each frame by the time the route's head was walked, from the start to the finish, with either `--pace`. On multi-day treks, each night becomes a short pause in which the head waits while the sun sets, the night passes and the sun rises again. The elapsed time keeps counting through it.
 
 ### Changed
 
-- Scene bundles now carry the sun's and the moon's paths across the sky during the hike. Bundles made by earlier versions can't be read any more; make them again with `isotrail bundle` (or `isotrail embed`).
+- `--no-attribution` now prints Open-Meteo's credit along with the others when the bundle holds weather.
+
+- Scene bundles now carry the sun's and the moon's paths across the sky and the weather during the hike. Bundles made by earlier versions can't be read any more; make them again with `isotrail bundle` (or `isotrail embed`).
 - Animations end on the light at the finish of the hike, while the still image keeps the light at the start. The web embed opens under the start's light, like its poster, and follows the route's head once it is played or scrubbed.
 - `--pace time` no longer cuts the nights of a multi-day trek to a minute: they become the night pauses above. Other stops are still cut to a minute.
 

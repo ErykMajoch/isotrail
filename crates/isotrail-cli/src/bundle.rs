@@ -15,6 +15,8 @@ use isotrail_geo::{
 use png::ColorType;
 use tracing::info;
 
+use crate::weather;
+
 const PREVIEW_SCALE: u32 = 4;
 const ROUTE_RGB: [u8; 3] = [230, 32, 48];
 const MIN_REPORTED_SHARE: f64 = 0.01;
@@ -66,6 +68,10 @@ pub struct DataArgs {
     /// Overpass API endpoint for OpenStreetMap data
     #[arg(long, value_name = "URL", env = "ISOTRAIL_OVERPASS_URL", default_value = OVERPASS_URL)]
     overpass_url: String,
+
+    /// Don't look up the weather during the hike
+    #[arg(long)]
+    no_weather: bool,
 }
 
 /// A scene bundle and what went into it
@@ -79,15 +85,20 @@ pub struct Prepared {
     elevation_range: (f32, f32),
 }
 
-/// Fetches terrain and map data around a GPX route and packs them into a bundle
+/// Fetches through the shared cache
+pub fn fetcher(offline: bool) -> anyhow::Result<CachedFetcher<HttpFetcher>> {
+    Ok(CachedFetcher::new(HttpFetcher::new()?, Cache::new(crate::cache::dir()?)).offline(offline))
+}
+
+/// Fetches terrain, map data and weather around a GPX route and packs them
+/// into a bundle
 pub fn prepare(file: &Path, data: &DataArgs) -> anyhow::Result<Prepared> {
     let track = crate::read_track(file)?;
     let footprint = Footprint::from_track(&track)?;
     let detail = NonZeroU32::new(data.detail).context("--detail must be positive")?;
     let grid = Grid::new(&footprint, detail);
 
-    let fetcher = CachedFetcher::new(HttpFetcher::new()?, Cache::new(crate::cache::dir()?))
-        .offline(data.offline);
+    let fetcher = fetcher(data.offline)?;
     let tiles = TerrariumSource::<HttpFetcher>::tiles(&grid).len();
     let mut heightmap = TerrariumSource::new(&fetcher).heightmap(&grid)?;
     let features = OverpassSource::new(&fetcher)
@@ -107,12 +118,19 @@ pub fn prepare(file: &Path, data: &DataArgs) -> anyhow::Result<Prepared> {
         info!("{cells:>6}  cells with a {name}");
     }
 
+    let weather = if data.no_weather {
+        None
+    } else {
+        weather::look_up(&track, &fetcher)
+    };
+
     let provenance = Provenance {
         generator: format!("isotrail {}", env!("CARGO_PKG_VERSION")),
         elevation: format!("{TERRARIUM_URL} at zoom {}", grid.dem_zoom()),
         map_data: format!("OpenStreetMap via {}", data.overpass_url),
+        weather: weather.as_ref().map(|(_, provenance)| provenance.clone()),
     };
-    let bundle = scene_bundle(
+    let mut bundle = scene_bundle(
         &track,
         &crate::title(&track, file),
         &grid,
@@ -120,6 +138,7 @@ pub fn prepare(file: &Path, data: &DataArgs) -> anyhow::Result<Prepared> {
         &landcover,
         provenance,
     )?;
+    bundle.weather = weather.map(|(weather, _)| weather);
     Ok(Prepared {
         bundle,
         grid,
@@ -182,6 +201,12 @@ pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
         "Water: {bodies} {} levelled",
         if bodies == 1 { "lake" } else { "lakes" }
     );
+    let stats = &bundle.meta.stats;
+    let weather = bundle.weather.as_ref().and_then(|weather| {
+        let summary = weather::Summary::new(weather, stats.start?, stats.end?)?;
+        Some(summary.line(weather.dataset))
+    });
+    println!("Weather: {}", weather.as_deref().unwrap_or("none"));
     let pieces = bundle.route.breaks.len() + 1;
     println!(
         "Route: {} points in {pieces} piece{}",

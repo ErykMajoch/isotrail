@@ -111,15 +111,16 @@ The animation options only apply to `.gif` and `.mp4` output. PNG renders ignore
 | `--detail N` | `256` | Grid cells along the slab's long side, from `8` to `1024` |
 | `--offline` | off | Only use data that is already in the cache |
 | `--overpass-url URL` | public Overpass API | Another [Overpass](https://overpass-api.de/) endpoint for map data (also `ISOTRAIL_OVERPASS_URL`) |
+| `--no-weather` | off | Don't look up the weather during the hike |
 | `--config FILE` | none | Read settings from a TOML file (see [Configuration](configuration.md)) |
 
 ## bundle
 
 ```text
-isotrail bundle <hike.gpx> -o <hike.itb> [--debug-dir DIR] [--exaggeration X] [--detail N] [--offline] [--overpass-url URL]
+isotrail bundle <hike.gpx> -o <hike.itb> [--debug-dir DIR] [--exaggeration X] [--detail N] [--offline] [--overpass-url URL] [--no-weather]
 ```
 
-Downloads the elevation and OpenStreetMap data around the route and works out what covers every grid cell: from the map data where there is some, and from the slope and height of the ground elsewhere. Lakes and reservoirs get a level surface. The result is saved with the route, its elevation profile, the hike's statistics and the sun's and moon's paths across the sky during the hike as a **scene bundle**: one compact file (usually under 100 KB) that holds everything a render needs, with no further downloads.
+Downloads the elevation and OpenStreetMap data around the route and works out what covers every grid cell: from the map data where there is some, and from the slope and height of the ground elsewhere. Lakes and reservoirs get a level surface. The result is saved with the route, its elevation profile, the hike's statistics, the sun's and moon's paths across the sky and the hour-by-hour weather during the hike as a **scene bundle**: one compact file (usually under 100 KB) that holds everything a render needs, with no further downloads.
 
 Bundles are useful when you want to try many looks for one hike, to render offline, or to keep a hike's scene as it was even after the map data changes. A bundle made by an older version of isotrail may need to be made again; isotrail says so when it can't read one.
 
@@ -131,6 +132,7 @@ Elevation 130 – 524 m, drawn 2.4× taller
 Map data: 1840 areas and 2210 lines from OpenStreetMap
 Landcover: heath and moorland 52%, grassland 18%, broadleaf forest 11%, water 7%, ...
 Water: 3 lakes levelled
+Weather: partly cloudy, 11 – 16 °C, 0.4 mm rain (Open-Meteo archive)
 Route: 1650 points in 1 piece
 Wrote hike.itb (92 KB)
 ```
@@ -138,6 +140,8 @@ Wrote hike.itb (92 KB)
 `-v` also lists the map features by type.
 
 On long routes, where a grid cell is wider than 100 m, footpaths, streams and minor roads are left out, because they would be too small to show and would make the download much larger.
+
+The weather comes from [Open-Meteo](https://open-meteo.com/) (see [How it works](how-it-works.md#preparing-the-scene)). It needs the track's times, so tracks without them are bundled without weather. If it can't be fetched, for example offline with nothing in the cache, isotrail says why and makes the bundle without it; `--no-weather` skips it on purpose. The weather isn't drawn yet, but `isotrail stats --weather` shows what a bundle holds.
 
 ### Debug images
 
@@ -198,7 +202,7 @@ The release downloads have the runtime in a `web` folder next to the `isotrail` 
 ## stats
 
 ```text
-isotrail stats <hike.gpx | hike.itb> [--json] [--units metric|imperial]
+isotrail stats <hike.gpx | hike.itb> [--json] [--units metric|imperial] [--weather [--offline]]
 ```
 
 Prints a hike's statistics: distance, elevation gain and loss, the elevation range, elapsed and moving time, start and end times in the local time zone and in UTC, the bounding box, and the number of points and segments.
@@ -218,6 +222,25 @@ Morning ridge walk
 
 `--json` prints the same values as JSON for scripts, always in metres and seconds (`distance_m`, `gain_m`, `moving_s` and so on), whatever `--units` says.
 
+`--weather` adds the weather during the hike: from the bundle, or looked up on [Open-Meteo](https://open-meteo.com/) for a GPX file (`--offline` only uses the cache). A summary comes first, then one row per hour in local time. Temperatures and wind are values at the hour; rain and snow are what fell in the hour before it.
+
+```text
+  Weather    light rain (Open-Meteo archive)
+  Temp       11 – 14 °C
+  Rain       1.2 mm
+  Snowfall   none
+  Wind       up to 32 km/h WSW
+  Credit     Weather data by Open-Meteo.com
+
+  Hour       Temp  Conditions              Cloud l/m/h %    Precip  Wind
+  Sat 14 Jun 2025
+  09:00   11.2 °C  overcast                     95/40/10         —  25 km/h SW
+  10:00   12.0 °C  light rain                   90/60/20    0.8 mm  29 km/h WSW
+  ...
+```
+
+With `--json`, the bundle's hourly samples are under `weather.samples`, with keys such as `temperature_c`, `cloud_cover_low_pct`, `precipitation_mm`, `snowfall_cm`, `snow_depth_m`, `wind_speed_m_s` and `wind_direction_deg` (where the wind blows from), and the WMO `weather_code` with its `condition`.
+
 ## style-lab
 
 ```text
@@ -233,7 +256,7 @@ isotrail cache path
 isotrail cache clear [--yes]
 ```
 
-Downloaded elevation tiles and map data are cached on disk, so later renders of the same area are fast and can work offline. `cache path` prints where the cache is, and `cache clear` deletes it after asking (`--yes` skips the question).
+Downloaded elevation tiles, map data and weather are cached on disk, so later renders of the same area are fast and can work offline. `cache path` prints where the cache is, and `cache clear` deletes it after asking (`--yes` skips the question).
 
 | System | Cache directory |
 | --- | --- |

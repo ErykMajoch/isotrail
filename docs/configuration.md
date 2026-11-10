@@ -54,6 +54,6 @@ A switch set to `true` in the user file can be turned off again with `false` in 
 | Variable | Effect |
 | --- | --- |
 | `ISOTRAIL_CONFIG` | Path of the user config file. Empty means none |
-| `ISOTRAIL_CACHE_DIR` | Directory for downloaded elevation and map data (see [`cache`](usage.md#cache)) |
+| `ISOTRAIL_CACHE_DIR` | Directory for downloaded elevation, map data and weather (see [`cache`](usage.md#cache)) |
 | `ISOTRAIL_OVERPASS_URL` | Overpass API endpoint for OpenStreetMap data, the same as `--overpass-url` |
 | `ISOTRAIL_GPU` | `auto` (default), `hardware` or `software`. `software` forces a software renderer (WARP on Windows, lavapipe on Linux), which is useful on servers without a GPU |

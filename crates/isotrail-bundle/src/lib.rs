@@ -8,6 +8,7 @@ mod format;
 mod landcover;
 mod scene;
 mod units;
+mod weather;
 
 pub use error::BundleError;
 pub use format::{FORMAT_VERSION, MAGIC, is_bundle};
@@ -17,3 +18,7 @@ pub use scene::{
     RoutePoint, SceneBundle, SunSample, Terrain, WaterBody,
 };
 pub use units::Units;
+pub use weather::{
+    Precipitation, WEATHER_ATTRIBUTION, Weather, WeatherDataset, WeatherSample, WeatherState,
+    weather_condition,
+};

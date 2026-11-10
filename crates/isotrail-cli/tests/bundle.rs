@@ -5,8 +5,9 @@ use std::process::{Command, Output, Stdio};
 
 use isotrail_bundle::SceneBundle;
 use isotrail_geo::{
-    Cache, CachedFetcher, FeatureSource, Fetcher, Footprint, Grid, OVERPASS_URL, OverpassSource,
-    RecordedFetcher, TerrariumSource, TileId,
+    Cache, CachedFetcher, FeatureSource, Fetcher, Footprint, Grid, OPEN_METEO_ARCHIVE_URL,
+    OVERPASS_URL, OpenMeteoSource, OverpassSource, RecordedFetcher, TerrariumSource, TileId,
+    WeatherRequest,
 };
 use isotrail_track::{GpxReader, TrackReader};
 
@@ -63,6 +64,18 @@ fn warm(cache_dir: &Path, map_data: bool) {
     }
 }
 
+fn warm_weather(cache_dir: &Path) {
+    let mut file = File::open(fixtures().join("gpx/snowdon.gpx")).unwrap();
+    let track = GpxReader.read(&mut file).unwrap().clean().unwrap();
+    let request = WeatherRequest::from_track(&track, 0).unwrap();
+    let weather = CachedFetcher::new(
+        RecordedFetcher::new(fixtures().join("weather")),
+        Cache::new(cache_dir),
+    );
+    let url = OpenMeteoSource::<RecordedFetcher>::url(OPEN_METEO_ARCHIVE_URL, &request);
+    weather.get(&url).unwrap();
+}
+
 fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
@@ -82,6 +95,7 @@ fn offline_bundle_writes_the_bundle_and_debug_images_from_the_cache() {
     let temp = tempfile::tempdir().unwrap();
     let cache_dir = temp.path().join("cache");
     warm(&cache_dir, true);
+    warm_weather(&cache_dir);
 
     let debug = temp.path().join("debug");
     let itb = temp.path().join("snowdon.itb");
@@ -117,6 +131,10 @@ fn offline_bundle_writes_the_bundle_and_debug_images_from_the_cache() {
     assert!(stdout.contains("\nLandcover: "), "{stdout}");
     assert!(stdout.contains(", bare rock "), "{stdout}");
     assert!(stdout.contains("levelled\n"), "{stdout}");
+    assert!(
+        stdout.contains("\nWeather: drizzle, 9 – 10 °C, 0.6 mm rain (Open-Meteo archive)\n"),
+        "{stdout}"
+    );
     assert!(stdout.contains("\nRoute: "), "{stdout}");
     let size = std::fs::metadata(&itb).unwrap().len().div_ceil(1024);
     assert!(
@@ -127,6 +145,13 @@ fn offline_bundle_writes_the_bundle_and_debug_images_from_the_cache() {
     assert_eq!((bundle.grid.cols, bundle.grid.rows), (32, 16));
     assert_eq!(bundle.meta.title, "Synthetic Snowdon Descent");
     assert!(!bundle.route.points.is_empty());
+    let weather = bundle.weather.unwrap();
+    assert_eq!(weather.samples.len(), 4);
+    assert_eq!(
+        bundle.meta.provenance.weather.as_deref(),
+        Some("Open-Meteo archive at 1 location")
+    );
+    assert!(text(&output.stderr).is_empty(), "{}", text(&output.stderr));
     assert_eq!(png_size(&debug.join("heightmap.png")), (32, 16));
     for name in ["hillshade.png", "landcover.png", "water.png", "paths.png"] {
         assert_eq!(png_size(&debug.join(name)), (128, 64), "{name}");
@@ -241,6 +266,7 @@ fn stats_of_a_bundle_match_the_gpx() {
     let temp = tempfile::tempdir().unwrap();
     let cache_dir = temp.path().join("cache");
     warm(&cache_dir, true);
+    warm_weather(&cache_dir);
     let itb = temp.path().join("hike.itb");
     let output = isotrail(
         &cache_dir,
@@ -259,7 +285,13 @@ fn stats_of_a_bundle_match_the_gpx() {
     let renamed = temp.path().join("hike.bin");
     std::fs::copy(&itb, &renamed).unwrap();
 
-    for extra in [&[][..], &["--json"], &["--units", "imperial"]] {
+    for extra in [
+        &[][..],
+        &["--json"],
+        &["--units", "imperial"],
+        &["--weather", "--offline"],
+        &["--weather", "--offline", "--json"],
+    ] {
         let stats = |file: &str| {
             let output = isotrail(&cache_dir, &[&["stats", file][..], extra].concat());
             assert!(output.status.success(), "{}", text(&output.stderr));
@@ -277,7 +309,7 @@ fn stats_of_a_damaged_bundle_explains_why() {
     for (name, bytes, reason) in [
         (
             "damaged.itb",
-            &b"ITB1\x03\x00not deflate"[..],
+            &b"ITB1\x04\x00not deflate"[..],
             "the bundle is damaged",
         ),
         (
@@ -296,6 +328,112 @@ fn stats_of_a_damaged_bundle_explains_why() {
         assert!(stderr.contains("could not read"), "{stderr}");
         assert!(stderr.contains(reason), "{stderr}");
     }
+}
+
+#[test]
+fn weather_is_left_out_when_it_cannot_be_found_or_is_not_wanted() {
+    let temp = tempfile::tempdir().unwrap();
+    let cache_dir = temp.path().join("cache");
+    warm(&cache_dir, true);
+    let itb = temp.path().join("hike.itb");
+    let args = [
+        "bundle",
+        &gpx(),
+        "-o",
+        itb.to_str().unwrap(),
+        "--detail",
+        "32",
+        "--offline",
+    ];
+    for (extra, warning) in [(&[][..], true), (&["--no-weather"][..], false)] {
+        let output = isotrail(&cache_dir, &[&args[..], extra].concat());
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        assert!(text(&output.stdout).contains("\nWeather: none\n"));
+        let stderr = text(&output.stderr);
+        assert_eq!(
+            stderr.contains("could not get the weather, so it is left out"),
+            warning,
+            "{stderr}"
+        );
+        if warning {
+            assert!(stderr.contains("is not in the cache"), "{stderr}");
+        }
+        let bundle = SceneBundle::from_bytes(&std::fs::read(&itb).unwrap()).unwrap();
+        assert_eq!(bundle.weather, None);
+        assert_eq!(bundle.meta.provenance.weather, None);
+
+        let output = isotrail(&cache_dir, &["stats", itb.to_str().unwrap(), "--weather"]);
+        assert!(output.status.success());
+        assert!(text(&output.stderr).contains("the bundle has no weather"));
+        assert!(!text(&output.stdout).contains("Credit"));
+    }
+}
+
+#[test]
+fn stats_show_the_weather_hour_by_hour() {
+    let temp = tempfile::tempdir().unwrap();
+    warm_weather(temp.path());
+    let output = isotrail(temp.path(), &["stats", &gpx(), "--weather", "--offline"]);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let stdout = text(&output.stdout);
+    for line in [
+        "  Weather    drizzle (Open-Meteo archive)\n",
+        "  Temp       9 – 10 °C\n",
+        "  Rain       0.6 mm\n",
+        "  Snowfall   none\n",
+        "  Credit     Weather data by Open-Meteo.com\n",
+        "  Sat 14 Jun 2025\n",
+        "  10:00    9.6 °C  light drizzle",
+        "  11:00    8.6 °C  drizzle",
+    ] {
+        assert!(stdout.contains(line), "{line} in {stdout}");
+    }
+
+    let output = isotrail(
+        temp.path(),
+        &["stats", &gpx(), "--weather", "--offline", "--json"],
+    );
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let weather = &json["weather"];
+    assert_eq!(weather["dataset"], "archive");
+    assert_eq!(weather["attribution"], "Weather data by Open-Meteo.com");
+    let samples = weather["samples"].as_array().unwrap();
+    assert_eq!(samples.len(), 4);
+    assert_eq!(samples[1]["time"], "2025-06-14T09:00:00Z");
+    assert_eq!(samples[1]["condition"], "light drizzle");
+    for key in [
+        "temperature_c",
+        "weather_code",
+        "cloud_cover_pct",
+        "cloud_cover_low_pct",
+        "precipitation_mm",
+        "rain_mm",
+        "snowfall_cm",
+        "snow_depth_m",
+        "wind_speed_m_s",
+        "wind_direction_deg",
+    ] {
+        assert!(samples[1][key].is_number(), "{key}");
+    }
+
+    let plain = isotrail(temp.path(), &["stats", &gpx(), "--json"]);
+    let json: serde_json::Value = serde_json::from_slice(&plain.stdout).unwrap();
+    assert!(json.get("weather").is_none());
+
+    let cold = tempfile::tempdir().unwrap();
+    let output = isotrail(cold.path(), &["stats", &gpx(), "--weather", "--offline"]);
+    assert!(output.status.success());
+    assert!(text(&output.stderr).contains("could not get the weather"));
+    assert!(text(&output.stdout).contains("Distance"));
+    assert!(!text(&output.stdout).contains("Credit"));
+
+    let untimed = fixtures().join("gpx/no-time.gpx");
+    let output = isotrail(
+        cold.path(),
+        &["stats", untimed.to_str().unwrap(), "--weather", "--offline"],
+    );
+    assert!(output.status.success());
+    assert!(text(&output.stderr).contains("the track has no times"));
 }
 
 #[test]

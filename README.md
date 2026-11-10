@@ -143,6 +143,7 @@ Bug reports, ideas and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBU
 
 - Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), available under the [ODbL](https://opendatacommons.org/licenses/odbl/), fetched through the [Overpass API](https://overpass-api.de/)
 - Elevation data from [Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) on AWS Open Data, assembled by [Tilezen joerd](https://github.com/tilezen/joerd) from sources including SRTM, GMTED2010 and 3DEP (courtesy of the U.S. Geological Survey), ETOPO1 (NOAA), EU-DEM (produced using Copernicus data and information funded by the European Union) and national datasets such as © Environment Agency copyright and/or database right 2015 (see the [full attribution list](https://github.com/tilezen/joerd/blob/master/docs/attribution.md))
+- Weather data by [Open-Meteo.com](https://open-meteo.com/), available under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 - Time zones from [tzf-rs](https://github.com/ringsaturn/tzf-rs), using [timezone-boundary-builder](https://github.com/evansiroky/timezone-boundary-builder) data © OpenStreetMap contributors (ODbL)
 - Palettes by AdamCYounis, Kerrie Lake and Adigun A. Polack, and the [monogram](https://datagoblin.itch.io/monogram) font by Vinícius Menézio (CC0); see [assets/README.md](assets/README.md)
 

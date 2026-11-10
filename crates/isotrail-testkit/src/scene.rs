@@ -1,6 +1,6 @@
 use isotrail_bundle::{
     Bounds, GridInfo, HikeStats, Landcover, Metadata, ProfileSample, Provenance, Route, RoutePoint,
-    SceneBundle, Terrain, WaterBody, line_mask,
+    SceneBundle, Terrain, WaterBody, Weather, WeatherDataset, WeatherSample, line_mask,
 };
 
 /// An unrotated grid centred on the origin
@@ -74,6 +74,7 @@ pub fn bundle(grid: GridInfo, heights_m: &[f32], landcover: &[Landcover]) -> Sce
                 generator: "isotrail-testkit".into(),
                 elevation: "synthetic".into(),
                 map_data: "synthetic".into(),
+                weather: None,
             },
         },
         grid,
@@ -84,6 +85,7 @@ pub fn bundle(grid: GridInfo, heights_m: &[f32], landcover: &[Landcover]) -> Sce
         profile: Vec::new(),
         sun: Vec::new(),
         moon: Vec::new(),
+        weather: None,
     };
     bundle.prop_seed = bundle.content_seed();
     bundle
@@ -187,6 +189,40 @@ pub fn hike_bundle() -> SceneBundle {
         })
         .collect();
     bundle
+}
+
+/// Made-up hourly weather from `first` (Unix seconds on the hour): a cold
+/// front clearing to sun, with rain then snow showers on the way
+pub fn synthetic_weather(first: i64, hours: usize) -> Weather {
+    let sample = |i: usize| {
+        let h = i as f32;
+        let (code, rain, snow) = match i % 6 {
+            1 => (61, 0.6, 0.0),
+            2 => (85, 0.0, 0.35),
+            3 => (3, 0.0, 0.0),
+            4 => (1, 0.0, 0.0),
+            _ => (2, 0.0, 0.0),
+        };
+        WeatherSample {
+            time: first + i as i64 * 3600,
+            temperature_c: 2.0 + h * 1.5,
+            weather_code: code,
+            cloud_cover_pct: (90.0 - h * 15.0).max(10.0),
+            cloud_low_pct: (70.0 - h * 15.0).max(0.0),
+            cloud_mid_pct: 40.0,
+            cloud_high_pct: 20.0,
+            precipitation_mm: rain + snow / 0.7,
+            rain_mm: rain,
+            snowfall_cm: snow,
+            snow_depth_m: 0.05,
+            wind_speed_m_s: 8.0 - h,
+            wind_direction_deg: (250.0 + h * 10.0) % 360.0,
+        }
+    };
+    Weather {
+        dataset: WeatherDataset::Archive,
+        samples: (0..hours).map(sample).collect(),
+    }
 }
 
 #[cfg(test)]
