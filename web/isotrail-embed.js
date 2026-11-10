@@ -66,11 +66,13 @@ template.innerHTML = `
 <style>
   :host {
     --isotrail-panel: rgb(32 46 55 / 0.78);
+    --isotrail-edge: #819796;
     --isotrail-text: #ebede9;
     --isotrail-accent: #a4dddb;
+    --isotrail-progress: #d64834;
+    --isotrail-track: rgb(32 46 55 / 0.45);
     --isotrail-background: transparent;
-    display: flex;
-    flex-direction: column;
+    display: block;
     overflow: hidden;
     contain: content;
   }
@@ -115,40 +117,82 @@ template.innerHTML = `
   }
   :host([data-state="fallback"]:not([poster])) .message { display: grid; }
   .controls {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px;
-    background: var(--isotrail-panel);
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
     color: var(--isotrail-text);
   }
-  :host(:not([data-state="ready"])) .controls > * { visibility: hidden; }
-  :host([data-state="fallback"]) .controls { display: none; }
+  .controls > * { pointer-events: auto; }
+  :host(:not([data-state="ready"])) .controls { visibility: hidden; }
+  .buttons {
+    position: absolute;
+    bottom: 16px;
+    display: flex;
+    gap: 2px;
+  }
+  .start { left: 8px; }
+  .end { right: 8px; }
+  /* Square, with the corners cut and a lit top edge, like the panels in the stills */
   button {
-    flex: none;
     display: grid;
     place-items: center;
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     padding: 0;
     border: 0;
-    border-radius: 4px;
-    background: transparent;
+    border-radius: 0;
+    background: var(--isotrail-panel);
+    box-shadow: inset 0 2px 0 -1px var(--isotrail-edge);
+    clip-path: polygon(2px 0, calc(100% - 2px) 0, 100% 2px, 100% calc(100% - 2px),
+      calc(100% - 2px) 100%, 2px 100%, 0 calc(100% - 2px), 0 2px);
     color: inherit;
     cursor: pointer;
   }
-  button:hover { background: rgb(255 255 255 / 0.12); }
-  button[aria-disabled="true"] { opacity: 0.4; cursor: default; }
-  button:focus-visible, input:focus-visible {
-    outline: 2px solid var(--isotrail-accent);
-    outline-offset: 1px;
+  button:hover { background-color: rgb(52 70 80 / 0.9); }
+  button[aria-disabled="true"] { cursor: default; }
+  button[aria-disabled="true"] svg { opacity: 0.4; }
+  button:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--isotrail-accent);
   }
   svg { width: 16px; height: 16px; }
+  /* The route drawn so far, as a line along the bottom edge with a light
+     tick at its head; the input is taller than the line, to be easy to grab */
   input {
-    flex: 1;
-    min-width: 40px;
-    margin: 0 4px;
-    accent-color: var(--isotrail-accent);
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    height: 12px;
+    margin: 0;
+    appearance: none;
+    -webkit-appearance: none;
+    --walked: 100%;
+    background: linear-gradient(to right,
+        var(--isotrail-progress) var(--walked),
+        var(--isotrail-text) var(--walked) calc(var(--walked) + 2px),
+        var(--isotrail-track) calc(var(--walked) + 2px))
+      bottom / 100% 4px no-repeat;
+    cursor: pointer;
+    outline: none;
+  }
+  input:hover, input:focus-visible { background-size: 100% 6px; }
+  input:focus-visible { box-shadow: inset 0 -8px 0 -6px var(--isotrail-accent); }
+  input::-webkit-slider-runnable-track { height: 100%; background: transparent; }
+  input::-moz-range-track { height: 100%; background: transparent; }
+  input::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 2px;
+    height: 12px;
+    border: 0;
+    background: transparent;
+  }
+  input::-moz-range-thumb {
+    width: 2px;
+    height: 12px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
   }
   .hint {
     position: absolute;
@@ -178,13 +222,17 @@ template.innerHTML = `
   <img alt="Hike diorama">
   <div class="message">This browser can't show the 3D view.</div>
   <div class="hint" aria-live="polite"></div>
-</div>
-<div class="controls">
-  <button type="button" part="play" data-action="play" aria-label="Play">${ICONS.play}</button>
-  <input type="range" part="scrubber" min="0" max="1000" value="1000" aria-label="Route drawn">
-  <button type="button" part="zoom-out" data-action="zoom-out" aria-label="Zoom out">${ICONS.zoomOut}</button>
-  <button type="button" part="zoom-in" data-action="zoom-in" aria-label="Zoom in">${ICONS.zoomIn}</button>
-  <button type="button" part="reset" data-action="reset" aria-label="Reset view">${ICONS.reset}</button>
+  <div class="controls">
+    <div class="buttons start">
+      <button type="button" part="play" data-action="play" aria-label="Play">${ICONS.play}</button>
+    </div>
+    <div class="buttons end">
+      <button type="button" part="zoom-out" data-action="zoom-out" aria-label="Zoom out">${ICONS.zoomOut}</button>
+      <button type="button" part="zoom-in" data-action="zoom-in" aria-label="Zoom in">${ICONS.zoomIn}</button>
+      <button type="button" part="reset" data-action="reset" aria-label="Reset view">${ICONS.reset}</button>
+    </div>
+    <input type="range" part="scrubber" min="0" max="1000" value="1000" aria-label="Route drawn">
+  </div>
 </div>
 <p class="help" id="help">Drag to turn the diorama. Pinch, or hold ${ZOOM_KEY} and scroll, to zoom; once zoomed in, drag to move around and Shift-drag to turn. Keys: left and right arrows turn, plus and minus zoom, Shift with the arrows moves, 0 resets the view, Space plays and pauses.</p>
 `;
@@ -621,6 +669,7 @@ class IsotrailHike extends HTMLElement {
 
   #syncScrubber() {
     this.#scrubber.value = Math.round(this.#progress * 1000);
+    this.#scrubber.style.setProperty('--walked', `${this.#progress * 100}%`);
     this.#scrubber.setAttribute('aria-valuetext', `${Math.round(this.#progress * 100)}%`);
   }
 

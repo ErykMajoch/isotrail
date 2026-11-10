@@ -105,7 +105,7 @@ import Hike from '../components/Hike.astro';
 |---|---|
 | `src` | The scene bundle (`.itb`) to show |
 | `poster` | An image shown straight away, and kept if the browser can't draw the diorama |
-| `aspect` | `story` (9:16), `feed` (4:5), `square` or `wide` (16:9, the default). The element fills its container's width at this aspect, with the control bar underneath |
+| `aspect` | `story` (9:16), `feed` (4:5), `square` or `wide` (16:9, the default). The element fills its container's width at this aspect |
 | `autoplay` | Plays the route once as soon as the diorama is ready, unless the visitor prefers reduced motion |
 | `backend` | `webgl` forces the WebGL2 fallback, for testing it in a browser that has WebGPU |
 
@@ -121,7 +121,7 @@ The poster shows at once. The renderer (about 3 MB) only downloads when the elem
 | Back to the start view | the reset button | the reset button | 0 or Home |
 | Play and pause | the play button | the play button | Space or K |
 
-A plain mouse wheel keeps scrolling the page, and shows a reminder to hold Ctrl (⌘ on a Mac). Playing draws the route over about eight seconds, while the camera settles back to the start view as in the animated exports. The slider under the diorama scrubs along the route. Zooming never shows more than the whole slab, and the zoom centres on the pointer.
+A plain mouse wheel keeps scrolling the page, and shows a reminder to hold Ctrl (⌘ on a Mac). Playing draws the route over about eight seconds, while the camera settles back to the start view as in the animated exports. The line along the diorama's bottom edge shows how much of the route is drawn, in the route's colour; click or drag along it to scrub, or focus it and use the arrow keys. The play button sits in the bottom-left corner, and the zoom and reset buttons in the bottom-right. Zooming never shows more than the whole slab, and the zoom centres on the pointer.
 
 Scripts can call `play()` and `pause()` on the element, and read `playing`.
 
@@ -132,14 +132,17 @@ The element is a block that fills its container's width. These custom properties
 ```css
 isotrail-hike {
   --isotrail-background: transparent;   /* behind the diorama */
-  --isotrail-panel: rgb(32 46 55 / 0.78); /* control bar */
-  --isotrail-text: #ebede9;             /* icons */
-  --isotrail-accent: #a4dddb;           /* slider and focus rings */
+  --isotrail-panel: rgb(32 46 55 / 0.78); /* buttons */
+  --isotrail-edge: #819796;             /* the buttons' lit top edge */
+  --isotrail-text: #ebede9;             /* icons, and the head of the progress line */
+  --isotrail-accent: #a4dddb;           /* focus rings */
+  --isotrail-progress: #d64834;         /* the route drawn so far */
+  --isotrail-track: rgb(32 46 55 / 0.45); /* the route still to come */
   border-radius: 6px;
 }
 ```
 
-The parts `canvas`, `play`, `scrubber`, `zoom-in`, `zoom-out` and `reset` can be styled with `::part()`. The element sets `data-state` to `poster`, `loading`, `ready` or `fallback`.
+The parts `canvas`, `play`, `scrubber` (the progress line), `zoom-in`, `zoom-out` and `reset` can be styled with `::part()`. The element sets `data-state` to `poster`, `loading`, `ready` or `fallback`.
 
 ## The demo
 
