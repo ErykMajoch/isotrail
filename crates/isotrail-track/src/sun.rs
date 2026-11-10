@@ -12,8 +12,8 @@ pub struct SunPosition {
 /// The sun's position at `time` over a point, by NOAA's solar calculator
 /// equations (Meeus, Astronomical Algorithms)
 pub fn sun_position(lat: f64, lon: f64, time: DateTime<Utc>) -> SunPosition {
-    let unix_s = time.timestamp() as f64 + f64::from(time.timestamp_subsec_millis()) / 1000.0;
-    let sun = Solar::at(unix_s / 86_400.0 + 2_440_587.5);
+    let unix_s = unix_seconds(time);
+    let sun = Solar::at(julian_day(unix_s));
     let day_minutes = unix_s.rem_euclid(86_400.0) / 60.0;
     let solar_minutes = day_minutes + sun.equation_of_time_min + 4.0 * lon;
     let hour_angle = (solar_minutes / 4.0 - 180.0).to_radians();
@@ -31,13 +31,23 @@ pub fn sun_position(lat: f64, lon: f64, time: DateTime<Utc>) -> SunPosition {
     }
 }
 
-struct Solar {
-    declination_deg: f64,
-    equation_of_time_min: f64,
+pub(crate) fn unix_seconds(time: DateTime<Utc>) -> f64 {
+    time.timestamp() as f64 + f64::from(time.timestamp_subsec_millis()) / 1000.0
+}
+
+pub(crate) fn julian_day(unix_s: f64) -> f64 {
+    unix_s / 86_400.0 + 2_440_587.5
+}
+
+pub(crate) struct Solar {
+    pub declination_deg: f64,
+    pub equation_of_time_min: f64,
+    pub apparent_longitude_deg: f64,
+    pub obliquity_deg: f64,
 }
 
 impl Solar {
-    fn at(julian_day: f64) -> Solar {
+    pub fn at(julian_day: f64) -> Solar {
         let t = (julian_day - 2_451_545.0) / 36_525.0;
         let mean_longitude = (280.46646 + t * (36000.76983 + t * 0.0003032)).rem_euclid(360.0);
         let mean_anomaly = 357.52911 + t * (35999.05029 - t * 0.0001537);
@@ -62,12 +72,14 @@ impl Solar {
         Solar {
             declination_deg: declination.to_degrees(),
             equation_of_time_min: 4.0 * equation_of_time.to_degrees(),
+            apparent_longitude_deg: apparent_longitude,
+            obliquity_deg: obliquity.to_degrees(),
         }
     }
 }
 
 /// NOAA's approximation for a standard atmosphere
-fn refraction_deg(elevation_deg: f64) -> f64 {
+pub(crate) fn refraction_deg(elevation_deg: f64) -> f64 {
     let e = elevation_deg;
     let tan = e.to_radians().tan();
     let arcsec = if e > 85.0 {
@@ -92,14 +104,14 @@ mod tests {
         Utc.with_ymd_and_hms(y, mo, d, h, mi, s).unwrap()
     }
 
-    fn julian_day(time: DateTime<Utc>) -> f64 {
-        time.timestamp() as f64 / 86_400.0 + 2_440_587.5
+    fn day(time: DateTime<Utc>) -> f64 {
+        julian_day(unix_seconds(time))
     }
 
     #[test]
     fn matches_meeus_example_25a() {
         // 1992 October 13.0 TD: declination −7.78507°
-        let sun = Solar::at(julian_day(utc(1992, 10, 13, 0, 0, 0)));
+        let sun = Solar::at(day(utc(1992, 10, 13, 0, 0, 0)));
         assert!(
             (sun.declination_deg + 7.78507).abs() < 0.002,
             "{}",
@@ -110,7 +122,7 @@ mod tests {
     #[test]
     fn matches_meeus_example_28a() {
         // 1992 October 13.0 TD: equation of time +13m 42.7s
-        let sun = Solar::at(julian_day(utc(1992, 10, 13, 0, 0, 0)));
+        let sun = Solar::at(day(utc(1992, 10, 13, 0, 0, 0)));
         let expected = 13.0 + 42.7 / 60.0;
         assert!(
             (sun.equation_of_time_min - expected).abs() < 0.02,

@@ -1,4 +1,4 @@
-use isotrail_bundle::{SunSample, Units};
+use isotrail_bundle::{MoonSample, SunSample, Units};
 use isotrail_export::{ExportError, GifWriter, render_clip, render_still, upscale};
 use isotrail_render::{
     Aspect, Background, DEFAULT_PALETTE, DEFAULT_STATS, DEFAULT_YAW_OFFSET_DEG, DateFormat, Frame,
@@ -65,16 +65,24 @@ fn low_suns_and_night_match_goldens() {
     let gpu = isotrail_testkit::gpu();
     let framing = Aspect::Story.framing(6).unwrap();
     let mut mean = Vec::new();
-    for (name, azimuth_deg, elevation_deg) in [
-        ("terrain-voxel", 150.0, 40.0),
-        ("light-golden-hour", 290.0, 3.0),
-        ("light-night", 330.0, -20.0),
+    // The full moon stands ahead and to the right of the view
+    for (name, azimuth_deg, elevation_deg, moon_elevation_deg) in [
+        ("terrain-voxel", 150.0, 40.0, -30.0),
+        ("light-golden-hour", 290.0, 3.0, -30.0),
+        ("light-night", 330.0, -20.0, -30.0),
+        ("light-moonlit", 330.0, -20.0, 35.0),
     ] {
         let mut bundle = diorama_bundle();
         bundle.sun = vec![SunSample {
             time: 1_750_000_000,
             azimuth_deg,
             elevation_deg,
+        }];
+        bundle.moon = vec![MoonSample {
+            time: 1_750_000_000,
+            azimuth_deg: 50.0,
+            elevation_deg: moon_elevation_deg,
+            illuminated: 1.0,
         }];
         let frame = render_still(
             &gpu,
@@ -90,6 +98,74 @@ fn low_suns_and_night_match_goldens() {
         assert_golden(name, frame.width(), frame.height(), frame.rgba());
     }
     assert!(mean[0] > mean[1] && mean[1] * 2 > mean[2] * 3, "{mean:?}");
+    assert!(mean[3] > mean[2], "{mean:?}");
+}
+
+fn mean(frame: &Frame) -> f64 {
+    frame.rgba().iter().map(|&c| f64::from(c)).sum::<f64>() / frame.rgba().len() as f64
+}
+
+/// A hike from an afternoon into the night: the light follows the clock at
+/// the route's head through the clip, unless the clip holds one sun
+#[test]
+fn clips_follow_the_sun_unless_one_is_held() {
+    let gpu = isotrail_testkit::gpu();
+    let mut bundle = hike_bundle();
+    let start = 1_750_000_000;
+    for (i, point) in bundle.route.points.iter_mut().enumerate() {
+        point.time = Some(start + i as i64 * 600);
+    }
+    let end = bundle.route.points.last().unwrap().time.unwrap();
+    bundle.sun = [(start, 250.0, 35.0), (end, 320.0, -25.0)]
+        .map(|(time, azimuth_deg, elevation_deg)| SunSample {
+            time,
+            azimuth_deg,
+            elevation_deg,
+        })
+        .to_vec();
+    bundle.moon = [start, end]
+        .map(|time| MoonSample {
+            time,
+            azimuth_deg: 90.0,
+            elevation_deg: -30.0,
+            illuminated: 0.2,
+        })
+        .to_vec();
+    let framing = Aspect::Square.framing(6).unwrap();
+    let motion = Motion {
+        timeline: Timeline {
+            duration_s: 1.0,
+            fps: 4,
+            step_fps: None,
+        },
+        ..Motion::default()
+    };
+    let clip = |motion: &Motion| {
+        let mut means = Vec::new();
+        render_clip(
+            &gpu,
+            &bundle,
+            &VoxelMesher::default(),
+            &framing,
+            &Look::default(),
+            motion,
+            |_, frame| -> Result<(), ExportError> {
+                means.push(mean(frame));
+                Ok(())
+            },
+        )
+        .unwrap();
+        means
+    };
+    let following = clip(&motion);
+    assert!(following.windows(2).all(|w| w[0] > w[1]), "{following:?}");
+    assert!(following[0] > following[3] * 1.5, "{following:?}");
+    let held = clip(&Motion {
+        sun: Some(SunState::for_hike(&bundle)),
+        ..motion
+    });
+    assert_eq!(held[0], following[0]);
+    assert!(held[3] > following[3] * 1.5, "{held:?}");
 }
 
 #[test]

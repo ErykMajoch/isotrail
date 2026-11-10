@@ -1,5 +1,5 @@
 //! Track ingest for isotrail: reading GPX files into a clean in-memory track,
-//! hike statistics, the sun's position and the timeline used for animation
+//! hike statistics, the sun's and moon's positions and the timeline used for animation
 //!
 //! This crate is wasm-safe: no filesystem, network or thread access
 //!
@@ -22,6 +22,7 @@ mod error;
 mod geodesy;
 mod gpx;
 mod model;
+mod moon;
 mod reader;
 mod simplify;
 mod stats;
@@ -34,6 +35,7 @@ pub use geodesy::{EARTH_RADIUS_M, haversine_m};
 pub use gpx::GpxReader;
 pub use isotrail_bundle::Units;
 pub use model::{MIN_SEGMENT_POINTS, Segment, Track, TrackPoint};
+pub use moon::{MoonPosition, moon_position};
 pub use reader::TrackReader;
 pub use stats::{Bounds, GAIN_THRESHOLD_M, PAUSE_THRESHOLD, SMOOTHING_WINDOW_M, TrackStats};
 pub use sun::{SunPosition, sun_position};

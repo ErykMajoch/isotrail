@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use glam::Vec2;
 use isotrail_bundle::SceneBundle;
 use isotrail_render::{
-    Diorama, Framing, Gpu, Insets, Look, Mesher, OffscreenTarget, PixelGrid, Present, SunState,
-    TerrainMesh, TerrainRenderer, View, VoxelMesher,
+    Diorama, Framing, Gpu, Insets, Look, Mesher, OffscreenTarget, Pace, PixelGrid, Present,
+    SunState, TerrainMesh, TerrainRenderer, View, VoxelMesher, Walk,
 };
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
@@ -38,8 +38,10 @@ pub struct Viewer {
     mesh: TerrainMesh,
     look: Look,
     stage: Option<Stage>,
+    walk: Walk,
     view: View,
     progress: f32,
+    sun: SunState,
     id: u32,
 }
 
@@ -102,6 +104,7 @@ impl Viewer {
         let renderer = TerrainRenderer::new(&gpu);
         let present = Present::new(&gpu, config.format);
         let mesh = VoxelMesher::default().mesh(&bundle);
+        let (walk, sun) = (Walk::new(&bundle), SunState::for_hike(&bundle));
         Ok(Viewer {
             gpu,
             surface,
@@ -112,8 +115,10 @@ impl Viewer {
             mesh,
             look: Look::default(),
             stage: None,
+            walk,
             view: View::default(),
             progress: 1.0,
+            sun,
             id,
         })
     }
@@ -170,7 +175,7 @@ impl Viewer {
             self.mesh.clone(),
             &framing,
             &turn,
-            SunState::for_hike(&self.bundle),
+            self.sun,
         );
         let frame = OffscreenTarget::new(&self.gpu, grid.width, grid.height);
         // At the new scale the focus can fall outside the whole-slab view
@@ -182,10 +187,21 @@ impl Viewer {
         });
     }
 
-    /// Share of the route drawn, from 0 to 1
+    /// How far through drawing the route, from 0 to 1, at an even speed with
+    /// a pause for each night, lit by the time at the route's head; until
+    /// this is first called, the whole route shows under the sun at the
+    /// start, as on the poster
     #[wasm_bindgen(js_name = setProgress)]
     pub fn set_progress(&mut self, share: f32) {
-        self.progress = share.clamp(0.0, 1.0);
+        let step = self.walk.step(Pace::Distance, share);
+        self.progress = step.progress;
+        self.sun = step.time_s.map_or_else(
+            || SunState::for_hike(&self.bundle),
+            |time_s| SunState::during(&self.bundle, time_s),
+        );
+        if let Some(stage) = &mut self.stage {
+            stage.diorama.set_sun(self.sun);
+        }
     }
 
     /// Degrees the view turns from the still's

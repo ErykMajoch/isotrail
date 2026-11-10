@@ -370,7 +370,7 @@ fn write_clip(
         clip.motion,
         |moment, frame| -> anyhow::Result<()> {
             let mut frame = frame.clone();
-            let walked = walk.stats(moment.progress);
+            let walked = walk.stats_at(moment);
             let stats = args.overlay.walked_stats(clip.bundle, &walked);
             clip.overlays
                 .with_stats(&stats)

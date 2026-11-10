@@ -15,6 +15,12 @@ pub const DEFAULT_ORBIT_DEG: f32 = 30.0;
 const PAUSE_S: f64 = 60.0;
 /// Slower than this between two points counts as stopping
 const CRAWL_M_PER_S: f64 = 0.25;
+/// A stop at least this long is a night: the route waits while the clock
+/// runs through it
+const NIGHT_S: f64 = 6.0 * 3600.0;
+/// Share of the drawing each night takes, and all of them together at most
+const NIGHT_SHARE: f32 = 0.06;
+const MAX_NIGHTS_SHARE: f32 = 0.3;
 
 /// How long a clip runs and how often it changes
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -129,17 +135,30 @@ pub struct Moment {
     pub yaw_offset_deg: f32,
     /// Share of the route drawn, by distance
     pub progress: f32,
+    /// Unix seconds at the route's head, for routes with times
+    pub hike_time_s: Option<f64>,
 }
 
 impl Motion {
     pub fn moment(&self, walk: &Walk, index: u32) -> Moment {
         let time_s = self.timeline.frame_time(index);
+        let step = walk.step(self.pace, self.timeline.draw_share(time_s));
         Moment {
             time_s,
             yaw_offset_deg: self.orbit.yaw_offset_deg(self.timeline.share(time_s)),
-            progress: walk.progress(self.pace, self.timeline.draw_share(time_s)),
+            progress: step.progress,
+            hike_time_s: step.time_s,
         }
     }
+}
+
+/// How far the drawing has got: along the route, and on the hike's clock
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Step {
+    /// Share of the route's distance drawn
+    pub progress: f32,
+    /// Unix seconds at the route's head, for routes with times
+    pub time_s: Option<f64>,
 }
 
 /// The hike as it unfolds: how far along it is part-way through the
@@ -156,11 +175,16 @@ pub struct Walk {
 }
 
 /// The recorded times along the route, and the same with stops cut short
+/// and nights left out
 #[derive(Clone, Debug)]
 struct Clock {
+    /// Unix seconds at the first point
+    start_s: f64,
     distance_m: Vec<f32>,
     paced_s: Vec<f64>,
     real_s: Vec<f64>,
+    /// The points that a night follows
+    nights: Vec<usize>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -203,14 +227,90 @@ impl Walk {
     /// Share of the route's distance reached `draw_share` of the way through
     /// the drawing
     pub fn progress(&self, pace: Pace, draw_share: f32) -> f32 {
+        self.step(pace, draw_share).progress
+    }
+
+    /// Where the route's head is `draw_share` of the way through the
+    /// drawing, and the time there. Each night takes an equal slice of the
+    /// drawing, the head waiting while the clock runs through it
+    pub fn step(&self, pace: Pace, draw_share: f32) -> Step {
         let share = draw_share.clamp(0.0, 1.0);
-        match (pace, &self.clock) {
-            (Pace::Time, Some(clock)) if self.end_m > self.start_m => {
-                let distance = clock.distance_at(share);
-                ((distance - self.start_m) / (self.end_m - self.start_m)).clamp(0.0, 1.0)
+        let span = self.end_m - self.start_m;
+        let Some(clock) = &self.clock else {
+            return Step {
+                progress: share,
+                time_s: None,
+            };
+        };
+        let timed = pace == Pace::Time && span > 0.0;
+        let walked = |at: usize| -> f32 {
+            if timed {
+                (clock.paced_s[at] / clock.total_s()) as f32
+            } else {
+                self.share_of(clock.distance_m[at])
             }
-            _ => share,
+        };
+        let nights = &clock.nights;
+        let night_share = if nights.is_empty() {
+            0.0
+        } else {
+            NIGHT_SHARE.min(MAX_NIGHTS_SHARE / nights.len() as f32)
+        };
+        let walking = 1.0 - night_share * nights.len() as f32;
+        let (mut cursor, mut from, mut dawn) = (0.0, 0.0, None);
+        for &before in nights {
+            let to = walked(before);
+            let stretch = (to - from).max(0.0) * walking;
+            if share < cursor + stretch {
+                break;
+            }
+            cursor += stretch;
+            if share < cursor + night_share {
+                let t = f64::from((share - cursor) / night_share);
+                let (dusk, dawn) = (clock.real_s[before], clock.real_s[before + 1]);
+                return Step {
+                    progress: self.share_of(clock.distance_m[before]),
+                    time_s: Some(clock.start_s + dusk + (dawn - dusk) * t),
+                };
+            }
+            cursor += night_share;
+            from = to;
+            dawn = Some(clock.real_s[before + 1]);
         }
+        let walked_share = (from + (share - cursor) / walking).clamp(0.0, 1.0);
+        let (distance, real) = if timed {
+            let paced = f64::from(walked_share) * clock.total_s();
+            (clock.distance_at(walked_share), clock.real_at_paced(paced))
+        } else {
+            let distance = self.start_m + span * walked_share;
+            (distance, clock.real_at(distance))
+        };
+        // Past a night, the clock never runs back into it
+        let real = dawn.map_or(real, |dawn: f64| real.max(dawn));
+        Step {
+            progress: self.share_of(distance),
+            time_s: Some(clock.start_s + real),
+        }
+    }
+
+    fn share_of(&self, distance_m: f32) -> f32 {
+        if self.end_m > self.start_m {
+            ((distance_m - self.start_m) / (self.end_m - self.start_m)).clamp(0.0, 1.0)
+        } else {
+            1.0
+        }
+    }
+
+    /// The stats at a frame of a clip, the elapsed time following the clock
+    /// through nights
+    pub fn stats_at(&self, moment: &Moment) -> HikeStats {
+        let mut stats = self.stats(moment.progress);
+        if let (Some(clock), Some(time_s), Some(total)) =
+            (&self.clock, moment.hike_time_s, self.stats.elapsed_s)
+        {
+            stats.elapsed_s = Some(((time_s - clock.start_s).round() as i64).clamp(0, total));
+        }
+        stats
     }
 
     /// The stats over the first `progress` share of the route: distance,
@@ -315,9 +415,11 @@ impl Clock {
             return None;
         }
         let mut clock = Clock {
+            start_s: first as f64,
             distance_m: vec![points[0].distance_m],
             paced_s: vec![0.0],
             real_s: vec![0.0],
+            nights: Vec::new(),
         };
         let mut paced = 0.0;
         for (i, pair) in points.windows(2).enumerate() {
@@ -325,7 +427,10 @@ impl Clock {
             let dt = (b.time? - a.time?).max(0) as f64;
             let gap = route.breaks.binary_search(&(i as u32 + 1)).is_ok();
             let walk_s = f64::from((b.distance_m - a.distance_m).max(0.0)) / CRAWL_M_PER_S;
-            paced += if gap {
+            paced += if dt >= NIGHT_S {
+                clock.nights.push(i);
+                0.0
+            } else if gap {
                 dt.min(PAUSE_S)
             } else {
                 dt.min(PAUSE_S + walk_s)
@@ -363,6 +468,23 @@ impl Clock {
     /// Seconds since the start when the hike reached `distance_m`
     fn real_at(&self, distance_m: f32) -> f64 {
         self.at(distance_m, &self.real_s)
+    }
+
+    /// Seconds since the start once `paced_s` of the paced time has passed
+    fn real_at_paced(&self, paced_s: f64) -> f64 {
+        let i = self.paced_s.partition_point(|&s| s < paced_s);
+        if i == 0 {
+            return self.real_s[0];
+        }
+        if i == self.paced_s.len() {
+            return self.real_s[i - 1];
+        }
+        let (a, b) = (self.paced_s[i - 1], self.paced_s[i]);
+        if b <= a {
+            return self.real_s[i];
+        }
+        let t = (paced_s - a) / (b - a);
+        self.real_s[i - 1] + (self.real_s[i] - self.real_s[i - 1]) * t
     }
 
     fn at(&self, distance_m: f32, series: &[f64]) -> f64 {
@@ -543,13 +665,13 @@ mod tests {
 
     #[test]
     fn gaps_between_pieces_count_as_a_minute() {
-        // Overnight between the two pieces
+        // Two hours between the two pieces
         let walk = Walk::new(&hike(
             &[
                 (0.0, Some(0)),
                 (400.0, Some(400)),
-                (600.0, Some(50_000)),
-                (1000.0, Some(50_400)),
+                (600.0, Some(7_600)),
+                (1000.0, Some(8_000)),
             ],
             vec![2],
         ));
@@ -558,11 +680,135 @@ mod tests {
         assert_near(walk.progress(Pace::Time, 460.0 / total), 0.6);
     }
 
+    /// 400 m on the first evening, a night until 50 000 s, then 600 m
+    fn overnight() -> SceneBundle {
+        hike(
+            &[
+                (0.0, Some(0)),
+                (400.0, Some(400)),
+                (600.0, Some(50_000)),
+                (1000.0, Some(50_400)),
+            ],
+            vec![2],
+        )
+    }
+
+    const START: f64 = 1_750_000_000.0;
+
+    #[track_caller]
+    fn assert_step(step: Step, progress: f32, time_s: f64) {
+        assert_near(step.progress, progress);
+        let time = step.time_s.unwrap() - START;
+        assert!((time - time_s).abs() < 0.5, "{time} vs {time_s}");
+    }
+
+    #[test]
+    fn nights_hold_the_head_while_the_clock_runs() {
+        let walk = Walk::new(&overnight());
+        // The night takes 6% of the drawing, at 40% of the distance
+        let dusk = 0.4 * 0.94;
+        assert_step(walk.step(Pace::Distance, 0.0), 0.0, 0.0);
+        assert_step(walk.step(Pace::Distance, 0.2 * 0.94), 0.2, 200.0);
+        assert_step(
+            walk.step(Pace::Distance, dusk + 0.001),
+            0.4,
+            400.0 + 49_600.0 / 60.0,
+        );
+        assert_step(walk.step(Pace::Distance, dusk + 0.03), 0.4, 25_200.0);
+        assert_step(
+            walk.step(Pace::Distance, dusk + 0.059),
+            0.4,
+            50_000.0 - 49_600.0 / 60.0,
+        );
+        // Past the night the morning never runs back, even across the
+        // distance between the pieces
+        assert_step(
+            walk.step(Pace::Distance, dusk + 0.06 + 0.1 * 0.94),
+            0.5,
+            50_000.0,
+        );
+        assert_step(
+            walk.step(Pace::Distance, dusk + 0.06 + 0.4 * 0.94),
+            0.8,
+            50_200.0,
+        );
+        assert_step(walk.step(Pace::Distance, 1.0), 1.0, 50_400.0);
+
+        // By time the night is halfway through 800 s of walking
+        assert_step(walk.step(Pace::Time, 0.25 * 0.94), 0.2, 200.0);
+        assert_step(walk.step(Pace::Time, 0.5 * 0.94 + 0.03), 0.4, 25_200.0);
+        assert_step(
+            walk.step(Pace::Time, 0.5 * 0.94 + 0.06 + 0.25 * 0.94),
+            0.8,
+            50_200.0,
+        );
+        assert_step(walk.step(Pace::Time, 1.0), 1.0, 50_400.0);
+    }
+
+    #[test]
+    fn the_clock_never_runs_backwards() {
+        let walk = Walk::new(&overnight());
+        for pace in [Pace::Distance, Pace::Time] {
+            let mut previous = (0.0, START);
+            for i in 0..=1000 {
+                let step = walk.step(pace, i as f32 / 1000.0);
+                let time = step.time_s.unwrap();
+                assert!(
+                    step.progress >= previous.0 && time >= previous.1,
+                    "{pace:?} {i}"
+                );
+                previous = (step.progress, time);
+            }
+        }
+    }
+
+    #[test]
+    fn many_nights_share_at_most_thirty_percent_of_the_drawing() {
+        // Ten days of 100 m, each followed by a night
+        let points: Vec<(f32, Option<i64>)> = (0..20)
+            .map(|i| {
+                let day = i / 2;
+                let distance = (day * 100 + (i % 2) * 100) as f32;
+                (distance, Some(day as i64 * 86_400 + (i % 2) as i64 * 1_000))
+            })
+            .collect();
+        let walk = Walk::new(&hike(&points, (1..10).map(|d| d * 2).collect()));
+        let held = (0..=10_000)
+            .map(|i| walk.step(Pace::Distance, i as f32 / 10_000.0))
+            .collect::<Vec<_>>()
+            .windows(2)
+            .filter(|w| w[0].progress == w[1].progress)
+            .count();
+        assert!((2_900..=3_050).contains(&held), "{held}");
+    }
+
+    #[test]
+    fn elapsed_time_counts_through_the_night() {
+        let mut bundle = overnight();
+        bundle.meta.stats.elapsed_s = Some(50_400);
+        let walk = Walk::new(&bundle);
+        let at = |draw_share: f32| {
+            let step = walk.step(Pace::Distance, draw_share);
+            let moment = Moment {
+                time_s: 0.0,
+                yaw_offset_deg: 0.0,
+                progress: step.progress,
+                hike_time_s: step.time_s,
+            };
+            walk.stats_at(&moment)
+        };
+        let night = at(0.4 * 0.94 + 0.03);
+        assert_eq!(night.elapsed_s, Some(25_200));
+        assert!((night.distance_m - 400.0).abs() < 1e-3);
+        assert_eq!(at(1.0), bundle.meta.stats);
+    }
+
     #[test]
     fn routes_without_times_pace_by_distance() {
         let walk = Walk::new(&hike(&[(0.0, Some(0)), (1000.0, None)], Vec::new()));
         assert!(!walk.is_timed());
         assert_eq!(walk.progress(Pace::Time, 0.4), 0.4);
+        assert_eq!(walk.step(Pace::Distance, 0.4).time_s, None);
         let still = Walk::new(&hike(&[(0.0, Some(9)), (1000.0, Some(9))], Vec::new()));
         assert!(!still.is_timed());
     }
@@ -637,9 +883,11 @@ mod tests {
         };
         let first = motion.moment(&walk, 0);
         assert_eq!((first.time_s, first.progress), (0.0, 0.0));
+        assert_eq!(first.hike_time_s, Some(START));
         assert_near(first.yaw_offset_deg, -30.0);
         let last = motion.moment(&walk, motion.timeline.frame_count() - 1);
         assert_eq!(last.progress, 1.0);
+        assert_eq!(last.hike_time_s, Some(START + 4_600.0));
         assert_eq!(last.yaw_offset_deg, 0.0);
     }
 }

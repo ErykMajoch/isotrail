@@ -261,6 +261,8 @@ class IsotrailHike extends HTMLElement {
   #restarted = false;
 
   #progress = 1;
+  // Until played or scrubbed, the viewer shows the poster's light
+  #moved = false;
   #yaw = 0;
   #time = INTRO_S + DRAW_S;
   #playing = false;
@@ -285,6 +287,7 @@ class IsotrailHike extends HTMLElement {
       this.pause();
       this.#cancelSettle();
       this.#progress = this.#scrubber.value / 1000;
+      this.#moved = true;
       this.#time = INTRO_S + this.#progress * DRAW_S;
       this.#syncScrubber();
       this.#schedule();
@@ -331,6 +334,7 @@ class IsotrailHike extends HTMLElement {
 
   play() {
     if (!this.#viewer || this.#playing) return;
+    this.#moved = true;
     if (this.#progress >= 1) {
       this.#time = 0;
       this.#progress = 0;
@@ -411,6 +415,7 @@ class IsotrailHike extends HTMLElement {
     this.#drawn = false;
     this.#pointers.clear();
     this.#progress = 1;
+    this.#moved = false;
     this.#time = INTRO_S + DRAW_S;
     this.#yaw = 0;
     this.#syncPlayButton();
@@ -476,7 +481,7 @@ class IsotrailHike extends HTMLElement {
       }
       this.#syncScrubber();
     }
-    viewer.setProgress(this.#progress);
+    if (this.#moved) viewer.setProgress(this.#progress);
     viewer.setYaw(this.#yaw + (this.#settling ? orbit(this.#time) : 0));
     viewer.draw();
     if (!this.#drawn && this.#canvas.width > 0) {

@@ -1,8 +1,8 @@
 use anyhow::{Context, bail};
 use chrono::{NaiveDate, NaiveTime, TimeZone};
 use isotrail_bundle::SceneBundle;
-use isotrail_render::SunState;
-use isotrail_track::{Tz, sun_position, timezone_at};
+use isotrail_render::{Moon, SunState};
+use isotrail_track::{Tz, moon_position, sun_position, timezone_at};
 use tracing::info;
 
 pub fn parse_time(value: &str) -> Result<NaiveTime, String> {
@@ -10,8 +10,8 @@ pub fn parse_time(value: &str) -> Result<NaiveTime, String> {
         .map_err(|_| "expected a local time such as 20:30".to_owned())
 }
 
-/// The sun at the start of the hike, or at `time` on the hike's start date in
-/// its time zone
+/// The sun and moon at the start of the hike, or at `time` on the hike's
+/// start date in its time zone
 pub fn hike_sun(bundle: &SceneBundle, time: Option<NaiveTime>) -> anyhow::Result<SunState> {
     let grid = &bundle.grid;
     let Some(time) = time else {
@@ -49,13 +49,26 @@ pub fn hike_sun(bundle: &SceneBundle, time: Option<NaiveTime>) -> anyhow::Result
             )
         })?;
     let sun = sun_position(grid.origin_lat, grid.origin_lon, at.to_utc());
+    let moon = moon_position(grid.origin_lat, grid.origin_lon, at.to_utc());
     info!(
         azimuth = sun.azimuth_deg,
         elevation = sun.elevation_deg,
-        "sun at {}",
+        moon_azimuth = moon.azimuth_deg,
+        moon_elevation = moon.elevation_deg,
+        moon_lit = moon.illuminated,
+        "sun and moon at {}",
         at.format("%Y-%m-%d %H:%M %Z")
     );
-    Ok(SunState::at(grid, sun.azimuth_deg, sun.elevation_deg))
+    Ok(SunState::with_moon(
+        grid,
+        sun.azimuth_deg,
+        sun.elevation_deg,
+        Some(Moon {
+            azimuth_deg: moon.azimuth_deg,
+            elevation_deg: moon.elevation_deg,
+            illuminated: moon.illuminated,
+        }),
+    ))
 }
 
 #[cfg(test)]
@@ -105,8 +118,20 @@ mod tests {
             let utc = chrono::Utc
                 .with_ymd_and_hms(2025, 6, 14, utc_hour, minute, 0)
                 .unwrap();
-            let sun = sun_position(46.5, 10.0, utc);
-            SunState::at(&bundle.grid, sun.azimuth_deg, sun.elevation_deg)
+            let (sun, moon) = (
+                sun_position(46.5, 10.0, utc),
+                moon_position(46.5, 10.0, utc),
+            );
+            SunState::with_moon(
+                &bundle.grid,
+                sun.azimuth_deg,
+                sun.elevation_deg,
+                Some(Moon {
+                    azimuth_deg: moon.azimuth_deg,
+                    elevation_deg: moon.elevation_deg,
+                    illuminated: moon.illuminated,
+                }),
+            )
         };
         assert_eq!(at("20:30"), expected(18, 30));
         assert_eq!(at("13:00"), expected(11, 0));

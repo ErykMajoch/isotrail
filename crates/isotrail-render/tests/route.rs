@@ -79,6 +79,7 @@ impl Render {
             mesh: &gpu_mesh,
             route: progress.is_some().then_some(&line),
             progress: progress.unwrap_or(1.0),
+            star_seed: 0,
         };
         let sun = SunState::late_morning(&bundle.grid);
         renderer.draw(&gpu, &target, &scene, &camera, &sun, look);

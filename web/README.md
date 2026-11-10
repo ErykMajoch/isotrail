@@ -121,7 +121,7 @@ The poster shows at once. The renderer (about 3 MB) only downloads when the elem
 | Back to the start view | the reset button | the reset button | 0 or Home |
 | Play and pause | the play button | the play button | Space or K |
 
-A plain mouse wheel keeps scrolling the page, and shows a reminder to hold Ctrl (⌘ on a Mac). Playing draws the route over about eight seconds, while the camera settles back to the start view as in the animated exports. The line along the diorama's bottom edge shows how much of the route is drawn, in the route's colour; click or drag along it to scrub, or focus it and use the arrow keys. The play button sits in the bottom-left corner, and the zoom and reset buttons in the bottom-right. Zooming never shows more than the whole slab, and the zoom centres on the pointer.
+A plain mouse wheel keeps scrolling the page, and shows a reminder to hold Ctrl (⌘ on a Mac). Playing draws the route over about eight seconds, while the camera settles back to the start view as in the animated exports. The line along the diorama's bottom edge shows how much of the route is drawn, in the route's colour; click or drag along it to scrub, or focus it and use the arrow keys. The light follows the time at the route's head, through any nights of a multi-day trek, as in the animated exports; until the visitor plays or scrubs, the diorama shows the light at the start, as on the poster. The play button sits in the bottom-left corner, and the zoom and reset buttons in the bottom-right. Zooming never shows more than the whole slab, and the zoom centres on the pointer.
 
 Scripts can call `play()` and `pause()` on the element, and read `playing`.
 
@@ -168,7 +168,7 @@ const bytes = new Uint8Array(await (await fetch('hike.itb')).arrayBuffer());
 const viewer = await Viewer.load(canvas, bytes, 'auto');   // or 'webgl'
 
 viewer.resize(canvas.width, canvas.height);   // the drawing buffer, in device pixels
-viewer.setProgress(0.5);                      // share of the route drawn, 0 to 1
+viewer.setProgress(0.5);                      // how far through drawing the route, 0 to 1; sets the light too
 viewer.setYaw(30);                            // degrees turned from the still image's view
 viewer.zoomBy(1.5, x, y);                     // zoom, keeping canvas pixel (x, y) in place
 viewer.pan(dx, dy);                           // move with a drag of (dx, dy) canvas pixels
@@ -179,4 +179,4 @@ viewer.onLost((message) => { ... });          // the GPU was lost: free the view
 viewer.free();                                // releases the GPU memory at once
 ```
 
-Nothing is drawn until the first `resize`. Each art pixel covers a whole number of device pixels, chosen so that the frame's long side is at most 640 pixels, as in a still rendered at `--scale 3`. Call `resize` again whenever the canvas changes size, and `draw` after any change.
+Nothing is drawn until the first `resize`. Until the first `setProgress`, the whole route shows under the light at the start, as on the poster; `setProgress` draws the route at an even speed with a pause for each night of a multi-day trek, lit by the time at its head. Each art pixel covers a whole number of device pixels, chosen so that the frame's long side is at most 640 pixels, as in a still rendered at `--scale 3`. Call `resize` again whenever the canvas changes size, and `draw` after any change.

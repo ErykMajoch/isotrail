@@ -13,7 +13,7 @@ pub use error::BundleError;
 pub use format::{FORMAT_VERSION, MAGIC, is_bundle};
 pub use landcover::{Landcover, line_mask};
 pub use scene::{
-    Bounds, GridInfo, HikeStats, Metadata, ProfileSample, Provenance, Route, RoutePoint,
-    SceneBundle, SunSample, Terrain, WaterBody,
+    Bounds, GridInfo, HikeStats, Metadata, MoonSample, ProfileSample, Provenance, Route,
+    RoutePoint, SceneBundle, SunSample, Terrain, WaterBody,
 };
 pub use units::Units;

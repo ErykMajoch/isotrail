@@ -1,6 +1,6 @@
 use glam::camera::rh::{proj, view};
 use glam::{Mat4, Vec3};
-use isotrail_bundle::{GridInfo, SceneBundle};
+use isotrail_bundle::{GridInfo, MoonSample, SceneBundle, SunSample};
 
 use crate::camera::slab_angle;
 use crate::{SKY_BOTTOM, SKY_TOP};
@@ -18,6 +18,9 @@ pub const BANDS: u32 = 4;
 /// The light never comes from lower than this, so a setting sun casts long
 /// but bounded shadows and twilight still models the terrain
 pub const MIN_LIGHT_ELEVATION_DEG: f64 = 10.0;
+/// Direct light from a full moon high in a dark sky
+pub const MOONLIGHT: f32 = 0.4;
+const MOON_COLOUR: Vec3 = Vec3::new(0.72, 0.82, 1.0);
 
 /// The light and sky at one sun elevation
 #[derive(Clone, Copy)]
@@ -36,8 +39,8 @@ const RAMP: [Key; 5] = [
     Key {
         elevation_deg: -18.0,
         colour: Vec3::new(0.55, 0.65, 1.0),
-        intensity: 0.25,
-        ambient: 0.22,
+        intensity: 0.1,
+        ambient: 0.3,
         ambient_colour: Vec3::new(0.45, 0.55, 0.95),
         sky: [[14, 18, 40], [30, 40, 74]],
     },
@@ -87,6 +90,42 @@ pub struct SunState {
     pub ambient_colour: Vec3,
     /// The sky's colour at the top and bottom of the frame
     pub sky: [[u8; 3]; 2],
+    /// How brightly the stars show, from 0 by day to 1 at night
+    pub stars: f32,
+    /// The moon's disc, while it shows in the sky
+    pub moon: Option<MoonDisc>,
+}
+
+/// Where the moon stands, as the sky shows it
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MoonDisc {
+    /// Unit vector towards the moon, in the slab frame
+    pub direction: Vec3,
+    /// Unit vector towards the sun, which lights one side of the disc
+    pub sun_direction: Vec3,
+    /// Share of the disc in sunlight
+    pub illuminated: f32,
+    /// How much the disc stands out from the sky, rising as the sky darkens
+    pub opacity: f32,
+}
+
+/// The moon's compass bearing, elevation and phase
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Moon {
+    pub azimuth_deg: f64,
+    pub elevation_deg: f64,
+    /// Share of the disc in sunlight
+    pub illuminated: f64,
+}
+
+impl From<&MoonSample> for Moon {
+    fn from(sample: &MoonSample) -> Moon {
+        Moon {
+            azimuth_deg: sample.azimuth_deg.into(),
+            elevation_deg: sample.elevation_deg.into(),
+            illuminated: sample.illuminated.into(),
+        }
+    }
 }
 
 impl SunState {
@@ -94,33 +133,108 @@ impl SunState {
         SunState::at(grid, SUN_AZIMUTH_DEG, SUN_ELEVATION_DEG)
     }
 
-    /// The light of a sun standing at this compass bearing and elevation
+    /// The light of a sun standing at this compass bearing and elevation, on
+    /// a moonless night
     pub fn at(grid: &GridInfo, azimuth_deg: f64, elevation_deg: f64) -> SunState {
-        let azimuth = slab_angle(grid, azimuth_deg);
-        let light = elevation_deg.max(MIN_LIGHT_ELEVATION_DEG).to_radians() as f32;
+        SunState::with_moon(grid, azimuth_deg, elevation_deg, None)
+    }
+
+    /// The light of the sun and, once the sky is dark, the moon
+    pub fn with_moon(
+        grid: &GridInfo,
+        azimuth_deg: f64,
+        elevation_deg: f64,
+        moon: Option<Moon>,
+    ) -> SunState {
         let key = blend(elevation_deg as f32);
-        SunState {
-            direction: Vec3::new(
-                azimuth.cos() * light.cos(),
-                azimuth.sin() * light.cos(),
-                light.sin(),
-            ),
+        let mut sun = SunState {
+            direction: light_direction(grid, azimuth_deg, elevation_deg),
             colour: key.colour,
             intensity: key.intensity,
             ambient: key.ambient,
             ambient_colour: key.ambient_colour,
             sky: key.sky,
+            stars: smoothstep(-6.0, -14.0, elevation_deg as f32),
+            moon: None,
+        };
+        let Some(moon) = moon.filter(|moon| moon.elevation_deg > -2.0) else {
+            return sun;
+        };
+        let opacity = smoothstep(6.0, -4.0, elevation_deg as f32);
+        if opacity > 0.0 {
+            sun.moon = Some(MoonDisc {
+                direction: towards(grid, moon.azimuth_deg, moon.elevation_deg),
+                sun_direction: towards(grid, azimuth_deg, elevation_deg),
+                illuminated: moon.illuminated as f32,
+                opacity,
+            });
         }
+        // A half moon gives about a tenth of a full one's light
+        let moonlight = MOONLIGHT
+            * (moon.illuminated as f32).powi(2)
+            * smoothstep(-1.0, 8.0, moon.elevation_deg as f32)
+            * smoothstep(-4.0, -12.0, elevation_deg as f32);
+        if moonlight > 0.0 {
+            let (from_sun, from_moon) = (key.colour * key.intensity, MOON_COLOUR * moonlight);
+            let total = from_sun + from_moon;
+            sun.intensity = total.max_element();
+            sun.colour = total / sun.intensity;
+            let towards_moon = light_direction(grid, moon.azimuth_deg, moon.elevation_deg);
+            sun.direction = (sun.direction * luminance(from_sun)
+                + towards_moon * luminance(from_moon))
+            .normalize_or(sun.direction);
+        }
+        sun
     }
 
-    /// The sun at the start of the hike, or the late-morning one when the
-    /// track has no times
+    /// The sun and moon at the start of the hike, or the late-morning sun
+    /// when the track has no times
     pub fn for_hike(bundle: &SceneBundle) -> SunState {
-        match bundle.sun.first() {
-            Some(sun) => SunState::at(
+        SunState::sample(bundle, 0)
+    }
+
+    /// The sun and moon at Unix time `time_s`, between the bundle's samples;
+    /// before the first and after the last, they stand as at those
+    pub fn during(bundle: &SceneBundle, time_s: f64) -> SunState {
+        let track = &bundle.sun;
+        let i = track.partition_point(|s| (s.time as f64) <= time_s);
+        if i == 0 || i == track.len() {
+            return SunState::sample(bundle, i.saturating_sub(1));
+        }
+        let (from, to) = (&track[i - 1], &track[i]);
+        let t = (time_s - from.time as f64) / (to.time - from.time) as f64;
+        let lerp = |x: f32, y: f32| f64::from(x) + (f64::from(y) - f64::from(x)) * t;
+        let turn = |x: f32, y: f32| {
+            let delta = (f64::from(y) - f64::from(x) + 180.0).rem_euclid(360.0) - 180.0;
+            (f64::from(x) + delta * t).rem_euclid(360.0)
+        };
+        let moon = match (bundle.moon.get(i - 1), bundle.moon.get(i)) {
+            (Some(x), Some(y)) => Some(Moon {
+                azimuth_deg: turn(x.azimuth_deg, y.azimuth_deg),
+                elevation_deg: lerp(x.elevation_deg, y.elevation_deg),
+                illuminated: lerp(x.illuminated, y.illuminated),
+            }),
+            _ => None,
+        };
+        SunState::with_moon(
+            &bundle.grid,
+            turn(from.azimuth_deg, to.azimuth_deg),
+            lerp(from.elevation_deg, to.elevation_deg),
+            moon,
+        )
+    }
+
+    fn sample(bundle: &SceneBundle, i: usize) -> SunState {
+        match bundle.sun.get(i) {
+            Some(&SunSample {
+                azimuth_deg,
+                elevation_deg,
+                ..
+            }) => SunState::with_moon(
                 &bundle.grid,
-                sun.azimuth_deg.into(),
-                sun.elevation_deg.into(),
+                azimuth_deg.into(),
+                elevation_deg.into(),
+                bundle.moon.get(i).map(Moon::from),
             ),
             None => SunState::late_morning(&bundle.grid),
         }
@@ -156,6 +270,36 @@ impl SunState {
     }
 }
 
+/// Unit vector towards a point in the sky, in the slab frame
+fn towards(grid: &GridInfo, azimuth_deg: f64, elevation_deg: f64) -> Vec3 {
+    let azimuth = slab_angle(grid, azimuth_deg);
+    let elevation = elevation_deg.to_radians() as f32;
+    Vec3::new(
+        azimuth.cos() * elevation.cos(),
+        azimuth.sin() * elevation.cos(),
+        elevation.sin(),
+    )
+}
+
+/// Towards a light in the sky, never lower than [`MIN_LIGHT_ELEVATION_DEG`]
+fn light_direction(grid: &GridInfo, azimuth_deg: f64, elevation_deg: f64) -> Vec3 {
+    towards(
+        grid,
+        azimuth_deg,
+        elevation_deg.max(MIN_LIGHT_ELEVATION_DEG),
+    )
+}
+
+fn luminance(rgb: Vec3) -> f32 {
+    rgb.dot(Vec3::new(0.2126, 0.7152, 0.0722))
+}
+
+/// 0 at `from` and 1 at `to`, eased between; `to` may be the smaller
+fn smoothstep(from: f32, to: f32, x: f32) -> f32 {
+    let t = ((x - from) / (to - from)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 fn blend(elevation_deg: f32) -> Key {
     let above = RAMP.partition_point(|key| key.elevation_deg <= elevation_deg);
     let (low, high) = match (above.checked_sub(1), RAMP.get(above)) {
@@ -182,14 +326,10 @@ fn blend(elevation_deg: f32) -> Key {
 
 #[cfg(test)]
 mod tests {
-    use isotrail_bundle::{Landcover, SunSample};
+    use isotrail_bundle::Landcover;
     use isotrail_testkit::{bundle, grid};
 
     use super::*;
-
-    fn luminance(rgb: Vec3) -> f32 {
-        rgb.dot(Vec3::new(0.2126, 0.7152, 0.0722))
-    }
 
     fn brightness(sun: &SunState) -> f32 {
         sun.intensity * (1.0 - sun.ambient) * luminance(sun.colour)
@@ -287,6 +427,139 @@ mod tests {
         };
         bundle.sun = vec![sample(0, 290.0, 3.0), sample(300, 291.0, 2.5)];
         assert_eq!(SunState::for_hike(&bundle), SunState::at(&grid, 290.0, 3.0));
+        bundle.moon = vec![
+            moon_sample(0, 100.0, 4.0, 0.9),
+            moon_sample(300, 101.0, 5.0, 0.9),
+        ];
+        let moon = Moon {
+            azimuth_deg: 100.0,
+            elevation_deg: 4.0,
+            illuminated: 0.9,
+        };
+        assert_eq!(
+            SunState::for_hike(&bundle),
+            SunState::with_moon(&grid, 290.0, 3.0, Some(moon))
+        );
+    }
+
+    fn moon_sample(
+        time: i64,
+        azimuth_deg: f32,
+        elevation_deg: f32,
+        illuminated: f32,
+    ) -> MoonSample {
+        MoonSample {
+            time,
+            azimuth_deg,
+            elevation_deg,
+            illuminated,
+        }
+    }
+
+    fn full_moon(elevation_deg: f64) -> Option<Moon> {
+        Some(Moon {
+            azimuth_deg: 180.0,
+            elevation_deg,
+            illuminated: 1.0,
+        })
+    }
+
+    #[test]
+    fn stars_come_out_as_the_sky_darkens() {
+        let grid = grid(10, 10, 10.0);
+        let stars = |elevation| SunState::at(&grid, 300.0, elevation).stars;
+        assert_eq!(stars(10.0), 0.0);
+        assert_eq!(stars(-6.0), 0.0);
+        assert!(stars(-10.0) > 0.2 && stars(-10.0) < 0.8);
+        assert_eq!(stars(-14.0), 1.0);
+        assert_eq!(stars(-40.0), 1.0);
+    }
+
+    #[test]
+    fn the_moon_shows_once_the_sun_is_low_and_lights_the_night() {
+        let grid = grid(10, 10, 10.0);
+        // By day the moon neither shows nor lights anything
+        let day = SunState::with_moon(&grid, 120.0, 40.0, full_moon(30.0));
+        assert_eq!(day, SunState::at(&grid, 120.0, 40.0));
+
+        let moonless = SunState::at(&grid, 0.0, -25.0);
+        let moonlit = SunState::with_moon(&grid, 0.0, -25.0, full_moon(30.0));
+        assert!(brightness(&moonlit) > brightness(&moonless) * 1.3);
+        assert_eq!(moonlit.ambient, moonless.ambient);
+        assert!(moonlit.colour.z >= moonlit.colour.x, "{:?}", moonlit.colour);
+        let disc = moonlit.moon.unwrap();
+        assert_eq!((disc.illuminated, disc.opacity), (1.0, 1.0));
+        // The moon lights from the south, the sun is below the north horizon
+        let towards_moon = towards(&grid, 180.0, 30.0);
+        assert!(
+            moonlit.direction.dot(towards_moon) > 0.95,
+            "{:?}",
+            moonlit.direction
+        );
+        assert!((disc.direction - towards_moon).length() < 1e-5);
+        assert!((disc.sun_direction - towards(&grid, 0.0, -25.0)).length() < 1e-5);
+
+        // A thin crescent hardly lights anything, and a set moon nothing
+        let crescent = SunState::with_moon(
+            &grid,
+            0.0,
+            -25.0,
+            Some(Moon {
+                illuminated: 0.1,
+                ..full_moon(30.0).unwrap()
+            }),
+        );
+        assert!(brightness(&crescent) < brightness(&moonless) * 1.02);
+        assert!(crescent.moon.is_some());
+        let set = SunState::with_moon(&grid, 0.0, -25.0, full_moon(-5.0));
+        assert_eq!(set, moonless);
+    }
+
+    #[test]
+    fn the_sky_between_samples_is_interpolated() {
+        let mut bundle = bundle(grid(2, 2, 10.0), &[0.0; 4], &[Landcover::Grassland; 4]);
+        let grid = bundle.grid;
+        let sample = |time, azimuth_deg, elevation_deg| SunSample {
+            time,
+            azimuth_deg,
+            elevation_deg,
+        };
+        bundle.sun = vec![sample(1_000, 350.0, -20.0), sample(1_300, 10.0, -16.0)];
+        bundle.moon = vec![
+            moon_sample(1_000, 170.0, 20.0, 0.5),
+            moon_sample(1_300, 174.0, 22.0, 0.52),
+        ];
+        let moon = |azimuth_deg, elevation_deg, illuminated| {
+            Some(Moon {
+                azimuth_deg,
+                elevation_deg,
+                illuminated,
+            })
+        };
+        // The bearing turns the short way through north
+        let middle = SunState::during(&bundle, 1_150.0);
+        let expected = SunState::with_moon(&grid, 0.0, -18.0, moon(172.0, 21.0, 0.51));
+        assert!((middle.direction - expected.direction).length() < 1e-4);
+        assert!(
+            (middle.moon.unwrap().direction - expected.moon.unwrap().direction).length() < 1e-4
+        );
+        assert!((middle.moon.unwrap().illuminated - 0.51).abs() < 1e-4);
+        assert!((middle.intensity - expected.intensity).abs() < 1e-4);
+        // Outside the track the ends hold
+        assert_eq!(
+            SunState::during(&bundle, 0.0),
+            SunState::with_moon(&grid, 350.0, -20.0, moon(170.0, 20.0, 0.5))
+        );
+        assert_eq!(
+            SunState::during(&bundle, 9_999.0),
+            SunState::during(&bundle, 1_300.0)
+        );
+        bundle.sun.clear();
+        bundle.moon.clear();
+        assert_eq!(
+            SunState::during(&bundle, 1_150.0),
+            SunState::late_morning(&grid)
+        );
     }
 
     #[test]

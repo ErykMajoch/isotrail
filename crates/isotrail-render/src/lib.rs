@@ -31,8 +31,8 @@ pub use error::RenderError;
 pub use frame::Frame;
 pub use gpu::{ADAPTER_ENV, AdapterMode, Gpu};
 pub use lighting::{
-    AMBIENT, BANDS, FILL, MIN_LIGHT_ELEVATION_DEG, SUN_AZIMUTH_DEG, SUN_COLOUR, SUN_ELEVATION_DEG,
-    SunState,
+    AMBIENT, BANDS, FILL, MIN_LIGHT_ELEVATION_DEG, MOONLIGHT, Moon, MoonDisc, SUN_AZIMUTH_DEG,
+    SUN_COLOUR, SUN_ELEVATION_DEG, SunState,
 };
 pub use mesh::{Mesher, SmoothMesher, Surface, TerrainMesh, Vertex, VoxelMesher};
 pub use overlay::{
@@ -49,5 +49,5 @@ pub use test_scene::draw_test_scene;
 pub use text::{PixelFont, TextEffect};
 pub use timeline::{
     DEFAULT_DURATION_S, DEFAULT_FPS, DEFAULT_ORBIT_DEG, DRAW_SHARE, INTRO_SHARE, Moment, Motion,
-    Orbit, Pace, Timeline, Walk,
+    Orbit, Pace, Step, Timeline, Walk,
 };

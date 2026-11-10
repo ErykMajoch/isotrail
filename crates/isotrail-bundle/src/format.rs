@@ -5,7 +5,7 @@ use crate::{BundleError, Landcover, SceneBundle};
 
 pub const MAGIC: [u8; 4] = *b"ITB1";
 /// Bumped whenever the payload layout changes
-pub const FORMAT_VERSION: u16 = 2;
+pub const FORMAT_VERSION: u16 = 3;
 const HEADER_LEN: usize = MAGIC.len() + 2;
 const COMPRESSION_LEVEL: u8 = 9;
 const MAX_PAYLOAD_BYTES: usize = 256 << 20;
@@ -104,6 +104,22 @@ impl SceneBundle {
         if self.sun.windows(2).any(|w| w[0].time >= w[1].time) {
             return corrupt("sun samples out of order".into());
         }
+        if let Some(sample) = self.moon.iter().find(|s| {
+            !(s.azimuth_deg.is_finite()
+                && (-90.0..=90.0).contains(&s.elevation_deg)
+                && (0.0..=1.0).contains(&s.illuminated))
+        }) {
+            return corrupt(format!("moon sample {sample:?}"));
+        }
+        if self.moon.len() != self.sun.len()
+            || self
+                .moon
+                .iter()
+                .zip(&self.sun)
+                .any(|(m, s)| m.time != s.time)
+        {
+            return corrupt("moon samples don't match the sun's".into());
+        }
         Ok(())
     }
 }
@@ -118,8 +134,8 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 mod tests {
     use super::*;
     use crate::{
-        Bounds, GridInfo, HikeStats, Metadata, ProfileSample, Provenance, Route, RoutePoint,
-        SunSample, Terrain, WaterBody, line_mask,
+        Bounds, GridInfo, HikeStats, Metadata, MoonSample, ProfileSample, Provenance, Route,
+        RoutePoint, SunSample, Terrain, WaterBody, line_mask,
     };
 
     fn bundle() -> SceneBundle {
@@ -207,6 +223,14 @@ mod tests {
                     elevation_deg: -0.5 + i as f32 * 0.4,
                 })
                 .collect(),
+            moon: (0..3)
+                .map(|i| MoonSample {
+                    time: 1_750_000_000 + i * 120,
+                    azimuth_deg: 250.0 - i as f32,
+                    elevation_deg: 30.0 - i as f32 * 0.3,
+                    illuminated: 0.62,
+                })
+                .collect(),
         }
     }
 
@@ -215,7 +239,7 @@ mod tests {
         let bundle = bundle();
         let bytes = bundle.to_bytes();
         assert!(is_bundle(&bytes));
-        assert_eq!(&bytes[..6], b"ITB1\x02\x00");
+        assert_eq!(&bytes[..6], b"ITB1\x03\x00");
         assert_eq!(SceneBundle::from_bytes(&bytes).unwrap(), bundle);
         assert_eq!(bundle.to_bytes(), bytes, "encoding is deterministic");
     }
@@ -257,15 +281,17 @@ mod tests {
     }
 
     #[test]
-    fn bundles_from_before_the_sun_track_ask_to_be_made_again() {
-        let mut bytes = bundle().to_bytes();
-        bytes[4..6].copy_from_slice(&1u16.to_le_bytes());
-        let message = SceneBundle::from_bytes(&bytes).unwrap_err().to_string();
-        assert!(
-            message.contains("version 1") && message.contains("reads version 2"),
-            "{message}"
-        );
-        assert!(message.contains("`isotrail bundle`"), "{message}");
+    fn bundles_from_before_the_sky_tracks_ask_to_be_made_again() {
+        for old in [1u16, 2] {
+            let mut bytes = bundle().to_bytes();
+            bytes[4..6].copy_from_slice(&old.to_le_bytes());
+            let message = SceneBundle::from_bytes(&bytes).unwrap_err().to_string();
+            assert!(
+                message.contains(&format!("version {old}")) && message.contains("reads version 3"),
+                "{message}"
+            );
+            assert!(message.contains("`isotrail bundle`"), "{message}");
+        }
     }
 
     #[test]
@@ -310,6 +336,15 @@ mod tests {
         let mut b = bundle();
         b.sun[0].elevation_deg = f32::NAN;
         cases.push((b, "sun sample"));
+        let mut b = bundle();
+        b.moon[1].illuminated = 1.5;
+        cases.push((b, "moon sample"));
+        let mut b = bundle();
+        b.moon.pop();
+        cases.push((b, "moon samples don't match the sun's"));
+        let mut b = bundle();
+        b.moon[2].time += 1;
+        cases.push((b, "moon samples don't match the sun's"));
         for (bundle, expected) in cases {
             let message = SceneBundle::from_bytes(&bundle.to_bytes())
                 .unwrap_err()

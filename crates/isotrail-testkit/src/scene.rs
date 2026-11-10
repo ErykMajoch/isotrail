@@ -83,6 +83,7 @@ pub fn bundle(grid: GridInfo, heights_m: &[f32], landcover: &[Landcover]) -> Sce
         route: Route::default(),
         profile: Vec::new(),
         sun: Vec::new(),
+        moon: Vec::new(),
     };
     bundle.prop_seed = bundle.content_seed();
     bundle

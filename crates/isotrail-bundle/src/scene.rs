@@ -13,6 +13,8 @@ pub struct SceneBundle {
     /// Where the sun stood over the slab from the start to the end of the
     /// hike; empty for tracks without times
     pub sun: Vec<SunSample>,
+    /// The moon at the same times as `sun`
+    pub moon: Vec<MoonSample>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -194,6 +196,18 @@ pub struct SunSample {
     pub azimuth_deg: f32,
     /// Negative below the horizon
     pub elevation_deg: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct MoonSample {
+    /// Unix seconds
+    pub time: i64,
+    /// Compass bearing
+    pub azimuth_deg: f32,
+    /// Negative below the horizon
+    pub elevation_deg: f32,
+    /// Share of the disc in sunlight, from 0 at new moon to 1 at full
+    pub illuminated: f32,
 }
 
 #[cfg(test)]

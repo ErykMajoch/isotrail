@@ -1,8 +1,8 @@
 use isotrail_bundle::{
-    Bounds, GridInfo, HikeStats, Metadata, ProfileSample, Provenance, Route, RoutePoint,
-    SceneBundle, SunSample, Terrain,
+    Bounds, GridInfo, HikeStats, Metadata, MoonSample, ProfileSample, Provenance, Route,
+    RoutePoint, SceneBundle, SunSample, Terrain,
 };
-use isotrail_track::{Track, TrackPoint, TrackStats, haversine_m, sun_position};
+use isotrail_track::{Track, TrackPoint, TrackStats, haversine_m, moon_position, sun_position};
 
 use crate::{GeoError, Grid, Heightmap, LandcoverMap, vertical_exaggeration};
 
@@ -66,8 +66,10 @@ pub fn scene_bundle(
         prop_seed: 0,
         route,
         profile,
-        sun: sun_track(&stats, origin_lat, origin_lon),
+        sun: Vec::new(),
+        moon: Vec::new(),
     };
+    (bundle.sun, bundle.moon) = sky_track(&stats, origin_lat, origin_lon);
     bundle.prop_seed = bundle.content_seed();
     Ok(bundle)
 }
@@ -94,10 +96,11 @@ fn hike_stats(stats: &TrackStats) -> HikeStats {
     }
 }
 
-/// The sun over the slab every [`SUN_STEP_S`] from the start, and at the end
-fn sun_track(stats: &TrackStats, lat: f64, lon: f64) -> Vec<SunSample> {
+/// The sun and moon over the slab every [`SUN_STEP_S`] from the start, and
+/// at the end
+fn sky_track(stats: &TrackStats, lat: f64, lon: f64) -> (Vec<SunSample>, Vec<MoonSample>) {
     let (Some(start), Some(end)) = (stats.start, stats.end) else {
-        return Vec::new();
+        return Default::default();
     };
     let step = chrono::TimeDelta::seconds(SUN_STEP_S);
     std::iter::successors(Some(start), |&t| Some(t + step))
@@ -105,13 +108,22 @@ fn sun_track(stats: &TrackStats, lat: f64, lon: f64) -> Vec<SunSample> {
         .chain([end])
         .map(|time| {
             let sun = sun_position(lat, lon, time);
-            SunSample {
-                time: time.timestamp(),
-                azimuth_deg: sun.azimuth_deg as f32,
-                elevation_deg: sun.elevation_deg as f32,
-            }
+            let moon = moon_position(lat, lon, time);
+            (
+                SunSample {
+                    time: time.timestamp(),
+                    azimuth_deg: sun.azimuth_deg as f32,
+                    elevation_deg: sun.elevation_deg as f32,
+                },
+                MoonSample {
+                    time: time.timestamp(),
+                    azimuth_deg: moon.azimuth_deg as f32,
+                    elevation_deg: moon.elevation_deg as f32,
+                    illuminated: moon.illuminated as f32,
+                },
+            )
         })
-        .collect()
+        .unzip()
 }
 
 /// Distance along the track at every point, summed the same way as
@@ -407,21 +419,29 @@ mod tests {
     }
 
     #[test]
-    fn the_sun_is_sampled_from_start_to_end() {
+    fn the_sun_and_moon_are_sampled_from_start_to_end() {
         let track = track(&[(0.0, 2000.0), (2600.0, 8000.0)], true);
-        let sun = bundle(&track).sun;
+        let sky = bundle(&track);
+        let sun = sky.sun;
         let times: Vec<i64> = sun.iter().map(|s| s.time - 1_750_000_030).collect();
         assert_eq!(times, [0, 300, 600, 900, 1200, 1500, 1800, 2100, 2250]);
         let start = sun_position(ORIGIN.0, ORIGIN.1, track.stats().unwrap().start.unwrap());
         // The slab's origin is within a few kilometres of the track's
         assert!((f64::from(sun[0].elevation_deg) - start.elevation_deg).abs() < 0.1);
         assert!((f64::from(sun[0].azimuth_deg) - start.azimuth_deg).abs() < 0.1);
+        let moon = sky.moon;
+        assert_eq!(moon.len(), sun.len());
+        assert!(moon.iter().zip(&sun).all(|(m, s)| m.time == s.time));
+        let rise = moon_position(ORIGIN.0, ORIGIN.1, track.stats().unwrap().start.unwrap());
+        assert!((f64::from(moon[0].elevation_deg) - rise.elevation_deg).abs() < 0.1);
+        assert!((f64::from(moon[0].illuminated) - rise.illuminated).abs() < 1e-3);
 
         let mut untimed = track.clone();
         for point in untimed.segments.iter_mut().flat_map(|s| &mut s.points) {
             point.time = None;
         }
-        assert!(bundle(&untimed).sun.is_empty());
+        let untimed = bundle(&untimed);
+        assert!(untimed.sun.is_empty() && untimed.moon.is_empty());
     }
 
     #[test]

@@ -16,6 +16,7 @@ pub struct Diorama {
     route: RouteLine,
     turntable: Turntable,
     sun: SunState,
+    star_seed: u32,
 }
 
 impl Diorama {
@@ -42,11 +43,17 @@ impl Diorama {
             route,
             turntable,
             sun,
+            star_seed: bundle.prop_seed as u32,
         }
     }
 
     pub fn turntable(&self) -> &Turntable {
         &self.turntable
+    }
+
+    /// Lights the frames drawn from now on with `sun`
+    pub fn set_sun(&mut self, sun: SunState) {
+        self.sun = sun;
     }
 
     /// Draws the diorama as `view` shows it, with `progress` of the route
@@ -65,6 +72,7 @@ impl Diorama {
             mesh: &self.mesh,
             route: Some(&self.route),
             progress,
+            star_seed: self.star_seed,
         };
         renderer.draw(gpu, target, &scene, &camera, &self.sun, look);
     }

@@ -2,7 +2,7 @@ use glam::{IVec2, Vec3};
 use wgpu::util::DeviceExt;
 
 use crate::lighting::{BANDS, FILL};
-use crate::post::{DEPTH_FORMAT, ID_FORMAT, NORMAL_FORMAT, PostPass, TERRAIN_ID};
+use crate::post::{DEPTH_FORMAT, ID_FORMAT, NORMAL_FORMAT, PostPass, Sky, TERRAIN_ID};
 use crate::route::{RoutePass, to_pixel};
 use crate::sprite::Sprite;
 use crate::{
@@ -34,6 +34,8 @@ pub struct Scene<'a> {
     /// Share of the route drawn, by distance: 1 draws all of it with the
     /// finish marker, anything less ends in the head marker
     pub progress: f32,
+    /// Scatters the night sky's stars
+    pub star_seed: u32,
 }
 
 impl<'a> Scene<'a> {
@@ -42,6 +44,7 @@ impl<'a> Scene<'a> {
             mesh,
             route: None,
             progress: 1.0,
+            star_seed: 0,
         }
     }
 }
@@ -405,8 +408,15 @@ impl TerrainRenderer {
                 sprites.push(atlas.place(Sprite::Head, pixel(head)));
             }
         }
+        let sky = Sky::new(
+            camera,
+            sun,
+            scene.star_seed,
+            target.width(),
+            target.height(),
+        );
         self.post
-            .encode(&mut encoder, target, camera, sun.sky, look, &sprites);
+            .encode(&mut encoder, target, camera, &sky, look, &sprites);
         gpu.queue().submit([encoder.finish()]);
     }
 }

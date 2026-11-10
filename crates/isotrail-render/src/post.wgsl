@@ -11,8 +11,15 @@ struct Uniforms {
     // rgb the route's colour, a its opacity where hidden
     route: vec4<f32>,
     // x the route's width in pixels, y the sprite count, z the background:
-    // 0 sky, 1 a flat colour kept as it is, 2 transparent
+    // 0 sky, 1 a flat colour kept as it is, 2 transparent, w the stars' seed
     counts: vec4<u32>,
+    // x how brightly the stars show, y how far they have moved in pixels,
+    // z the moon's opacity, w its radius in pixels
+    night: vec4<f32>,
+    // xy the moon's centre in pixels, zw towards its sunlit side
+    moon: vec4<f32>,
+    // x where the terminator crosses the moon's axis, from -1 (full) to 1 (new)
+    moon_phase: vec4<f32>,
     // xy each sprite's top-left pixel, zw its size
     sprite_frame: array<vec4<i32>, 4>,
     // xy each sprite's top-left texel in the atlas
@@ -179,6 +186,44 @@ fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     return vec4<f32>(quantise(colour), 1.0);
 }
 
+fn hash(x: u32, y: u32, seed: u32) -> u32 {
+    var h = x * 374761393u + y * 668265263u + seed * 2246822519u;
+    h = (h ^ (h >> 13u)) * 1274126177u;
+    return h ^ (h >> 16u);
+}
+
+// The stars and the moon over the sky's colour, `t` down from the top
+fn night_sky(pixel: vec2<i32>, sky: vec3<f32>, t: f32) -> vec3<f32> {
+    var colour = sky;
+    let stars = uniforms.night.x;
+    if stars > 0.0 {
+        // The stars repeat after a whole turn of the view
+        let turn = 2 * i32(textureDimensions(id_map).x);
+        let x = ((pixel.x - i32(uniforms.night.y)) % turn + turn) % turn;
+        let h = hash(u32(x), u32(pixel.y), uniforms.counts.w);
+        let density = 0.007 * (1.0 - smoothstep(0.5, 0.85, t));
+        if f32(h & 0xffffu) / 65535.0 < density {
+            let brightness = 0.75 + 0.25 * f32(h >> 16u) / 65535.0;
+            colour = mix(colour, vec3<f32>(0.92, 0.95, 1.0) * brightness, stars);
+        }
+    }
+    let opacity = uniforms.night.z;
+    if opacity > 0.0 {
+        let d = (vec2<f32>(pixel) + 0.5 - uniforms.moon.xy) / uniforms.night.w;
+        if dot(d, d) <= 1.0 {
+            let side = uniforms.moon.zw;
+            let along = dot(d, side);
+            let across = dot(d, vec2<f32>(-side.y, side.x));
+            let edge = uniforms.moon_phase.x * sqrt(max(1.0 - across * across, 0.0));
+            let lit = vec3<f32>(0.95, 0.93, 0.82);
+            // Earthshine keeps the dark side just visible
+            let face = select(mix(colour, lit, 0.12), lit, along >= edge);
+            colour = mix(colour, face, opacity);
+        }
+    }
+    return colour;
+}
+
 // The lit, outlined terrain or the dithered sky, before quantising
 fn scene(pixel: vec2<i32>) -> vec3<f32> {
     let centre = load(pixel);
@@ -187,7 +232,7 @@ fn scene(pixel: vec2<i32>) -> vec3<f32> {
         let t = (f32(pixel.y) + 0.5) / f32(size.y);
         // Rounded like the terrain's colour target, so both quantise the same way
         let sky = round(mix(uniforms.sky_top.rgb, uniforms.sky_bottom.rgb, t) * 255.0) / 255.0;
-        return sky + bayer(pixel) * uniforms.look.y;
+        return night_sky(pixel, sky + bayer(pixel) * uniforms.look.y, t);
     }
 
     var silhouette = false;
