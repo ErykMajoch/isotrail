@@ -34,6 +34,7 @@
 - **Diorama look**: stepped voxel or smooth low-poly terrain, layered cut faces, cel shading with shadows, and outlines
 - **Pixel-art finish**: every pixel snapped to a hand-made palette (three built in, or any Lospec `.hex` file)
 - **Animated**: looping GIFs and MP4 videos where the route draws itself, the camera turns and the stats count up
+- **Light, weather and seasons**: lit by the sun or moon as they stood during the hike, under its real weather (clouds, rain, snow, fog and sunbeams breaking through), in its season (blossom, autumn colours, snow and frozen lakes)
 - **On your website**: an interactive `<isotrail-hike>` element that visitors can turn, zoom and play, on any static site
 - **Ready to share**: story, feed, square and wide presets, with the title, date, stats and elevation profile laid out around Instagram's interface
 - **Your style**: choose the stats, units, date format and panels, or use a transparent background to place the diorama over a photo
@@ -96,6 +97,10 @@ isotrail render hike.gpx --background transparent --overlay none
 # Your own title and stats, in miles and feet
 isotrail render hike.gpx --title "Derwent Edge" --stats distance,gain,elapsed --units imperial
 
+# The same hike at sunset, or in winter
+isotrail render hike.gpx --time 20:30
+isotrail render hike.gpx --season winter
+
 # Prepare the scene once, then render it as often as you like, offline
 isotrail bundle hike.gpx -o hike.itb
 isotrail render hike.itb --palette aap-64 --mesher smooth
@@ -111,7 +116,7 @@ isotrail embed hike.gpx -o site/hikes/my-hike --with-runtime
 | [`render`](docs/usage.md#render) | Render a GPX file or scene bundle as a PNG, an animated GIF or an MP4 video |
 | [`bundle`](docs/usage.md#bundle) | Download the terrain around a route and save everything the render needs as a `.itb` file |
 | [`embed`](docs/usage.md#embed) | Write a bundle, a poster and an HTML snippet that put an interactive diorama on a web page |
-| [`stats`](docs/usage.md#stats) | Print distance, elevation gain and loss, moving and elapsed time |
+| [`stats`](docs/usage.md#stats) | Print distance, elevation gain and loss, moving and elapsed time, and the weather during the hike |
 | [`style-lab`](docs/usage.md#style-lab) | Render every mesher, pixel scale and palette on one contact sheet |
 | [`cache`](docs/usage.md#cache) | Show or clear the cache of downloaded data |
 
