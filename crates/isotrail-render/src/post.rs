@@ -4,7 +4,7 @@ use crate::palette::{MAX_COLOURS, srgb_to_oklab};
 use crate::sprite::{Placed, SpriteAtlas};
 use crate::{Camera, DEFAULT_PALETTE, Gpu, OffscreenTarget, Palette, TARGET_FORMAT};
 
-/// The sky's colour at the top and bottom of the frame
+/// The daytime sky's colour at the top and bottom of the frame
 pub const SKY_TOP: [u8; 3] = [150, 190, 226];
 pub const SKY_BOTTOM: [u8; 3] = [214, 230, 240];
 
@@ -84,7 +84,8 @@ impl Default for RouteStyle {
 /// What shows where there is no terrain
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Background {
-    /// A dithered gradient from [`SKY_TOP`] to [`SKY_BOTTOM`]
+    /// A dithered gradient that follows the sun, from [`SKY_TOP`] to
+    /// [`SKY_BOTTOM`] by day
     #[default]
     Sky,
     Transparent,
@@ -312,21 +313,22 @@ impl PostPass {
     pub fn encode(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        gbuffer: &GBuffer,
         target: &OffscreenTarget,
         camera: &Camera,
+        sky: [[u8; 3]; 2],
         look: &Look,
         sprites: &[Placed],
     ) {
         let device = &self.device;
+        let gbuffer = target.gbuffer();
         let inv_view_proj = camera.view_proj.inverse();
         let metres_per_px = 2.0 * inv_view_proj.x_axis.truncate().length() / target.width() as f32;
         let colour =
             |rgb: [u8; 3]| Vec4::new(rgb[0].into(), rgb[1].into(), rgb[2].into(), 255.0) / 255.0;
-        let (sky_top, sky_bottom, background) = match look.background {
-            Background::Sky => (SKY_TOP, SKY_BOTTOM, 0),
-            Background::Colour(rgb) => (rgb, rgb, 1),
-            Background::Transparent => (SKY_TOP, SKY_BOTTOM, 2),
+        let ([sky_top, sky_bottom], background) = match look.background {
+            Background::Sky => (sky, 0),
+            Background::Colour(rgb) => ([rgb, rgb], 1),
+            Background::Transparent => (sky, 2),
         };
         let mut uniforms = Uniforms {
             inv_view_proj: inv_view_proj.to_cols_array(),

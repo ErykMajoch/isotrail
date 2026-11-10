@@ -1,9 +1,9 @@
-use isotrail_bundle::Units;
+use isotrail_bundle::{SunSample, Units};
 use isotrail_export::{ExportError, GifWriter, render_clip, render_still, upscale};
 use isotrail_render::{
     Aspect, Background, DEFAULT_PALETTE, DEFAULT_STATS, DEFAULT_YAW_OFFSET_DEG, DateFormat, Frame,
     Gpu, Look, Mesher, Motion, OffscreenTarget, OverlayStyle, OverlayText, Overlays, Pace, Palette,
-    SmoothMesher, Timeline, VoxelMesher, Walk, draw_test_scene,
+    SmoothMesher, SunState, Timeline, VoxelMesher, Walk, draw_test_scene,
 };
 use isotrail_testkit::{assert_golden, decode_gif, diorama_bundle, hike_bundle};
 
@@ -19,12 +19,14 @@ fn test_scene_matches_golden() {
 fn assert_terrain_golden(name: &str, mesher: &dyn Mesher, look: &Look) {
     let gpu = isotrail_testkit::gpu();
     let framing = Aspect::Story.framing(6).unwrap();
+    let bundle = diorama_bundle();
     let frame = render_still(
         &gpu,
-        &diorama_bundle(),
+        &bundle,
         mesher,
         &framing,
         DEFAULT_YAW_OFFSET_DEG,
+        &SunState::for_hike(&bundle),
         look,
     )
     .unwrap();
@@ -59,6 +61,38 @@ fn other_palettes_match_goldens() {
 }
 
 #[test]
+fn low_suns_and_night_match_goldens() {
+    let gpu = isotrail_testkit::gpu();
+    let framing = Aspect::Story.framing(6).unwrap();
+    let mut mean = Vec::new();
+    for (name, azimuth_deg, elevation_deg) in [
+        ("terrain-voxel", 150.0, 40.0),
+        ("light-golden-hour", 290.0, 3.0),
+        ("light-night", 330.0, -20.0),
+    ] {
+        let mut bundle = diorama_bundle();
+        bundle.sun = vec![SunSample {
+            time: 1_750_000_000,
+            azimuth_deg,
+            elevation_deg,
+        }];
+        let frame = render_still(
+            &gpu,
+            &bundle,
+            &VoxelMesher::default(),
+            &framing,
+            DEFAULT_YAW_OFFSET_DEG,
+            &SunState::for_hike(&bundle),
+            &Look::default(),
+        )
+        .unwrap();
+        mean.push(frame.rgba().iter().map(|&c| u64::from(c)).sum::<u64>());
+        assert_golden(name, frame.width(), frame.height(), frame.rgba());
+    }
+    assert!(mean[0] > mean[1] && mean[1] * 2 > mean[2] * 3, "{mean:?}");
+}
+
+#[test]
 fn overlays_on_the_diorama_match_golden() {
     let gpu = isotrail_testkit::gpu();
     let mut bundle = diorama_bundle();
@@ -78,6 +112,7 @@ fn overlays_on_the_diorama_match_golden() {
         &VoxelMesher::default(),
         &overlays.diorama_framing(),
         DEFAULT_YAW_OFFSET_DEG,
+        &SunState::for_hike(&bundle),
         &look,
     )
     .unwrap();
@@ -101,6 +136,7 @@ fn render_hike(gpu: &Gpu, aspect: Aspect, look: &Look) -> Frame {
         &VoxelMesher::default(),
         &overlays.diorama_framing(),
         DEFAULT_YAW_OFFSET_DEG,
+        &SunState::for_hike(&bundle),
         look,
     )
     .unwrap();

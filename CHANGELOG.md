@@ -4,6 +4,15 @@ All notable changes to `isotrail` are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **Time-of-day lighting:** hikes are lit by the sun as it stood when they started, worked out from the time and place of the track. Midday is white and bright, evenings turn golden and orange, and dusk and night go deep blue, with the sky changing to match. Animations and the web embed use the same light.
+- **`--time HH:MM`** on `render` relights the scene at another local time on the day of the hike, such as `--time 20:30` for a sunset.
+
+### Changed
+
+- Scene bundles now carry the sun's path across the sky during the hike. Bundles made by earlier versions can't be read any more; make them again with `isotrail bundle` (or `isotrail embed`).
+
 ## [1.2.0] - 2026-11-10
 
 Hikes on the web: put an interactive diorama of any hike on your own site, with one command.

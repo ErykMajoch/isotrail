@@ -5,7 +5,7 @@ use crate::{BundleError, Landcover, SceneBundle};
 
 pub const MAGIC: [u8; 4] = *b"ITB1";
 /// Bumped whenever the payload layout changes
-pub const FORMAT_VERSION: u16 = 1;
+pub const FORMAT_VERSION: u16 = 2;
 const HEADER_LEN: usize = MAGIC.len() + 2;
 const COMPRESSION_LEVEL: u8 = 9;
 const MAX_PAYLOAD_BYTES: usize = 256 << 20;
@@ -94,6 +94,16 @@ impl SceneBundle {
         if let Some(&at) = self.route.breaks.iter().find(|&&b| b as usize >= points) {
             return corrupt(format!("route break at point {at} of {points}"));
         }
+        if let Some(sample) = self
+            .sun
+            .iter()
+            .find(|s| !(s.azimuth_deg.is_finite() && (-90.0..=90.0).contains(&s.elevation_deg)))
+        {
+            return corrupt(format!("sun sample {sample:?}"));
+        }
+        if self.sun.windows(2).any(|w| w[0].time >= w[1].time) {
+            return corrupt("sun samples out of order".into());
+        }
         Ok(())
     }
 }
@@ -109,7 +119,7 @@ mod tests {
     use super::*;
     use crate::{
         Bounds, GridInfo, HikeStats, Metadata, ProfileSample, Provenance, Route, RoutePoint,
-        Terrain, WaterBody, line_mask,
+        SunSample, Terrain, WaterBody, line_mask,
     };
 
     fn bundle() -> SceneBundle {
@@ -190,6 +200,13 @@ mod tests {
                     ele_m: 414.0,
                 },
             ],
+            sun: (0..3)
+                .map(|i| SunSample {
+                    time: 1_750_000_000 + i * 120,
+                    azimuth_deg: 101.5 + i as f32,
+                    elevation_deg: -0.5 + i as f32 * 0.4,
+                })
+                .collect(),
         }
     }
 
@@ -198,7 +215,7 @@ mod tests {
         let bundle = bundle();
         let bytes = bundle.to_bytes();
         assert!(is_bundle(&bytes));
-        assert_eq!(&bytes[..6], b"ITB1\x01\x00");
+        assert_eq!(&bytes[..6], b"ITB1\x02\x00");
         assert_eq!(SceneBundle::from_bytes(&bytes).unwrap(), bundle);
         assert_eq!(bundle.to_bytes(), bytes, "encoding is deterministic");
     }
@@ -209,7 +226,7 @@ mod tests {
             &b""[..],
             b"ITB",
             b"<?xml version=\"1.0\"?><gpx/>",
-            b"ITB2\x01\x00",
+            b"ITB2\x02\x00",
         ] {
             assert!(
                 matches!(SceneBundle::from_bytes(bytes), Err(BundleError::NotABundle)),
@@ -237,6 +254,18 @@ mod tests {
         let message = err.to_string();
         assert!(message.contains("version 7"), "{message}");
         assert!(message.contains("isotrail bundle"), "{message}");
+    }
+
+    #[test]
+    fn bundles_from_before_the_sun_track_ask_to_be_made_again() {
+        let mut bytes = bundle().to_bytes();
+        bytes[4..6].copy_from_slice(&1u16.to_le_bytes());
+        let message = SceneBundle::from_bytes(&bytes).unwrap_err().to_string();
+        assert!(
+            message.contains("version 1") && message.contains("reads version 2"),
+            "{message}"
+        );
+        assert!(message.contains("`isotrail bundle`"), "{message}");
     }
 
     #[test]
@@ -275,6 +304,12 @@ mod tests {
         let mut b = bundle();
         b.terrain.height_scale_m = 0.0;
         cases.push((b, "height scale 0"));
+        let mut b = bundle();
+        b.sun[2].time = b.sun[1].time;
+        cases.push((b, "sun samples out of order"));
+        let mut b = bundle();
+        b.sun[0].elevation_deg = f32::NAN;
+        cases.push((b, "sun sample"));
         for (bundle, expected) in cases {
             let message = SceneBundle::from_bytes(&bundle.to_bytes())
                 .unwrap_err()

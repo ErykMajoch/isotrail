@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use glam::Vec2;
 use isotrail_bundle::SceneBundle;
 use isotrail_render::{
-    Diorama, Framing, Gpu, Insets, Look, Mesher, OffscreenTarget, PixelGrid, Present, TerrainMesh,
-    TerrainRenderer, View, VoxelMesher,
+    Diorama, Framing, Gpu, Insets, Look, Mesher, OffscreenTarget, PixelGrid, Present, SunState,
+    TerrainMesh, TerrainRenderer, View, VoxelMesher,
 };
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
@@ -170,6 +170,7 @@ impl Viewer {
             self.mesh.clone(),
             &framing,
             &turn,
+            SunState::for_hike(&self.bundle),
         );
         let frame = OffscreenTarget::new(&self.gpu, grid.width, grid.height);
         // At the new scale the focus can fall outside the whole-slab view

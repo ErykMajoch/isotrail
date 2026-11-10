@@ -44,6 +44,9 @@ Stories leave the top 14% and bottom 20% of the image free of text, because Inst
 | `--block-height F` | `1` | Voxel block height as a share of its width, from `0.25` (fine terraces) to `4` (chunky steps). Voxel mesher only |
 | `--exaggeration X` | automatic | How many times taller than life the terrain is drawn, from `0.1` to `100`. By default, the relief is scaled to about 15% of the slab's length, between 1× and 5× |
 | `--palette NAME\|FILE` | `apollo` | A built-in palette (`apollo`, `resurrect-64`, `aap-64`), any [Lospec](https://lospec.com/palette-list) `.hex` file, or `none` to keep the unquantised colours |
+| `--time HH:MM` | start of the hike | Light the scene as at this local time on the day of the hike, such as `20:30` for a sunset. Needs a track with times |
+
+The scene is lit by the sun as it stood when the hike started: high and white at midday, low and golden in the evening, deep blue after dusk. The sky changes with it. Tracks without times are lit by a late-morning sun.
 
 The slab is turned to follow the route, and the camera looks the way the hike goes, so the start is in front. For loops and out-and-backs, the camera looks towards the halfway point. See [How it works](how-it-works.md) for what each part of the look does.
 
@@ -114,9 +117,9 @@ The animation options only apply to `.gif` and `.mp4` output. PNG renders ignore
 isotrail bundle <hike.gpx> -o <hike.itb> [--debug-dir DIR] [--exaggeration X] [--detail N] [--offline] [--overpass-url URL]
 ```
 
-Downloads the elevation and OpenStreetMap data around the route and works out what covers every grid cell: from the map data where there is some, and from the slope and height of the ground elsewhere. Lakes and reservoirs get a level surface. The result is saved with the route, its elevation profile and the hike's statistics as a **scene bundle**: one compact file (usually under 100 KB) that holds everything a render needs, with no further downloads.
+Downloads the elevation and OpenStreetMap data around the route and works out what covers every grid cell: from the map data where there is some, and from the slope and height of the ground elsewhere. Lakes and reservoirs get a level surface. The result is saved with the route, its elevation profile, the hike's statistics and the sun's path across the sky during the hike as a **scene bundle**: one compact file (usually under 100 KB) that holds everything a render needs, with no further downloads.
 
-Bundles are useful when you want to try many looks for one hike, to render offline, or to keep a hike's scene as it was even after the map data changes.
+Bundles are useful when you want to try many looks for one hike, to render offline, or to keep a hike's scene as it was even after the map data changes. A bundle made by an older version of isotrail may need to be made again; isotrail says so when it can't read one.
 
 The command reports what it found:
 

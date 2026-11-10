@@ -5,6 +5,8 @@ struct Uniforms {
     sun: vec4<f32>,
     // rgb the sun's colour times its intensity, w the band count
     sun_colour: vec4<f32>,
+    // rgb tints the ambient light
+    ambient_colour: vec4<f32>,
     // xyz towards the camera, w the fill share of the ambient
     fill: vec4<f32>,
     // x how far to push lookups along the normal, in metres
@@ -62,7 +64,7 @@ fn fs_main(in: VertexOut) -> FragmentOut {
     let ambient = uniforms.sun.w;
     let bands = uniforms.sun_colour.w;
     let facing = round(max(dot(in.normal, uniforms.fill.xyz), 0.0) * bands) / bands;
-    let sky = ambient * (1.0 + uniforms.fill.w * facing);
+    let sky = ambient * uniforms.ambient_colour.rgb * (1.0 + uniforms.fill.w * facing);
 
     // Sampled for every face so the lookup stays in uniform control flow
     let shadow = sunlit(in.world, in.normal);

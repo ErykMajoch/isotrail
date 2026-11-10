@@ -559,3 +559,34 @@ pallete = \"apollo\"
     let stderr = text(&output.stderr);
     assert!(stderr.contains("unknown setting \"pallete\""), "{stderr}");
 }
+
+#[test]
+fn the_time_of_day_relights_the_scene() {
+    let temp = with_hike();
+    let cache = temp.path().join("cache");
+    fs::write(temp.path().join("hill.itb"), diorama_bundle().to_bytes()).unwrap();
+    let render = |input: &str, extra: &[&str]| {
+        let mut args = vec!["render", input];
+        args.extend_from_slice(extra);
+        isotrail(&cache, temp.path(), &args)
+    };
+    for (image, time) in [("start.png", None), ("night.png", Some("21:00"))] {
+        let mut extra = vec!["-o", image];
+        extra.extend(time.map(|time| ["--time", time]).into_iter().flatten());
+        let output = render("hike.itb", &extra);
+        assert!(output.status.success(), "{}", text(&output.stderr));
+    }
+    let (day, night) = (
+        png_corner(&temp.path().join("start.png")),
+        png_corner(&temp.path().join("night.png")),
+    );
+    let brightness = |rgba: [u8; 4]| rgba[..3].iter().map(|&c| u32::from(c)).sum::<u32>();
+    assert!(brightness(night) * 2 < brightness(day), "{night:?} {day:?}");
+
+    let output = render("hike.itb", &["--time", "9pm"]);
+    assert!(!output.status.success());
+    assert!(text(&output.stderr).contains("such as 20:30"));
+    let output = render("hill.itb", &["--time", "21:00"]);
+    assert!(!output.status.success());
+    assert!(text(&output.stderr).contains("track with times"));
+}

@@ -1,8 +1,8 @@
 use isotrail_bundle::{
     Bounds, GridInfo, HikeStats, Metadata, ProfileSample, Provenance, Route, RoutePoint,
-    SceneBundle, Terrain,
+    SceneBundle, SunSample, Terrain,
 };
-use isotrail_track::{Track, TrackPoint, TrackStats, haversine_m};
+use isotrail_track::{Track, TrackPoint, TrackStats, haversine_m, sun_position};
 
 use crate::{GeoError, Grid, Heightmap, LandcoverMap, vertical_exaggeration};
 
@@ -13,6 +13,7 @@ pub const ROUTE_TOLERANCE_CELLS: f64 = 0.25;
 pub const PROFILE_SAMPLES: usize = 256;
 pub const OSM_ATTRIBUTION: &str = "© OpenStreetMap contributors";
 pub const DEM_ATTRIBUTION: &str = "Terrain Tiles (AWS)";
+pub const SUN_STEP_S: i64 = 300;
 
 /// Packs the prepared terrain and the route into a bundle; `heightmap` is
 /// the one [`LandcoverMap::classify`] levelled
@@ -65,6 +66,7 @@ pub fn scene_bundle(
         prop_seed: 0,
         route,
         profile,
+        sun: sun_track(&stats, origin_lat, origin_lon),
     };
     bundle.prop_seed = bundle.content_seed();
     Ok(bundle)
@@ -90,6 +92,26 @@ fn hike_stats(stats: &TrackStats) -> HikeStats {
         elapsed_s: stats.elapsed.map(|d| d.num_seconds()),
         moving_s: stats.moving.map(|d| d.num_seconds()),
     }
+}
+
+/// The sun over the slab every [`SUN_STEP_S`] from the start, and at the end
+fn sun_track(stats: &TrackStats, lat: f64, lon: f64) -> Vec<SunSample> {
+    let (Some(start), Some(end)) = (stats.start, stats.end) else {
+        return Vec::new();
+    };
+    let step = chrono::TimeDelta::seconds(SUN_STEP_S);
+    std::iter::successors(Some(start), |&t| Some(t + step))
+        .take_while(|&t| t < end)
+        .chain([end])
+        .map(|time| {
+            let sun = sun_position(lat, lon, time);
+            SunSample {
+                time: time.timestamp(),
+                azimuth_deg: sun.azimuth_deg as f32,
+                elevation_deg: sun.elevation_deg as f32,
+            }
+        })
+        .collect()
 }
 
 /// Distance along the track at every point, summed the same way as
@@ -382,6 +404,24 @@ mod tests {
         assert_eq!(meta.stats.elapsed_s, Some(75 * 30));
         assert_eq!(meta.stats.gain_m, stats.gain_m);
         assert_eq!(meta.attribution, [OSM_ATTRIBUTION, DEM_ATTRIBUTION]);
+    }
+
+    #[test]
+    fn the_sun_is_sampled_from_start_to_end() {
+        let track = track(&[(0.0, 2000.0), (2600.0, 8000.0)], true);
+        let sun = bundle(&track).sun;
+        let times: Vec<i64> = sun.iter().map(|s| s.time - 1_750_000_030).collect();
+        assert_eq!(times, [0, 300, 600, 900, 1200, 1500, 1800, 2100, 2250]);
+        let start = sun_position(ORIGIN.0, ORIGIN.1, track.stats().unwrap().start.unwrap());
+        // The slab's origin is within a few kilometres of the track's
+        assert!((f64::from(sun[0].elevation_deg) - start.elevation_deg).abs() < 0.1);
+        assert!((f64::from(sun[0].azimuth_deg) - start.azimuth_deg).abs() < 0.1);
+
+        let mut untimed = track.clone();
+        for point in untimed.segments.iter_mut().flat_map(|s| &mut s.points) {
+            point.time = None;
+        }
+        assert!(bundle(&untimed).sun.is_empty());
     }
 
     #[test]

@@ -3,6 +3,7 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
+use chrono::NaiveTime;
 use clap::{Args, ValueEnum};
 use isotrail_bundle::SceneBundle;
 use isotrail_export::{
@@ -11,7 +12,7 @@ use isotrail_export::{
 };
 use isotrail_render::{
     Aspect, Background, DEFAULT_PALETTE, DEFAULT_YAW_OFFSET_DEG, Frame, Gpu, Look, Mesher, Motion,
-    Overlays, Pace, Palette, SmoothMesher, VoxelMesher, Walk,
+    Overlays, Pace, Palette, SmoothMesher, SunState, VoxelMesher, Walk,
 };
 use tracing::{info, warn};
 
@@ -63,6 +64,11 @@ pub struct RenderArgs {
     /// Height of a voxel block as a share of its width (default 1)
     #[arg(long, value_name = "F", value_parser = parse_block_height)]
     block_height: Option<f32>,
+
+    /// Light the scene as at this local time on the hike's start date, rather
+    /// than when the hike started
+    #[arg(long, value_name = "HH:MM", value_parser = crate::sun::parse_time)]
+    time: Option<NaiveTime>,
 
     /// How many times taller than life to draw the terrain; chosen from the
     /// slab's size and relief by default
@@ -208,7 +214,7 @@ fn parse_block_height(value: &str) -> Result<f32, String> {
 pub fn run(args: &RenderArgs) -> anyhow::Result<()> {
     let aspects = args.aspects()?;
     let (outputs, format) = output_paths(&args.file, args.output.as_deref(), &aspects)?;
-    let motion = match format {
+    let mut motion = match format {
         Format::Png => None,
         Format::Gif | Format::Mp4 => Some(args.animation.motion()?),
     };
@@ -234,6 +240,10 @@ pub fn run(args: &RenderArgs) -> anyhow::Result<()> {
         bundle.grid.exaggeration = exaggeration;
     }
     info!(exaggeration = bundle.grid.exaggeration, "terrain");
+    let sun = crate::sun::hike_sun(&bundle, args.time)?;
+    if let Some(motion) = &mut motion {
+        motion.sun = args.time.is_some().then_some(sun);
+    }
     let text = args.overlay.text(&bundle)?;
     let style = args.overlay.style();
     if motion.is_some_and(|motion| motion.pace == Pace::Time) && !Walk::new(&bundle).is_timed() {
@@ -264,15 +274,8 @@ pub fn run(args: &RenderArgs) -> anyhow::Result<()> {
                 .with_context(|| format!("could not write {}", output.display()))?;
             println!("Rendered {frames} frames of {size}");
         } else {
-            write_still(
-                &gpu,
-                &bundle,
-                mesher.as_ref(),
-                &overlays,
-                &look,
-                args.scale,
-                output,
-            )?;
+            let frame = still(&gpu, &bundle, mesher.as_ref(), &overlays, &sun, &look)?;
+            write_png(output, &upscale(&frame, args.scale)?)?;
             println!("Rendered {size}");
         }
         println!("Wrote {}", output.display());
@@ -283,28 +286,26 @@ pub fn run(args: &RenderArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Renders the still with its overlays and saves it as a PNG enlarged `scale`
-/// times
-pub(crate) fn write_still(
+/// Renders the still with its overlays at internal resolution
+pub(crate) fn still(
     gpu: &Gpu,
     bundle: &SceneBundle,
     mesher: &dyn Mesher,
     overlays: &Overlays,
+    sun: &SunState,
     look: &Look,
-    scale: u32,
-    output: &Path,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Frame> {
     let mut frame = render_still(
         gpu,
         bundle,
         mesher,
         &overlays.diorama_framing(),
         DEFAULT_YAW_OFFSET_DEG,
+        sun,
         look,
     )?;
     overlays.draw(&mut frame, look.palette.as_ref(), 1.0);
-    write_png(output, &upscale(&frame, scale)?)?;
-    Ok(())
+    Ok(frame)
 }
 
 struct Clip<'a> {

@@ -31,7 +31,8 @@ pub use error::RenderError;
 pub use frame::Frame;
 pub use gpu::{ADAPTER_ENV, AdapterMode, Gpu};
 pub use lighting::{
-    AMBIENT, BANDS, FILL, SUN_AZIMUTH_DEG, SUN_COLOUR, SUN_ELEVATION_DEG, SunState,
+    AMBIENT, BANDS, FILL, MIN_LIGHT_ELEVATION_DEG, SUN_AZIMUTH_DEG, SUN_COLOUR, SUN_ELEVATION_DEG,
+    SunState,
 };
 pub use mesh::{Mesher, SmoothMesher, Surface, TerrainMesh, Vertex, VoxelMesher};
 pub use overlay::{

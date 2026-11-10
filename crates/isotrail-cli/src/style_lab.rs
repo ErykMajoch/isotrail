@@ -5,7 +5,8 @@ use anyhow::Context;
 use clap::Args;
 use isotrail_export::{render_still, upscale, write_png};
 use isotrail_render::{
-    Aspect, DEFAULT_YAW_OFFSET_DEG, Frame, Gpu, Look, Mesher, Palette, SmoothMesher, VoxelMesher,
+    Aspect, DEFAULT_YAW_OFFSET_DEG, Frame, Gpu, Look, Mesher, Palette, SmoothMesher, SunState,
+    VoxelMesher,
 };
 use tracing::info;
 
@@ -50,6 +51,7 @@ pub fn run(args: &StyleLabArgs) -> anyhow::Result<()> {
     let mut sheet = Sheet::new(columns, palettes.len(), width, height);
 
     let gpu = Gpu::headless()?;
+    let sun = SunState::for_hike(&bundle);
     let mut index = 0;
     for palette in palettes {
         let look = Look {
@@ -68,6 +70,7 @@ pub fn run(args: &StyleLabArgs) -> anyhow::Result<()> {
                     mesher.as_ref(),
                     &framing,
                     DEFAULT_YAW_OFFSET_DEG,
+                    &sun,
                     &look,
                 )?;
                 let frame = upscale(&frame, scale)?;

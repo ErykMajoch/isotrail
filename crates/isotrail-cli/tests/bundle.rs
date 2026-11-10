@@ -277,8 +277,13 @@ fn stats_of_a_damaged_bundle_explains_why() {
     for (name, bytes, reason) in [
         (
             "damaged.itb",
-            &b"ITB1\x01\x00not deflate"[..],
+            &b"ITB1\x02\x00not deflate"[..],
             "the bundle is damaged",
+        ),
+        (
+            "old.itb",
+            b"ITB1\x01\x00",
+            "create it again with `isotrail bundle`",
         ),
         ("newer.dat", b"ITB1\x09\x00", "format version 9"),
         ("hike.itb", b"<gpx/>", "not an isotrail scene bundle"),

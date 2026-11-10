@@ -10,6 +10,7 @@ mod overlay;
 mod render;
 mod stats;
 mod style_lab;
+mod sun;
 
 use std::fs;
 use std::io::IsTerminal;

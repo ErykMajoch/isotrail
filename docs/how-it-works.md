@@ -19,7 +19,7 @@
   <img src="images/debug-landcover.png" alt="Landcover of the slab with the route" width="45%">
 </p>
 
-The route is then draped onto the terrain, and everything is saved together as a scene bundle: a compact, versioned binary file of about 100 KB.
+The route is then draped onto the terrain. The sun's position over the slab is worked out every five minutes from the start of the hike to its end, with the [NOAA solar calculator](https://gml.noaa.gov/grad/solcalc/) equations, which follow Jean Meeus's *Astronomical Algorithms*. Everything is saved together as a scene bundle: a compact, versioned binary file of about 100 KB.
 
 ## Rendering
 
@@ -27,7 +27,7 @@ The scene is drawn with [wgpu](https://wgpu.rs/) at a small internal resolution:
 
 1. **Mesh.** The `voxel` mesher builds one column of blocks per cell, with the height rounded to whole blocks. The `smooth` mesher builds a low-poly surface with one flat colour per triangle. Trees and boulders are placed by a random generator seeded from the scene, so the same hike always renders the same way.
 2. **Slab sides.** The cut faces show strata that follow the surface: a darker topsoil, a few blocks of dirt, then stone, with a band of deep stone at the base and seeded pebbles and ore. Where a lake reaches the edge, its water shows in cross-section.
-3. **Light.** A late-morning sun from the south-south-east casts shadows from a shadow map. Lighting is cel-shaded into a few flat bands, and a soft fill from the viewer's side keeps faces that point away from the sun readable.
+3. **Light.** The sun stands where it was when the hike started (or at `--time`), and casts shadows from a shadow map. Its height sets the mood: white daylight above 20°, warmer and dimmer golden light as it sinks, orange at sunset, then the cool blue of dusk and night, with the sky's gradient following along. The light never comes from lower than 10°, so shadows stay long but bounded, and the scene still reads by night. Tracks without times get a late-morning sun from the south-south-east. Lighting is cel-shaded into a few flat bands, and a soft fill from the viewer's side keeps faces that point away from the sun readable.
 4. **Outlines.** Dark lines mark the slab's silhouette and the places where one surface passes in front of another. Sharp outward folds, such as ridges and the rim of the slab, are picked out in a lighter shade.
 5. **Route.** The route is a bold line with a dark border that climbs every block step it crosses. Where a ridge hides it, it shows through as a faint dashed line. Flags mark the start and finish.
 6. **Palette.** Every pixel is snapped to the nearest colour of the palette, compared in [OKLab](https://bottosson.github.io/posts/oklab/), a colour space that matches how alike colours look to the eye. The sky gradient is dithered with a fine checker pattern.

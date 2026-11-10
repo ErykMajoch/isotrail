@@ -10,6 +10,9 @@ pub struct SceneBundle {
     pub prop_seed: u64,
     pub route: Route,
     pub profile: Vec<ProfileSample>,
+    /// Where the sun stood over the slab from the start to the end of the
+    /// hike; empty for tracks without times
+    pub sun: Vec<SunSample>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -181,6 +184,16 @@ pub struct RoutePoint {
 pub struct ProfileSample {
     pub distance_m: f32,
     pub ele_m: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SunSample {
+    /// Unix seconds
+    pub time: i64,
+    /// Compass bearing
+    pub azimuth_deg: f32,
+    /// Negative below the horizon
+    pub elevation_deg: f32,
 }
 
 #[cfg(test)]

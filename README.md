@@ -133,7 +133,6 @@ See [Configuration](docs/configuration.md) for file locations, precedence and en
 
 ## Roadmap
 
-- Lighting from the real time of day of the hike
 - Historical weather and a seasonal look
 
 ## Contributing

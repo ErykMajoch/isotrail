@@ -53,6 +53,7 @@ struct Uniforms {
     light_view_proj: [f32; 16],
     sun: [f32; 4],
     sun_colour: [f32; 4],
+    ambient_colour: [f32; 4],
     fill: [f32; 4],
     shadow: [f32; 4],
     object: [u32; 4],
@@ -311,6 +312,7 @@ impl TerrainRenderer {
             light_view_proj: light_view_proj.to_cols_array(),
             sun: sun.direction.normalize().extend(sun.ambient).to_array(),
             sun_colour: (sun.colour * sun.intensity).extend(BANDS as f32).to_array(),
+            ambient_colour: sun.ambient_colour.extend(1.0).to_array(),
             fill: towards_camera.extend(FILL).to_array(),
             shadow: [texel_m, 0.0, 0.0, 0.0],
             object: [TERRAIN_ID, 0, 0, 0],
@@ -404,7 +406,7 @@ impl TerrainRenderer {
             }
         }
         self.post
-            .encode(&mut encoder, gbuffer, target, camera, look, &sprites);
+            .encode(&mut encoder, target, camera, sun.sky, look, &sprites);
         gpu.queue().submit([encoder.finish()]);
     }
 }

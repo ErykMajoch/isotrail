@@ -1,5 +1,5 @@
 //! Track ingest for isotrail: reading GPX files into a clean in-memory track,
-//! hike statistics and the timeline used for animation
+//! hike statistics, the sun's position and the timeline used for animation
 //!
 //! This crate is wasm-safe: no filesystem, network or thread access
 //!
@@ -25,6 +25,7 @@ mod model;
 mod reader;
 mod simplify;
 mod stats;
+mod sun;
 mod timezone;
 
 pub use chrono_tz::Tz;
@@ -35,4 +36,5 @@ pub use isotrail_bundle::Units;
 pub use model::{MIN_SEGMENT_POINTS, Segment, Track, TrackPoint};
 pub use reader::TrackReader;
 pub use stats::{Bounds, GAIN_THRESHOLD_M, PAUSE_THRESHOLD, SMOOTHING_WINDOW_M, TrackStats};
+pub use sun::{SunPosition, sun_position};
 pub use timezone::timezone_at;

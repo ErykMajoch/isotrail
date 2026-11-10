@@ -71,6 +71,7 @@ impl AnimationArgs {
                 PaceArg::Distance => Pace::Distance,
                 PaceArg::Time => Pace::Time,
             },
+            sun: None,
         })
     }
 }

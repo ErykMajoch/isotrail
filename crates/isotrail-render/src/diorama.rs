@@ -28,6 +28,7 @@ impl Diorama {
         mut mesh: TerrainMesh,
         framing: &Framing,
         yaw_offsets_deg: &[f32],
+        sun: SunState,
     ) -> Diorama {
         let outline = outline(&mesh, bundle.grid.cell_size_m as f32);
         let heading = view_heading(bundle, DEFAULT_YAW_OFFSET_DEG);
@@ -40,7 +41,7 @@ impl Diorama {
             mesh: renderer.upload(gpu, &mesh),
             route,
             turntable,
-            sun: SunState::late_morning(&bundle.grid),
+            sun,
         }
     }
 

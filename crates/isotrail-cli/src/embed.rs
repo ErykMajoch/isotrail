@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
 use clap::Args;
-use isotrail_export::DEFAULT_SCALE;
-use isotrail_render::{Aspect, Gpu, Look, Overlays, VoxelMesher};
+use isotrail_export::{DEFAULT_SCALE, upscale, write_png};
+use isotrail_render::{Aspect, Gpu, Look, Overlays, SunState, VoxelMesher};
 use tracing::warn;
 
 use crate::bundle::DataArgs;
@@ -114,15 +114,15 @@ pub fn run(args: &EmbedArgs) -> anyhow::Result<()> {
         .context("the pixel scale doesn't divide the image size")?;
     let overlays = Overlays::layout(&text, &style, &framing);
     let poster_path = dir.join(format!("{name}.png"));
-    crate::render::write_still(
+    let poster = crate::render::still(
         &Gpu::headless()?,
         &bundle,
         &VoxelMesher::default(),
         &overlays,
+        &SunState::for_hike(&bundle),
         &Look::default(),
-        DEFAULT_SCALE,
-        &poster_path,
     )?;
+    write_png(&poster_path, &upscale(&poster, DEFAULT_SCALE)?)?;
     println!("Wrote {}", poster_path.display());
 
     if let Some(runtime) = runtime {
