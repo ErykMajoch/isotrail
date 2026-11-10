@@ -1,5 +1,3 @@
-use wgpu::util::DeviceExt;
-
 use crate::{Gpu, OffscreenTarget};
 
 /// The longest side of a canvas's internal frame, as in a story or wide
@@ -38,6 +36,7 @@ struct Uniforms {
 pub struct Present {
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
+    uniforms: wgpu::Buffer,
     format: wgpu::TextureFormat,
 }
 
@@ -99,6 +98,7 @@ impl Present {
         Present {
             pipeline,
             layout,
+            uniforms: gpu.uniform_buffer::<Uniforms>("present uniforms"),
             format,
         }
     }
@@ -129,18 +129,15 @@ impl Present {
                 i32::from(self.format.is_srgb()),
             ],
         };
-        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("present uniforms"),
-            contents: bytemuck::bytes_of(&uniforms),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        gpu.queue()
+            .write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&uniforms));
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("present"),
             layout: &self.layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: buffer.as_entire_binding(),
+                    resource: self.uniforms.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,

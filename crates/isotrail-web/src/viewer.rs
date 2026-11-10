@@ -1,3 +1,6 @@
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+
 use glam::Vec2;
 use isotrail_bundle::SceneBundle;
 use isotrail_render::{
@@ -16,6 +19,13 @@ const SAFE_AREA: Insets = Insets {
 /// The diorama fits the canvas from every heading this far apart
 const FIT_STEP_DEG: usize = 5;
 
+// wgpu wants a device-lost callback it could send between threads, which a
+// JavaScript function can't be, so the callback finds it by the viewer's id
+thread_local! {
+    static NEXT_ID: Cell<u32> = const { Cell::new(0) };
+    static ON_LOST: RefCell<HashMap<u32, js_sys::Function>> = RefCell::new(HashMap::new());
+}
+
 /// A hike's diorama drawn into a canvas
 #[wasm_bindgen]
 pub struct Viewer {
@@ -30,6 +40,7 @@ pub struct Viewer {
     stage: Option<Stage>,
     view: View,
     progress: f32,
+    id: u32,
 }
 
 /// What a canvas size needs, rebuilt when the pixel grid changes
@@ -62,6 +73,17 @@ impl Viewer {
         let bundle = SceneBundle::from_bytes(&bundle)?;
         let (width, height) = (canvas.width().max(1), canvas.height().max(1));
         let (gpu, surface) = Gpu::for_canvas(canvas, webgl_only).await?;
+        let id = NEXT_ID.with(|next| next.replace(next.get().wrapping_add(1)));
+        gpu.device()
+            .set_device_lost_callback(move |reason, message| {
+                if reason == wgpu::DeviceLostReason::Destroyed {
+                    return;
+                }
+                let callback = ON_LOST.with_borrow(|callbacks| callbacks.get(&id).cloned());
+                if let Some(callback) = callback {
+                    let _ = callback.call1(&JsValue::NULL, &JsValue::from_str(&message));
+                }
+            });
         let capabilities = surface.get_capabilities(gpu.adapter());
         let mut config = surface
             .get_default_config(gpu.adapter(), width, height)
@@ -92,7 +114,16 @@ impl Viewer {
             stage: None,
             view: View::default(),
             progress: 1.0,
+            id,
         })
+    }
+
+    /// Calls `callback` with the browser's message if the GPU is lost, for
+    /// instance when the driver resets. The viewer can't draw after that:
+    /// free it and load the bundle again
+    #[wasm_bindgen(js_name = onLost)]
+    pub fn on_lost(&self, callback: js_sys::Function) {
+        ON_LOST.with_borrow_mut(|callbacks| callbacks.insert(self.id, callback));
     }
 
     /// The graphics API in use, such as `"webgpu"` or `"gl"`
@@ -222,6 +253,15 @@ impl Viewer {
             stage.grid.scale,
         );
         self.gpu.queue().present(texture);
+    }
+}
+
+impl Drop for Viewer {
+    /// Frees the GPU memory at once, rather than whenever the browser
+    /// collects the objects that hold it
+    fn drop(&mut self) {
+        ON_LOST.with_borrow_mut(|callbacks| callbacks.remove(&self.id));
+        self.gpu.device().destroy();
     }
 }
 

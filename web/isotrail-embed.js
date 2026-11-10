@@ -210,6 +210,7 @@ class IsotrailHike extends HTMLElement {
   #resize = null;
   #frame = 0;
   #drawn = false;
+  #restarted = false;
 
   #progress = 1;
   #yaw = 0;
@@ -321,6 +322,7 @@ class IsotrailHike extends HTMLElement {
         return;
       }
       this.#viewer = viewer;
+      viewer.onLost((message) => this.#onLost(message));
       canvas.setAttribute('aria-label', `3D diorama of ${viewer.title || 'a hike'}`);
       this.#resize = new ResizeObserver(([entry]) => this.#onResize(entry));
       this.#resize.observe(canvas);
@@ -330,6 +332,19 @@ class IsotrailHike extends HTMLElement {
       this.#teardown();
       this.#setState('fallback');
     }
+  }
+
+  // One fresh start, in case the browser reset its GPU; the poster after that
+  #onLost(message) {
+    console.warn('<isotrail-hike> lost the GPU:', message);
+    this.#teardown();
+    if (this.#restarted) {
+      this.#setState('fallback');
+      return;
+    }
+    this.#restarted = true;
+    this.#setState('poster');
+    if (this.#near) this.#start();
   }
 
   #teardown() {

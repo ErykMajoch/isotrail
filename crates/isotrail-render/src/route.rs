@@ -1,7 +1,8 @@
+use std::sync::Mutex;
+
 use geo::{Coord, LineString, SimplifyIdx};
 use glam::{Vec2, Vec3};
 use isotrail_bundle::{GridInfo, RoutePoint, SceneBundle};
-use wgpu::util::DeviceExt;
 
 use crate::mesh::slab_position;
 use crate::post::{DEPTH_FORMAT, GBuffer, ROUTE_FORMAT};
@@ -169,9 +170,14 @@ struct Uniforms {
 /// behind it
 pub(crate) struct RoutePass {
     device: wgpu::Device,
+    queue: wgpu::Queue,
     visible: wgpu::RenderPipeline,
     hidden: wgpu::RenderPipeline,
-    layout: wgpu::BindGroupLayout,
+    uniforms: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    /// Reused from frame to frame, and replaced only when a longer line
+    /// needs more room
+    vertices: Mutex<Option<wgpu::Buffer>>,
 }
 
 impl RoutePass {
@@ -236,11 +242,23 @@ impl RoutePass {
                 cache: None,
             })
         };
+        let uniforms = gpu.uniform_buffer::<Uniforms>("route uniforms");
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("route"),
+            layout: &layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniforms.as_entire_binding(),
+            }],
+        });
         RoutePass {
             device: device.clone(),
+            queue: gpu.queue().clone(),
             visible: pipeline("fs_visible", wgpu::CompareFunction::LessEqual),
             hidden: pipeline("fs_hidden", wgpu::CompareFunction::Greater),
-            layout,
+            uniforms,
+            bind_group,
+            vertices: Mutex::new(None),
         }
     }
 
@@ -255,7 +273,6 @@ impl RoutePass {
         camera: &Camera,
         dash_px: f32,
     ) {
-        let device = &self.device;
         let vertices = line.map_or_else(Vec::new, |line| {
             line_vertices(line, camera, gbuffer.width, gbuffer.height)
         });
@@ -290,31 +307,36 @@ impl RoutePass {
                 .to_array(),
             route: [distance_m, dash_px, 0.0, 0.0],
         };
-        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("route uniforms"),
-            contents: bytemuck::bytes_of(&uniforms),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("route vertices"),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("route"),
-            layout: &self.layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            }],
-        });
-        pass.set_bind_group(0, &bind_group, &[]);
-        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        self.queue
+            .write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&uniforms));
+        let bytes: &[u8] = bytemuck::cast_slice(&vertices);
+        let vertex_buffer = self.vertex_buffer(bytes.len() as wgpu::BufferAddress);
+        self.queue.write_buffer(&vertex_buffer, 0, bytes);
+        pass.set_bind_group(0, &self.bind_group, &[]);
+        pass.set_vertex_buffer(0, vertex_buffer.slice(..bytes.len() as wgpu::BufferAddress));
         // Drawn last, so overlapping stretches show as visible
         for pipeline in [&self.hidden, &self.visible] {
             pass.set_pipeline(pipeline);
             pass.draw(0..vertices.len() as u32, 0..1);
         }
+    }
+
+    /// A vertex buffer of at least `size` bytes
+    fn vertex_buffer(&self, size: wgpu::BufferAddress) -> wgpu::Buffer {
+        let mut vertices = self.vertices.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(buffer) = vertices.as_ref().filter(|b| b.size() >= size) {
+            return buffer.clone();
+        }
+        if let Some(old) = vertices.take() {
+            old.destroy();
+        }
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("route vertices"),
+            size: size.next_power_of_two(),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        vertices.insert(buffer).clone()
     }
 }
 

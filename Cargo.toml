@@ -19,6 +19,7 @@ directories = "6.0.0"
 geo = { version = "0.33.1", default-features = false }
 gif = { version = "0.14.2", default-features = false, features = ["raii_no_panic", "std"] }
 glam = "0.34.1"
+js-sys = "0.3.106"
 miniz_oxide = "0.9.1"
 png = "0.18.1"
 pollster = "1.0.1"

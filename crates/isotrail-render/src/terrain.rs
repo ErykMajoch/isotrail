@@ -2,7 +2,7 @@ use glam::{IVec2, Vec3};
 use wgpu::util::DeviceExt;
 
 use crate::lighting::{BANDS, FILL};
-use crate::post::{DEPTH_FORMAT, GBuffer, ID_FORMAT, NORMAL_FORMAT, PostPass, TERRAIN_ID};
+use crate::post::{DEPTH_FORMAT, ID_FORMAT, NORMAL_FORMAT, PostPass, TERRAIN_ID};
 use crate::route::{RoutePass, to_pixel};
 use crate::sprite::Sprite;
 use crate::{
@@ -19,6 +19,12 @@ pub struct GpuMesh {
     vertices: wgpu::Buffer,
     count: u32,
     corners: [Vec3; 8],
+}
+
+impl Drop for GpuMesh {
+    fn drop(&mut self) {
+        self.vertices.destroy();
+    }
 }
 
 /// What a frame shows
@@ -57,10 +63,10 @@ struct Uniforms {
 pub struct TerrainRenderer {
     pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
-    layout: wgpu::BindGroupLayout,
-    shadow_layout: wgpu::BindGroupLayout,
+    uniforms: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    shadow_bind_group: wgpu::BindGroup,
     shadow_view: wgpu::TextureView,
-    shadow_sampler: wgpu::Sampler,
     route: RoutePass,
     post: PostPass,
 }
@@ -212,13 +218,40 @@ impl TerrainRenderer {
             compare: Some(wgpu::CompareFunction::LessEqual),
             ..Default::default()
         });
+        let uniforms = gpu.uniform_buffer::<Uniforms>("terrain uniforms");
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("terrain"),
+            layout: &layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniforms.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&shadow_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&shadow_sampler),
+                },
+            ],
+        });
+        let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("terrain shadow"),
+            layout: &shadow_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniforms.as_entire_binding(),
+            }],
+        });
         TerrainRenderer {
             pipeline,
             shadow_pipeline,
-            layout,
-            shadow_layout,
+            uniforms,
+            bind_group,
+            shadow_bind_group,
             shadow_view,
-            shadow_sampler,
             route: RoutePass::new(gpu),
             post: PostPass::new(gpu),
         }
@@ -282,38 +315,9 @@ impl TerrainRenderer {
             shadow: [texel_m, 0.0, 0.0, 0.0],
             object: [TERRAIN_ID, 0, 0, 0],
         };
-        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("terrain uniforms"),
-            contents: bytemuck::bytes_of(&uniforms),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("terrain"),
-            layout: &self.layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: uniform_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&self.shadow_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&self.shadow_sampler),
-                },
-            ],
-        });
-        let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("terrain shadow"),
-            layout: &self.shadow_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            }],
-        });
-        let gbuffer = GBuffer::new(gpu, target.width(), target.height());
+        gpu.queue()
+            .write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&uniforms));
+        let gbuffer = target.gbuffer();
 
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
@@ -331,7 +335,7 @@ impl TerrainRenderer {
                 ..Default::default()
             });
             pass.set_pipeline(&self.shadow_pipeline);
-            pass.set_bind_group(0, &shadow_bind_group, &[]);
+            pass.set_bind_group(0, &self.shadow_bind_group, &[]);
             pass.set_vertex_buffer(0, mesh.vertices.slice(..));
             pass.draw(0..mesh.count, 0..1);
         }
@@ -360,7 +364,7 @@ impl TerrainRenderer {
                 ..Default::default()
             });
             pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
+            pass.set_bind_group(0, &self.bind_group, &[]);
             pass.set_vertex_buffer(0, mesh.vertices.slice(..));
             pass.draw(0..mesh.count, 0..1);
         }
@@ -368,7 +372,7 @@ impl TerrainRenderer {
         let distance_m = route.map_or(0.0, |line| line.distance_at(scene.progress));
         self.route.encode(
             &mut encoder,
-            &gbuffer,
+            gbuffer,
             route,
             distance_m,
             camera,
@@ -400,7 +404,7 @@ impl TerrainRenderer {
             }
         }
         self.post
-            .encode(&mut encoder, &gbuffer, target, camera, look, &sprites);
+            .encode(&mut encoder, gbuffer, target, camera, look, &sprites);
         gpu.queue().submit([encoder.finish()]);
     }
 }

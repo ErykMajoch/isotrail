@@ -1,5 +1,4 @@
 use glam::Vec4;
-use wgpu::util::DeviceExt;
 
 use crate::palette::{MAX_COLOURS, srgb_to_oklab};
 use crate::sprite::{Placed, SpriteAtlas};
@@ -159,43 +158,64 @@ pub(crate) struct GBuffer {
     pub id: wgpu::TextureView,
     pub depth: wgpu::TextureView,
     pub route: wgpu::TextureView,
+    textures: Vec<wgpu::Texture>,
 }
 
 impl GBuffer {
     pub fn new(gpu: &Gpu, width: u32, height: u32) -> GBuffer {
-        let view = |label, format| {
-            gpu.device()
-                .create_texture(&wgpu::TextureDescriptor {
-                    label: Some(label),
-                    size: wgpu::Extent3d {
-                        width,
-                        height,
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                        | wgpu::TextureUsages::TEXTURE_BINDING,
-                    view_formats: &[],
-                })
-                .create_view(&wgpu::TextureViewDescriptor::default())
+        let mut textures = Vec::new();
+        let mut view = |label, format| {
+            let texture = gpu.device().create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            textures.push(texture);
+            view
         };
+        let (colour, normal, id, depth, route) = (
+            view("g-buffer colour", TARGET_FORMAT),
+            view("g-buffer normal", NORMAL_FORMAT),
+            view("g-buffer id", ID_FORMAT),
+            view("g-buffer depth", DEPTH_FORMAT),
+            view("g-buffer route", ROUTE_FORMAT),
+        );
         GBuffer {
             width,
             height,
-            colour: view("g-buffer colour", TARGET_FORMAT),
-            normal: view("g-buffer normal", NORMAL_FORMAT),
-            id: view("g-buffer id", ID_FORMAT),
-            depth: view("g-buffer depth", DEPTH_FORMAT),
-            route: view("g-buffer route", ROUTE_FORMAT),
+            colour,
+            normal,
+            id,
+            depth,
+            route,
+            textures,
+        }
+    }
+}
+
+impl Drop for GBuffer {
+    fn drop(&mut self) {
+        for texture in &self.textures {
+            texture.destroy();
         }
     }
 }
 
 pub(crate) struct PostPass {
     device: wgpu::Device,
+    queue: wgpu::Queue,
+    uniforms: wgpu::Buffer,
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     depth_sampler: wgpu::Sampler,
@@ -272,6 +292,8 @@ impl PostPass {
         });
         PostPass {
             device: device.clone(),
+            queue: gpu.queue().clone(),
+            uniforms: gpu.uniform_buffer::<Uniforms>("post uniforms"),
             pipeline,
             layout,
             depth_sampler: device.create_sampler(&wgpu::SamplerDescriptor {
@@ -346,11 +368,8 @@ impl PostPass {
             uniforms.palette_lab[i] = srgb_to_oklab(rgb).extend(0.0).to_array();
             uniforms.palette_rgb[i] = colour(rgb).to_array();
         }
-        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("post uniforms"),
-            contents: bytemuck::bytes_of(&uniforms),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        self.queue
+            .write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&uniforms));
         let view = |binding, view| wgpu::BindGroupEntry {
             binding,
             resource: wgpu::BindingResource::TextureView(view),
@@ -361,7 +380,7 @@ impl PostPass {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: buffer.as_entire_binding(),
+                    resource: self.uniforms.as_entire_binding(),
                 },
                 view(1, &gbuffer.colour),
                 view(2, &gbuffer.normal),

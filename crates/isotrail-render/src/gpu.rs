@@ -128,6 +128,18 @@ impl Gpu {
         &self.queue
     }
 
+    /// A buffer for one `T`, rewritten with `Queue::write_buffer` before
+    /// each use. A browser only frees GPU memory when it is destroyed or
+    /// garbage-collected, so passes keep theirs rather than make one a frame
+    pub(crate) fn uniform_buffer<T>(&self, label: &str) -> wgpu::Buffer {
+        self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size: size_of::<T>() as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        })
+    }
+
     pub fn adapter_info(&self) -> &wgpu::AdapterInfo {
         &self.adapter_info
     }

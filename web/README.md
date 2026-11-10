@@ -109,7 +109,7 @@ import Hike from '../components/Hike.astro';
 | `autoplay` | Plays the route once as soon as the diorama is ready, unless the visitor prefers reduced motion |
 | `backend` | `webgl` forces the WebGL2 fallback, for testing it in a browser that has WebGPU |
 
-The poster shows at once. The renderer (about 3 MB) only downloads when the element comes near the screen, and it downloads once however many hikes are on the page. If the browser has neither WebGPU nor WebGL2, or the bundle can't be loaded, the poster stays and a warning goes to the console.
+The poster shows at once. The renderer (about 3 MB) only downloads when the element comes near the screen, and it downloads once however many hikes are on the page. If the browser has neither WebGPU nor WebGL2, or the bundle can't be loaded, the poster stays and a warning goes to the console. If the GPU is lost while the page is open, for instance when its driver resets, the element starts again once and keeps the poster if that fails too.
 
 ### Controls
 
@@ -172,7 +172,8 @@ viewer.pan(dx, dy);                           // move with a drag of (dx, dy) ca
 viewer.resetView();                           // the whole slab, from the still image's view
 viewer.draw();
 console.log(viewer.backend, viewer.zoom, viewer.title);   // "webgpu" or "gl", 1 to 3, the hike's name
-viewer.free();                                // releases the GPU resources
+viewer.onLost((message) => { ... });          // the GPU was lost: free the viewer and load again
+viewer.free();                                // releases the GPU memory at once
 ```
 
 Nothing is drawn until the first `resize`. Each art pixel covers a whole number of device pixels, chosen so that the frame's long side is at most 640 pixels, as in a still rendered at `--scale 3`. Call `resize` again whenever the canvas changes size, and `draw` after any change.

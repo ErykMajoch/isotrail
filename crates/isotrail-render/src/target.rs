@@ -1,14 +1,18 @@
 use crate::Gpu;
+use crate::post::GBuffer;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::{Frame, RenderError};
 
 /// Not sRGB, so the bytes read back are exactly what the shaders wrote
 pub const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
-/// A colour texture at internal resolution that can be read back to the CPU
+/// A colour texture at internal resolution that can be read back to the CPU,
+/// with the intermediate targets that drawing into it needs. Make one per
+/// frame size and reuse it, as a browser only frees its GPU memory on drop
 pub struct OffscreenTarget {
     texture: wgpu::Texture,
     view: wgpu::TextureView,
+    gbuffer: GBuffer,
 }
 
 impl OffscreenTarget {
@@ -30,7 +34,11 @@ impl OffscreenTarget {
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        Self { texture, view }
+        Self {
+            texture,
+            view,
+            gbuffer: GBuffer::new(gpu, width, height),
+        }
     }
 
     pub fn width(&self) -> u32 {
@@ -43,6 +51,10 @@ impl OffscreenTarget {
 
     pub fn view(&self) -> &wgpu::TextureView {
         &self.view
+    }
+
+    pub(crate) fn gbuffer(&self) -> &GBuffer {
+        &self.gbuffer
     }
 
     /// Copies the texture to the CPU, blocking until the GPU has finished
@@ -96,5 +108,11 @@ impl OffscreenTarget {
         }
         buffer.unmap();
         Ok(Frame::new(width, height, rgba))
+    }
+}
+
+impl Drop for OffscreenTarget {
+    fn drop(&mut self) {
+        self.texture.destroy();
     }
 }
