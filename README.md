@@ -34,6 +34,7 @@
 - **Diorama look**: stepped voxel or smooth low-poly terrain, layered cut faces, cel shading with shadows, and outlines
 - **Pixel-art finish**: every pixel snapped to a hand-made palette (three built in, or any Lospec `.hex` file)
 - **Animated**: looping GIFs and MP4 videos where the route draws itself, the camera turns and the stats count up
+- **On your website**: an interactive `<isotrail-hike>` element that visitors can turn, zoom and play, on any static site
 - **Ready to share**: story, feed, square and wide presets, with the title, date, stats and elevation profile laid out around Instagram's interface
 - **Your style**: choose the stats, units, date format and panels, or use a transparent background to place the diorama over a photo
 - **Offline and repeatable**: map data is cached, and a scene bundle (`.itb`) re-renders a hike without the network
@@ -98,6 +99,9 @@ isotrail render hike.gpx --title "Derwent Edge" --stats distance,gain,elapsed --
 # Prepare the scene once, then render it as often as you like, offline
 isotrail bundle hike.gpx -o hike.itb
 isotrail render hike.itb --palette aap-64 --mesher smooth
+
+# An interactive diorama for your website: the bundle, a poster and the HTML to paste
+isotrail embed hike.gpx -o site/hikes/my-hike --with-runtime
 ```
 
 ## Commands

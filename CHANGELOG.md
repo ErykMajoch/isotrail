@@ -4,6 +4,10 @@ All notable changes to `isotrail` are documented here.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-10
+
+Hikes on the web: put an interactive diorama of any hike on your own site, with one command.
+
 ### Added
 
 - **Renderer in the browser:** the renderer compiles to WebAssembly and draws a scene bundle into a canvas, on WebGPU with a WebGL2 fallback. A JavaScript API sets the route's progress and the viewing angle, and a demo page in `web/demo/` shows it working. See [`web/README.md`](web/README.md).
@@ -40,6 +44,7 @@ The first release: render any recorded hike as a pixel-art diorama PNG.
 - **Style lab:** `isotrail style-lab` renders every mesher, scale and palette on one labelled contact sheet.
 - Prebuilt binaries for Windows, Linux and macOS.
 
-[Unreleased]: https://github.com/ErykMajoch/isotrail/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/ErykMajoch/isotrail/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/ErykMajoch/isotrail/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/ErykMajoch/isotrail/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/ErykMajoch/isotrail/releases/tag/v1.0.0
