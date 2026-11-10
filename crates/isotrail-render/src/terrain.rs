@@ -2,6 +2,7 @@ use glam::{IVec2, Vec3};
 use wgpu::util::DeviceExt;
 
 use crate::lighting::{BANDS, FILL};
+use crate::occlusion::sky_view;
 use crate::post::{DEPTH_FORMAT, ID_FORMAT, NORMAL_FORMAT, PostPass, Sky, TERRAIN_ID};
 use crate::route::{RoutePass, to_pixel};
 use crate::sprite::Sprite;
@@ -21,11 +22,14 @@ pub struct GpuMesh {
     count: u32,
     corners: [Vec3; 8],
     cell_m: f32,
+    sky_view: wgpu::Texture,
+    bind_group: wgpu::BindGroup,
 }
 
 impl Drop for GpuMesh {
     fn drop(&mut self) {
         self.vertices.destroy();
+        self.sky_view.destroy();
     }
 }
 
@@ -66,6 +70,16 @@ struct Uniforms {
     shadow: [f32; 4],
     clouds: [f32; 4],
     cloud_origin: [f32; 4],
+    /// The slab's extent: low x and y, then high x and y
+    slab: [f32; 4],
+    /// The occlusion's strength, the shadows' softening radius in shadow
+    /// texels and the cell size
+    shading: [f32; 4],
+    /// How strongly the beams light the ground, their spacing, and how far
+    /// the wind has moved them
+    rays: [f32; 4],
+    /// Across the sheets of light
+    ray_axis: [f32; 4],
     object: [u32; 4],
 }
 
@@ -78,6 +92,8 @@ pub struct TerrainRenderer {
     bind_group: wgpu::BindGroup,
     shadow_bind_group: wgpu::BindGroup,
     shadow_view: wgpu::TextureView,
+    mesh_layout: wgpu::BindGroupLayout,
+    nearest: wgpu::Sampler,
     route: RoutePass,
     post: PostPass,
 }
@@ -117,6 +133,27 @@ impl TerrainRenderer {
                 },
             ],
         });
+        let mesh_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("terrain mesh"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+            ],
+        });
         // The shadow pass writes the shadow map, so it can't also bind it
         let shadow_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("terrain shadow"),
@@ -133,7 +170,7 @@ impl TerrainRenderer {
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("terrain"),
-            bind_group_layouts: &[Some(&layout)],
+            bind_group_layouts: &[Some(&layout), Some(&mesh_layout)],
             immediate_size: 0,
         });
         let shadow_pipeline_layout =
@@ -263,6 +300,11 @@ impl TerrainRenderer {
             bind_group,
             shadow_bind_group,
             shadow_view,
+            mesh_layout,
+            nearest: device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("sky view"),
+                ..Default::default()
+            }),
             route: RoutePass::new(gpu),
             post: PostPass::new(gpu),
         }
@@ -281,11 +323,56 @@ impl TerrainRenderer {
             .fold((Vec3::INFINITY, Vec3::NEG_INFINITY), |(min, max), p| {
                 (min.min(p), max.max(p))
             });
-        let cols = mesh.surface.cols().max(1) as f32;
+        let cell_m = ((max.x - min.x) / mesh.surface.cols().max(1) as f32).max(f32::EPSILON);
+        let (cols, rows, view) = sky_view(&mesh.surface, cell_m);
+        let device = gpu.device();
+        let size = wgpu::Extent3d {
+            width: cols as u32,
+            height: rows as u32,
+            depth_or_array_layers: 1,
+        };
+        let sky_view = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("sky view"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        gpu.queue().write_texture(
+            sky_view.as_image_copy(),
+            &view,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(cols as u32),
+                rows_per_image: None,
+            },
+            size,
+        );
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("terrain mesh"),
+            layout: &self.mesh_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(
+                        &sky_view.create_view(&wgpu::TextureViewDescriptor::default()),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.nearest),
+                },
+            ],
+        });
         GpuMesh {
             vertices,
             count: mesh.vertices.len() as u32,
-            cell_m: ((max.x - min.x) / cols).max(f32::EPSILON),
+            cell_m,
+            sky_view,
+            bind_group,
             corners: std::array::from_fn(|i| {
                 Vec3::select(
                     glam::BVec3::new(i & 1 != 0, i & 2 != 0, i & 4 != 0),
@@ -320,6 +407,15 @@ impl TerrainRenderer {
         let texel_m = 2.0 / (row_scale(0).min(row_scale(1)) * SHADOW_MAP_SIZE as f32);
         let towards_camera = (-camera.forward * Vec3::new(1.0, 1.0, 0.0)).normalize_or_zero();
         let (clouds, cloud_origin) = cloud_shadows(mesh, sun, scene.time_s);
+        let mut sky = Sky::new(
+            camera,
+            sun,
+            scene.star_seed,
+            scene.time_s,
+            target.width(),
+            target.height(),
+        );
+        sky.rays.fit(mesh.corners, look.god_rays);
         let uniforms = Uniforms {
             view_proj: camera.view_proj.to_cols_array(),
             light_view_proj: light_view_proj.to_cols_array(),
@@ -330,6 +426,20 @@ impl TerrainRenderer {
             shadow: [texel_m, 0.0, 0.0, 0.0],
             clouds,
             cloud_origin,
+            slab: [
+                mesh.corners[0].x,
+                mesh.corners[0].y,
+                mesh.corners[7].x,
+                mesh.corners[7].y,
+            ],
+            shading: [
+                look.occlusion,
+                look.soft_shadows * mesh.cell_m / texel_m,
+                mesh.cell_m,
+                0.0,
+            ],
+            rays: [sky.rays.strength, sky.rays.spacing_m, sky.rays.drift_m, 0.0],
+            ray_axis: sky.rays.axis.extend(0.0).to_array(),
             object: [TERRAIN_ID, scene.star_seed, 0, 0],
         };
         gpu.queue()
@@ -382,6 +492,7 @@ impl TerrainRenderer {
             });
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.bind_group, &[]);
+            pass.set_bind_group(1, &mesh.bind_group, &[]);
             pass.set_vertex_buffer(0, mesh.vertices.slice(..));
             pass.draw(0..mesh.count, 0..1);
         }
@@ -420,14 +531,6 @@ impl TerrainRenderer {
                 sprites.push(atlas.place(Sprite::Head, pixel(head)));
             }
         }
-        let sky = Sky::new(
-            camera,
-            sun,
-            scene.star_seed,
-            scene.time_s,
-            target.width(),
-            target.height(),
-        );
         self.post
             .encode(&mut encoder, target, camera, &sky, look, &sprites);
         gpu.queue().submit([encoder.finish()]);

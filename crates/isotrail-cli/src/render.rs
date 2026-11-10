@@ -11,8 +11,9 @@ use isotrail_export::{
     write_png,
 };
 use isotrail_render::{
-    Aspect, Background, DEFAULT_PALETTE, DEFAULT_YAW_OFFSET_DEG, Frame, Gpu, Look, Mesher, Motion,
-    Overlays, Pace, Palette, SmoothMesher, SunState, VoxelMesher, Walk,
+    Aspect, Background, DEFAULT_OCCLUSION, DEFAULT_PALETTE, DEFAULT_SOFT_SHADOWS,
+    DEFAULT_YAW_OFFSET_DEG, Frame, GodRays, Gpu, Look, Mesher, Motion, Overlays, Pace, Palette,
+    SmoothMesher, SunState, VoxelMesher, Walk,
 };
 use tracing::{info, warn};
 
@@ -52,6 +53,21 @@ pub struct RenderArgs {
           value_parser = parse_background)]
     background: Background,
 
+    /// How much hollows, valley floors and the feet of slopes lose of the
+    /// sky's light, from 0 (none) to 1
+    #[arg(long, value_name = "X", default_value_t = DEFAULT_OCCLUSION, value_parser = parse_share)]
+    occlusion: f32,
+
+    /// How wide shadow edges soften, in grid cells, up to 4; 0 keeps them hard
+    #[arg(long, value_name = "CELLS", default_value_t = DEFAULT_SOFT_SHADOWS, value_parser = parse_softening)]
+    soft_shadows: f32,
+
+    /// Beams of sunlight slanting through the scene: when the sun breaks
+    /// through a partly cloudy sky (auto), whenever the sun is up (on), or
+    /// never (off)
+    #[arg(long, value_enum, value_name = "WHEN", default_value_t = GodRaysArg::Auto)]
+    god_rays: GodRaysArg,
+
     /// Read settings from the [render] table of this TOML file; flags given
     /// here take precedence over it, and it over the user config file
     #[arg(long, value_name = "FILE")]
@@ -88,6 +104,13 @@ pub struct RenderArgs {
 
     #[command(flatten)]
     data: DataArgs,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum GodRaysArg {
+    Auto,
+    On,
+    Off,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -222,6 +245,13 @@ pub fn run(args: &RenderArgs) -> anyhow::Result<()> {
     let look = Look {
         palette: read_palette(&args.palette)?,
         background: args.background,
+        occlusion: args.occlusion,
+        soft_shadows: args.soft_shadows,
+        god_rays: match args.god_rays {
+            GodRaysArg::Auto => GodRays::Weather,
+            GodRaysArg::On => GodRays::On,
+            GodRaysArg::Off => GodRays::Off,
+        },
         ..Look::default()
     };
     if format == Format::Gif && look.palette.is_none() {
@@ -398,6 +428,24 @@ pub(crate) fn read_scene(path: &Path, data: &DataArgs) -> anyhow::Result<SceneBu
         return Ok(bundle);
     }
     Ok(crate::bundle::prepare(path, data)?.bundle)
+}
+
+fn parse_share(value: &str) -> Result<f32, String> {
+    let share: f32 = value.parse().map_err(|e| format!("{e}"))?;
+    if (0.0..=1.0).contains(&share) {
+        Ok(share)
+    } else {
+        Err("must be between 0 and 1".into())
+    }
+}
+
+fn parse_softening(value: &str) -> Result<f32, String> {
+    let cells: f32 = value.parse().map_err(|e| format!("{e}"))?;
+    if (0.0..=4.0).contains(&cells) {
+        Ok(cells)
+    } else {
+        Err("must be between 0 and 4".into())
+    }
 }
 
 /// One file per aspect, named after the aspect when there are several, and

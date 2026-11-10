@@ -15,6 +15,7 @@ stats = ["distance", "gain", "elapsed"]
 no-attribution = true          # switches are true or false
 background = "#1e2a33"
 season = "autumn"
+god-rays = "on"
 orbit = 0                      # animation settings only apply to .gif and .mp4 output
 ```
 

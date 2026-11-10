@@ -2,6 +2,7 @@ use std::f32::consts::PI;
 
 use glam::{Vec2, Vec3, Vec4};
 
+use crate::lighting::smoothstep;
 use crate::palette::{MAX_COLOURS, srgb_to_oklab};
 use crate::sprite::{Placed, SpriteAtlas};
 use crate::weather::cloud_threshold;
@@ -10,6 +11,8 @@ use crate::{Camera, DEFAULT_PALETTE, Gpu, OffscreenTarget, Palette, SunState, TA
 /// The daytime sky's colour at the top and bottom of the frame
 pub const SKY_TOP: [u8; 3] = [150, 190, 226];
 pub const SKY_BOTTOM: [u8; 3] = [214, 230, 240];
+pub const DEFAULT_OCCLUSION: f32 = 1.0;
+pub const DEFAULT_SOFT_SHADOWS: f32 = 1.5;
 
 pub(crate) const NORMAL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 pub(crate) const ID_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Uint;
@@ -107,6 +110,23 @@ pub struct Look {
     /// as a share of full brightness
     pub sky_dither: f32,
     pub route: RouteStyle,
+    /// How much hollows, valley floors and the feet of slopes lose of the
+    /// sky's light, from 0 (none) to 1
+    pub occlusion: f32,
+    /// How wide shadow edges soften, in cells; 0 keeps them hard
+    pub soft_shadows: f32,
+    pub god_rays: GodRays,
+}
+
+/// Beams of sunlight slanting down through the scene
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GodRays {
+    Off,
+    /// When the sun breaks through a partly cloudy sky
+    #[default]
+    Weather,
+    /// Whenever the sun is up
+    On,
 }
 
 impl Look {
@@ -118,6 +138,9 @@ impl Look {
             edges: Edges::NONE,
             sky_dither: 0.0,
             route: RouteStyle::default(),
+            occlusion: 0.0,
+            soft_shadows: 0.0,
+            god_rays: GodRays::Off,
         }
     }
 }
@@ -130,6 +153,9 @@ impl Default for Look {
             edges: Edges::default(),
             sky_dither: 0.08,
             route: RouteStyle::default(),
+            occlusion: DEFAULT_OCCLUSION,
+            soft_shadows: DEFAULT_SOFT_SHADOWS,
+            god_rays: GodRays::Weather,
         }
     }
 }
@@ -146,6 +172,42 @@ pub(crate) struct Sky {
     pub star_shift_px: f32,
     pub moon: Option<MoonPixels>,
     pub weather: SkyWeather,
+    pub rays: Rays,
+}
+
+/// Beams of sunlight breaking through gaps in the cloud: sheets of light
+/// along the sun's direction, laid so that each pixel's view ray stays in
+/// one sheet, which lines the beams in the sky up with the ground they light
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Rays {
+    /// How strongly they show with the sun up, from 0 to 1, and how much of
+    /// that the weather allows
+    pub sun: f32,
+    pub weather: f32,
+    /// What the frame draws, once the look has chosen
+    pub strength: f32,
+    /// Across the sheets, in the slab frame
+    pub axis: Vec3,
+    /// Which way the light travels across the frame, in pixels
+    pub direction: Vec2,
+    pub colour: Vec3,
+    /// Width of a beam and its gap, and how far the wind has moved them
+    pub spacing_m: f32,
+    pub drift_m: f32,
+}
+
+impl Rays {
+    /// Spaces the beams for a slab with these corners and sets how strongly
+    /// `mode` shows them
+    pub fn fit(&mut self, corners: [Vec3; 8], mode: GodRays) {
+        let extent = (corners[7] - corners[0]).truncate().length();
+        self.spacing_m = (extent / RAY_BEAMS).max(1.0);
+        self.strength = match mode {
+            GodRays::Off => 0.0,
+            GodRays::Weather => self.sun * self.weather,
+            GodRays::On => self.sun,
+        };
+    }
 }
 
 /// Clouds, haze, rain and snow as one frame shows them
@@ -199,6 +261,10 @@ impl SkyWeather {
 
 /// Height of the horizon and of the zenith on the sky, as shares of the frame
 const HORIZON: f32 = 0.45;
+/// Beams and gaps across the slab's diagonal
+const RAY_BEAMS: f32 = 12.0;
+/// How much quicker than the wind the beams drift
+const RAY_DRIFT: f32 = 20.0;
 const ZENITH: f32 = 0.05;
 
 impl Sky {
@@ -262,6 +328,34 @@ impl Sky {
                 time_s,
             }
         });
+        // Beams show best from a low sun, and the weather's share is the
+        // sun breaking through gaps in the cloud
+        let up = smoothstep(-0.02, 0.08, sun.direction.z) * (1.0 - sun.stars);
+        let low = 1.0 - 0.5 * sun.direction.z.clamp(0.0, 1.0);
+        let gaps = sun.weather.map_or(0.0, |weather| {
+            smoothstep(0.15, 0.35, weather.cloud_cover)
+                * smoothstep(0.95, 0.7, weather.cloud_cover)
+                * (1.0 - weather.overcast)
+        });
+        let light = (-sun.direction).normalize_or(Vec3::NEG_Z);
+        let travel = camera.view_proj * light.extend(0.0);
+        let direction = Vec2::new(travel.x * width, -travel.y * height).normalize_or(Vec2::Y);
+        // The sheets hold both the light's direction and the view's, so a
+        // view ray never crosses from one to the next
+        let viewed = (camera.forward - camera.forward.dot(light) * light).normalize_or(right);
+        let axis = light.cross(viewed).normalize_or(Vec3::X);
+        let wind = sun.weather.map_or(Vec2::ZERO, |weather| weather.wind);
+        let rays = Rays {
+            sun: up * low,
+            weather: gaps,
+            strength: 0.0,
+            axis,
+            direction,
+            colour: sun.colour.lerp(Vec3::ONE, 0.5).min(Vec3::ONE),
+            spacing_m: 1.0,
+            // Quicker than the real wind, like the clouds
+            drift_m: wind.dot(axis.truncate()) * time_s * RAY_DRIFT,
+        };
         Sky {
             gradient: sun.sky,
             stars: sun.stars,
@@ -269,6 +363,7 @@ impl Sky {
             star_shift_px: (ahead.y.atan2(ahead.x) * px_per_rad).round(),
             moon,
             weather,
+            rays,
         }
     }
 }
@@ -291,6 +386,9 @@ struct Uniforms {
     cloud_lit: [f32; 4],
     cloud_shade: [f32; 4],
     haze_colour: [f32; 4],
+    rays: [f32; 4],
+    ray_axis: [f32; 4],
+    ray_colour: [f32; 4],
     sprite_frame: [[i32; 4]; MAX_SPRITES],
     sprite_atlas: [[i32; 4]; MAX_SPRITES],
     palette_lab: [[f32; 4]; MAX_COLOURS],
@@ -538,6 +636,14 @@ impl PostPass {
             cloud_lit: weather.cloud_lit.extend(1.0).to_array(),
             cloud_shade: weather.cloud_shade.extend(1.0).to_array(),
             haze_colour: weather.haze_colour.extend(1.0).to_array(),
+            rays: [
+                sky.rays.strength,
+                sky.rays.spacing_m,
+                sky.rays.direction.x,
+                sky.rays.direction.y,
+            ],
+            ray_axis: sky.rays.axis.extend(sky.rays.drift_m).to_array(),
+            ray_colour: sky.rays.colour.extend(1.0).to_array(),
             sprite_frame: [[0; 4]; MAX_SPRITES],
             sprite_atlas: [[0; 4]; MAX_SPRITES],
             palette_lab: [[0.0; 4]; MAX_COLOURS],
@@ -625,6 +731,30 @@ mod tests {
             ..SunState::at(&grid(10, 10, 10.0), 0.0, -20.0)
         };
         Sky::new(camera, &night, 7, 0.0, 180, 180)
+    }
+
+    #[test]
+    fn beam_sheets_hold_the_light_and_the_view() {
+        let view = camera(FRAC_PI_6);
+        let slab = grid(10, 10, 10.0);
+        let sun = SunState::at(&slab, 200.0, 15.0);
+        let mut rays = Sky::new(&view, &sun, 7, 0.0, 180, 180).rays;
+        // Every point on a view ray is in the same sheet
+        assert!(rays.axis.dot(sun.direction).abs() < 1e-5);
+        assert!(rays.axis.dot(view.forward).abs() < 1e-5);
+        assert!(rays.sun > 0.5 && rays.weather == 0.0, "{rays:?}");
+
+        let mut corners = [Vec3::new(-120.0, -50.0, -10.0); 8];
+        corners[7] = Vec3::new(120.0, 50.0, 40.0);
+        rays.fit(corners, GodRays::On);
+        assert_eq!(rays.strength, rays.sun);
+        assert_eq!(rays.spacing_m, 260.0 / RAY_BEAMS);
+        for mode in [GodRays::Weather, GodRays::Off] {
+            rays.fit(corners, mode);
+            assert_eq!(rays.strength, 0.0, "{mode:?} under a clear sky");
+        }
+        let night = SunState::at(&slab, 200.0, -20.0);
+        assert_eq!(Sky::new(&view, &night, 7, 0.0, 180, 180).rays.sun, 0.0);
     }
 
     #[test]

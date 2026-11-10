@@ -29,6 +29,12 @@ struct Uniforms {
     cloud_lit: vec4<f32>,
     cloud_shade: vec4<f32>,
     haze_colour: vec4<f32>,
+    // x how strongly beams of sunlight show (0 for none), y the width of a
+    // beam and its gap in metres, zw which way the light travels on screen
+    rays: vec4<f32>,
+    // xyz across the sheets of light, w how far the wind has moved them
+    ray_axis: vec4<f32>,
+    ray_colour: vec4<f32>,
     // xy each sprite's top-left pixel, zw its size
     sprite_frame: array<vec4<i32>, 4>,
     // xy each sprite's top-left texel in the atlas
@@ -181,7 +187,7 @@ fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
         }
         return vec4<f32>(uniforms.sky_top.rgb, 1.0);
     }
-    var colour = scene(pixel);
+    var colour = god_rays(pixel, scene(pixel));
     if mark == 2u {
         colour = uniforms.route.rgb;
     } else {
@@ -388,4 +394,56 @@ fn scene(pixel: vec2<i32>) -> vec3<f32> {
         colour = min(colour * (1.0 + uniforms.edges.z), vec3<f32>(1.0));
     }
     return hazed(colour, mix(0.3, 1.0, centre.depth));
+}
+
+fn beam_hash(i: i32, seed: u32) -> f32 {
+    var h = bitcast<u32>(i) * 374761393u + seed * 668265263u;
+    h = (h ^ (h >> 13u)) * 1274126177u;
+    h = h ^ (h >> 16u);
+    return f32(h & 0xffffu) / 65535.0;
+}
+
+fn beam_noise(x: f32, seed: u32) -> f32 {
+    let i = floor(x);
+    let f = x - i;
+    let u = f * f * (3.0 - 2.0 * f);
+    return mix(beam_hash(i32(i), seed), beam_hash(i32(i) + 1, seed), u);
+}
+
+// How much light reaches a sheet this many beam widths across, from 0 in a
+// gap to 1 in a beam; the same as the terrain's
+fn beam(across: f32) -> f32 {
+    let n = 0.6 * beam_noise(across, 71u) + 0.4 * beam_noise(across * 2.7 + 5.0, 72u);
+    return smoothstep(0.55, 0.6, n);
+}
+
+// The beams where they show against the sky, brightest where they come in
+// and fading as they go, dithered in whole steps towards the light's
+// colour. Over the terrain, the light they bring is in its lighting
+fn god_rays(pixel: vec2<i32>, colour: vec3<f32>) -> vec3<f32> {
+    let strength = uniforms.rays.x;
+    if strength <= 0.0 || textureLoad(id_map, pixel, 0).r != 0u {
+        return colour;
+    }
+    let size = vec2<f32>(textureDimensions(id_map));
+    let travel = uniforms.rays.zw;
+    let p = vec2<f32>(pixel) + 0.5;
+    let corners = array<vec2<f32>, 4>(vec2<f32>(0.0), vec2<f32>(size.x, 0.0), vec2<f32>(0.0, size.y), size);
+    var first = 1e9;
+    var last = -1e9;
+    for (var i = 0; i < 4; i++) {
+        let d = dot(corners[i], travel);
+        first = min(first, d);
+        last = max(last, d);
+    }
+    let along = (dot(p, travel) - first) / max(last - first, 1.0);
+    // Any point on the pixel's view ray lies in the same sheet
+    let ndc = vec2<f32>(p.x / size.x * 2.0 - 1.0, 1.0 - p.y / size.y * 2.0);
+    let near = uniforms.inv_view_proj * vec4<f32>(ndc, 0.0, 1.0);
+    let across = (dot(near.xyz / near.w, uniforms.ray_axis.xyz) + uniforms.ray_axis.w) / uniforms.rays.y;
+    let shown = beam(across) * strength * 0.6 * (1.0 - smoothstep(0.2, 0.95, along));
+    if shown <= bayer(pixel) + 0.5 {
+        return colour;
+    }
+    return mix(colour, max(colour, uniforms.ray_colour.rgb), 0.3);
 }

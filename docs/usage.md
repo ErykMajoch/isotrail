@@ -45,8 +45,13 @@ Stories leave the top 14% and bottom 20% of the image free of text, because Inst
 | `--exaggeration X` | automatic | How many times taller than life the terrain is drawn, from `0.1` to `100`. By default, the relief is scaled to about 15% of the slab's length, between 1× and 5× |
 | `--palette NAME\|FILE` | `apollo` | A built-in palette (`apollo`, `resurrect-64`, `aap-64`), any [Lospec](https://lospec.com/palette-list) `.hex` file, or `none` to keep the unquantised colours |
 | `--time HH:MM` | start of the hike | Light the scene as at this local time on the day of the hike, such as `20:30` for a sunset. Needs a track with times |
+| `--occlusion X` | `1` | How much hollows, valley floors and the feet of slopes lose of the sky's light, from `0` (none) to `1` |
+| `--soft-shadows CELLS` | `1.5` | How wide shadow edges soften, in grid cells, up to `4`; `0` keeps them hard |
+| `--god-rays auto\|on\|off` | `auto` | Beams of sunlight through the scene: when the sun breaks through a partly cloudy sky (`auto`), whenever the sun is up (`on`), or never |
 
 The scene is lit by the sun as it stood when the hike started: high and white at midday, low and golden in the evening, deep blue after dusk. The sky changes with it, and after dusk the stars come out and the moon shows in its phase for the date, where it stood in the sky. A bright moon lights the terrain. Tracks without times are lit by a late-morning sun.
+
+The light gives the terrain depth: hollows, valley floors and the feet of steps and cliffs see less of the sky, so they stay darker in the shade, and shadow edges soften into a few steps. When the sun breaks through a partly cloudy sky, it falls in beams: shafts slant across the sky, and the ground they reach is lit brightly while the ground between them lies in the cloud's shade. `--occlusion 0 --soft-shadows 0 --god-rays off` gives the plainer look of earlier versions.
 
 The slab is turned to follow the route, and the camera looks the way the hike goes, so the start is in front. For loops and out-and-backs, the camera looks towards the halfway point. See [How it works](how-it-works.md) for what each part of the look does.
 

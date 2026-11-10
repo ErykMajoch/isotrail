@@ -14,12 +14,15 @@ All notable changes to `isotrail` are documented here.
 - **Seasons:** the landscape matches the time of year. In spring, woods come into fresh leaf and blossom and meadows flower; in autumn, broadleaf woods turn yellow, orange and rust, grass turns golden and moorland tan; in winter, trees stand bare over brown grass. When there was snow on the ground, the slopes above the snowline are white, with patches of snow below it, and lakes that froze in a cold spell before the hike are drawn as ice. The seasons are turned round south of the equator.
 - **`--season spring|summer|autumn|winter`** on `render`, `embed` and `bundle` shows a hike in another season. A forced winter covers the whole slab in snow and freezes every lake.
 - `bundle` reports the season it found, such as `Season: autumn colours, snow above 1650 m`.
+- **Light with depth:** hollows, valley floors and the feet of slopes and steps see less of the sky, so the terrain keeps its shape in the shade, and shadow edges soften into a few steps. `--occlusion` and `--soft-shadows` set how much.
+- **God rays:** when the sun breaks through a partly cloudy sky, its light falls in beams. Shafts slant across the sky, and the ground they reach is lit brightly while the ground between them lies in the cloud's shade. `--god-rays on` shows them whenever the sun is up, and `--god-rays off` never.
 - **`stats --weather`** prints the weather during the hike, as a summary and hour by hour in local time, and adds it to `--json`.
 - **The sun moves in animations:** GIFs, MP4s and the web embed light each frame by the time the route's head was walked, from the start to the finish, with either `--pace`. On multi-day treks, each night becomes a short pause in which the head waits while the sun sets, the night passes and the sun rises again. The elapsed time keeps counting through it.
 
 ### Changed
 
 - `--no-attribution` now prints Open-Meteo's credit along with the others when the bundle holds weather, and the credit drawn on the image ends in "Open-Meteo.com" when weather is drawn.
+- The default look has deeper light, softer shadows and god rays in partly cloudy weather, in stills, animations and the web embed. `--occlusion 0 --soft-shadows 0 --god-rays off` gives the earlier look.
 - `--no-weather` on `render` and `embed` also leaves out the weather a scene bundle holds, for a clear-sky render of a rainy hike, along with its snow and ice.
 - Looking up the weather also fetches the daily temperatures and snowfall of the fortnight before the hike, to tell whether lakes had frozen.
 

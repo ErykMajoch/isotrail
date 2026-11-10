@@ -10,6 +10,7 @@ mod frame;
 mod gpu;
 mod lighting;
 mod mesh;
+mod occlusion;
 mod overlay;
 mod palette;
 mod post;
@@ -41,7 +42,10 @@ pub use overlay::{
     SUBTEXT, Stat, StatKind, Subtitle, TEXT, TEXT_SHADOW, TitleSize, WEATHER_CREDIT, format_date,
 };
 pub use palette::{DEFAULT_PALETTE, MAX_COLOURS, Palette, PaletteError, srgb_to_oklab};
-pub use post::{Background, Edges, Look, RouteStyle, SKY_BOTTOM, SKY_TOP};
+pub use post::{
+    Background, DEFAULT_OCCLUSION, DEFAULT_SOFT_SHADOWS, Edges, GodRays, Look, RouteStyle,
+    SKY_BOTTOM, SKY_TOP,
+};
 pub use present::{MAX_CANVAS_FRAME_PX, PixelGrid, Present};
 pub use route::{RouteLine, RouteVertex};
 pub use target::{OffscreenTarget, TARGET_FORMAT};

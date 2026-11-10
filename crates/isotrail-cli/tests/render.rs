@@ -605,6 +605,55 @@ season = \"winter\"
 }
 
 #[test]
+fn lighting_can_be_turned_down_by_flag_or_config() {
+    let temp = tempfile::tempdir().unwrap();
+    let cache = temp.path().join("cache");
+    fs::write(temp.path().join("hill.itb"), diorama_bundle().to_bytes()).unwrap();
+    fs::write(
+        temp.path().join("flat.toml"),
+        "[render]
+occlusion = 0
+soft-shadows = 0
+god-rays = \"off\"
+",
+    )
+    .unwrap();
+    let render = |image: &str, extra: &[&str]| {
+        let mut args = vec!["render", "hill.itb", "-o", image];
+        args.extend_from_slice(extra);
+        let output = isotrail(&cache, temp.path(), &args);
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        fs::read(temp.path().join(image)).unwrap()
+    };
+    let full = render("full.png", &[]);
+    let flat = render(
+        "flat.png",
+        &[
+            "--occlusion",
+            "0",
+            "--soft-shadows",
+            "0",
+            "--god-rays",
+            "off",
+        ],
+    );
+    assert_ne!(full, flat);
+    assert_eq!(render("configured.png", &["--config", "flat.toml"]), flat);
+    assert_ne!(render("rays.png", &["--god-rays", "on"]), full);
+
+    for (flag, value, reason) in [
+        ("--occlusion", "1.5", "between 0 and 1"),
+        ("--soft-shadows", "5", "between 0 and 4"),
+        ("--god-rays", "always", "auto, on, off"),
+    ] {
+        let output = isotrail(&cache, temp.path(), &["render", "hill.itb", flag, value]);
+        assert!(!output.status.success(), "{flag} {value}");
+        let stderr = text(&output.stderr);
+        assert!(stderr.contains(reason), "{stderr}");
+    }
+}
+
+#[test]
 fn settings_come_from_flags_then_the_given_file_then_the_user_file() {
     let temp = with_hike();
     let cache = temp.path().join("cache");

@@ -4,7 +4,7 @@ use isotrail_bundle::{
 use isotrail_export::{ExportError, GifWriter, render_clip, render_still, upscale};
 use isotrail_render::{
     Aspect, Background, DEFAULT_PALETTE, DEFAULT_STATS, DEFAULT_YAW_OFFSET_DEG, DateFormat,
-    Diorama, Frame, Gpu, Look, Mesher, Motion, OffscreenTarget, OverlayStyle, OverlayText,
+    Diorama, Frame, GodRays, Gpu, Look, Mesher, Motion, OffscreenTarget, OverlayStyle, OverlayText,
     Overlays, Pace, Palette, SmoothMesher, SunState, TerrainRenderer, Timeline, View, VoxelMesher,
     Walk, draw_test_scene,
 };
@@ -242,6 +242,77 @@ fn seasons_match_goldens() {
     };
     assert!(spring != summer && autumn != summer, "{means:?}");
     assert!(winter > summer, "{means:?}");
+}
+
+/// Sunlight breaking through a partly cloudy sky falls in beams on the
+/// ground, and the weather decides whether they show
+#[test]
+fn god_rays_light_the_ground_through_gaps_in_the_cloud() {
+    let gpu = isotrail_testkit::gpu();
+    let framing = Aspect::Story.framing(6).unwrap();
+    let render = |weather: WeatherSample, god_rays: GodRays| {
+        let mut bundle = under(weather);
+        bundle.sun[0].elevation_deg = 15.0;
+        let look = Look {
+            god_rays,
+            ..Look::default()
+        };
+        render_still(
+            &gpu,
+            &bundle,
+            &VoxelMesher::default(),
+            &framing,
+            DEFAULT_YAW_OFFSET_DEG,
+            &SunState::for_hike(&bundle),
+            &look,
+        )
+        .unwrap()
+    };
+    let partly = sky(2, 45.0, 30.0);
+    let beams = render(partly, GodRays::Weather);
+    assert_golden("god-rays", beams.width(), beams.height(), beams.rgba());
+    assert_ne!(beams.rgba(), render(partly, GodRays::Off).rgba());
+    let overcast = sky(3, 100.0, 100.0);
+    assert_eq!(
+        render(overcast, GodRays::Weather).rgba(),
+        render(overcast, GodRays::Off).rgba(),
+        "no sun breaks through an overcast sky"
+    );
+    assert_ne!(
+        render(overcast, GodRays::On).rgba(),
+        render(overcast, GodRays::Off).rgba()
+    );
+}
+
+/// Hollows and the feet of slopes lose some of the sky's light
+#[test]
+fn occlusion_darkens_hollows() {
+    let gpu = isotrail_testkit::gpu();
+    let framing = Aspect::Story.framing(6).unwrap();
+    let bundle = diorama_bundle();
+    let render = |occlusion: f32| {
+        let look = Look {
+            occlusion,
+            ..Look::default()
+        };
+        render_still(
+            &gpu,
+            &bundle,
+            &VoxelMesher::default(),
+            &framing,
+            DEFAULT_YAW_OFFSET_DEG,
+            &SunState::for_hike(&bundle),
+            &look,
+        )
+        .unwrap()
+    };
+    let (open, occluded) = (render(0.0), render(1.0));
+    assert!(
+        mean(&occluded) < mean(&open),
+        "{} {}",
+        mean(&occluded),
+        mean(&open)
+    );
 }
 
 /// Rain falls on as the clock runs, the same way every time
