@@ -31,15 +31,75 @@ cargo run -p isotrail-cli -- render web/demo/hike.itb -o web/demo/hike.png --asp
 
 ## Embedding a hike
 
-Serve `isotrail-embed.js` with the `pkg/` folder next to it, and add the element wherever the hike should appear:
+`isotrail embed` makes everything a page needs from a GPX file (or a `.itb` bundle):
 
-```html
-<script type="module" src="/isotrail/isotrail-embed.js"></script>
-
-<isotrail-hike src="/hikes/derwent-edge.itb" poster="/hikes/derwent-edge.png" aspect="wide"></isotrail-hike>
+```bash
+isotrail embed derwent-edge.gpx -o static/hikes/derwent --base-url /hikes/derwent/ --with-runtime
 ```
 
-Make the bundle with `isotrail bundle hike.gpx -o hike.itb`, and the poster with `isotrail render hike.itb -o hike.png --aspect wide`.
+```text
+static/hikes/derwent/
+├─ derwent-edge.itb      the scene bundle
+├─ derwent-edge.png      the poster
+├─ snippet.html          the HTML to paste into a page
+├─ isotrail-embed.js     the element, with --with-runtime
+└─ pkg/                  the renderer, with --with-runtime
+```
+
+`snippet.html` holds the two lines that show the hike, also printed by the command:
+
+```html
+<script type="module" src="/hikes/derwent/isotrail-embed.js"></script>
+<isotrail-hike src="/hikes/derwent/derwent-edge.itb" poster="/hikes/derwent/derwent-edge.png" aspect="wide"></isotrail-hike>
+```
+
+`--base-url` is the address the directory will be served at. Without it the snippet uses bare file names, so serving the directory and opening `snippet.html` shows a preview. `--aspect` picks the element's shape and its poster's, and the poster takes `render`'s overlay options, such as `--title` or `--overlay none`. [The usage guide](../docs/usage.md#embed) lists every option.
+
+`--with-runtime` copies the web runtime from the `web` folder that comes next to `isotrail` in the release downloads, or from `--runtime-dir` (`--runtime-dir web` in the repository, after building it). The runtime is the same for every hike, so a site with several hikes only needs it once. Copy that `web` folder (`isotrail-embed.js` and `pkg/`) to one place, such as `static/isotrail/`, and point each hike's snippet at it instead:
+
+```bash
+isotrail embed derwent-edge.gpx -o static/hikes/derwent --base-url /hikes/derwent/ --runtime-url /isotrail/isotrail-embed.js
+```
+
+`isotrail-embed.js` loads the renderer from the `pkg/` folder next to it. A page that shows several hikes only loads the script and the renderer once.
+
+### Hugo
+
+Put the files under `static/`, with the runtime in `static/isotrail/`, and add a shortcode in `layouts/shortcodes/hike.html`:
+
+```go-html-template
+<script type="module" src="/isotrail/isotrail-embed.js"></script>
+<isotrail-hike src="{{ .Get "src" }}" poster="{{ .Get "poster" }}" aspect="{{ .Get "aspect" | default "wide" }}"{{ if .Get "autoplay" }} autoplay{{ end }}></isotrail-hike>
+```
+
+Then use it in any post:
+
+```markdown
+{{< hike src="/hikes/derwent/derwent-edge.itb" poster="/hikes/derwent/derwent-edge.png" >}}
+```
+
+### Astro
+
+Put the files under `public/`, with the runtime in `public/isotrail/`, and add a component in `src/components/Hike.astro`:
+
+```astro
+---
+const { src, poster, aspect = 'wide', autoplay = false } = Astro.props;
+---
+<script is:inline type="module" src="/isotrail/isotrail-embed.js"></script>
+<isotrail-hike src={src} poster={poster} aspect={aspect} autoplay={autoplay}></isotrail-hike>
+```
+
+`is:inline` keeps Astro from bundling the script, which has to stay next to its `pkg/` folder. Use it in a page or an MDX post:
+
+```astro
+---
+import Hike from '../components/Hike.astro';
+---
+<Hike src="/hikes/derwent/derwent-edge.itb" poster="/hikes/derwent/derwent-edge.png" />
+```
+
+### Attributes
 
 | Attribute | Meaning |
 |---|---|

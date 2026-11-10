@@ -55,3 +55,40 @@ jobs:
       - name: Check wasm32 build of the wasm-safe and web crates
         if: runner.os == 'Linux'
         run: cargo clippy --target wasm32-unknown-unknown -p isotrail-track -p isotrail-bundle -p isotrail-render -p isotrail-web -- -D warnings
+
+  web-runtime:
+    name: web runtime size
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack@0.15.0
+
+      - name: Build
+        run: wasm-pack build crates/isotrail-web --target web --release --out-dir ../../web/pkg
+
+      - name: Check the gzipped size is at most 3 MB
+        run: |
+          total=0
+          {
+            echo "| File | Gzipped bytes |"
+            echo "|---|---|"
+            for file in web/isotrail-embed.js web/pkg/isotrail_web.js web/pkg/isotrail_web_bg.wasm; do
+              size=$(gzip -9c "$file" | wc -c)
+              total=$((total + size))
+              echo "| \`$file\` | $size |"
+            done
+            echo "| **Total** | **$total** |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "The web runtime is $total bytes gzipped"
+          if [ "$total" -gt 3000000 ]; then
+            echo "::error::the web runtime is $total bytes gzipped, over the 3 MB budget"
+            exit 1
+          fi

@@ -1,9 +1,10 @@
 # Usage
 
-isotrail has five commands. Each one prints its options with `--help`, for example `isotrail render --help`. The global flag `-v` (repeatable, up to `-vvv`) shows more log output.
+isotrail has six commands. Each one prints its options with `--help`, for example `isotrail render --help`. The global flag `-v` (repeatable, up to `-vvv`) shows more log output.
 
 - [`render`](#render): render a hike as a PNG, an animated GIF or an MP4 video
 - [`bundle`](#bundle): save a hike's scene as a `.itb` file
+- [`embed`](#embed): put an interactive diorama of a hike on a web page
 - [`stats`](#stats): print a hike's statistics
 - [`style-lab`](#style-lab): compare every look on one contact sheet
 - [`cache`](#cache): manage downloaded data
@@ -150,6 +151,44 @@ With `--debug-dir DIR`, `bundle` also writes images of the prepared terrain, to 
   <img src="images/debug-hillshade.png" alt="Hillshade debug image" width="45%">
   <img src="images/debug-landcover.png" alt="Landcover debug image" width="45%">
 </p>
+
+## embed
+
+```text
+isotrail embed <hike.gpx | hike.itb> -o DIR [options]
+```
+
+Writes everything a web page needs to show the hike as an interactive diorama with the [`<isotrail-hike>`](../web/README.md) element:
+
+| File | What it is |
+| --- | --- |
+| `DIR/<name>.itb` | The scene bundle the element draws |
+| `DIR/<name>.png` | The poster, shown until the diorama is ready and kept in browsers that can't draw it. It is the same image as `isotrail render --aspect <aspect>`, overlays included |
+| `DIR/snippet.html` | The two lines to paste into a page, also printed when the command finishes |
+| `DIR/isotrail-embed.js`, `DIR/pkg/` | The web runtime, with `--with-runtime` only |
+
+`<name>` is the input's file name without its extension. A GPX file is first prepared in the same way as [`bundle`](#bundle), with the same data options.
+
+```html
+<script type="module" src="/hikes/derwent/isotrail-embed.js"></script>
+<isotrail-hike src="/hikes/derwent/derwent-edge.itb" poster="/hikes/derwent/derwent-edge.png" aspect="wide"></isotrail-hike>
+```
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `-o`, `--output DIR` | required | The directory to write to, created if needed |
+| `--aspect SHAPE` | `wide` | `story` (9:16), `feed` (4:5), `square` or `wide` (16:9), for the element and its poster |
+| `--with-runtime` | off | Also copy the web runtime into `DIR` |
+| `--runtime-dir DIR` | the `web` folder next to `isotrail` | Where to copy the runtime from: a folder with `isotrail-embed.js` and `pkg/` |
+| `--base-url URL` | none | The address `DIR` will be served at, such as `/hikes/derwent/`. Without it, the snippet uses bare file names, relative to the page |
+| `--runtime-url URL` | `isotrail-embed.js` in `DIR` | The address of `isotrail-embed.js`, when one copy serves every hike on the site |
+| `--exaggeration X` | automatic | As for [`render`](#terrain-and-look) |
+
+The poster also takes the [text and overlay options](#text-and-overlays) of `render`, such as `--title` or `--overlay none`, and the [data options](#data). Settings from config files apply to `render` only.
+
+In Git Bash on Windows, an argument starting with `/` is turned into a Windows path before isotrail sees it, so `--base-url /hikes/derwent/` becomes `C:/Program Files/Git/hikes/derwent/`. isotrail warns when an address looks like that. Run the command as `MSYS_NO_PATHCONV=1 isotrail embed …`, or from PowerShell or Command Prompt.
+
+The release downloads have the runtime in a `web` folder next to the `isotrail` executable. If you built isotrail yourself, build the runtime with `sh web/build.sh` and pass `--runtime-dir web` from the repository. See [`web/README.md`](../web/README.md) for the element's attributes, Hugo and Astro examples, and how to share one runtime between hikes.
 
 ## stats
 

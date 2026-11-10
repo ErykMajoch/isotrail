@@ -57,7 +57,7 @@ More looks are shown in [How it works](docs/how-it-works.md#styles). -->
 
 ## Installation
 
-**Prebuilt binaries** for Windows, Linux and macOS are attached to every [release](https://github.com/ErykMajoch/isotrail/releases/latest). Download the archive for your system, unpack it and put `isotrail` (`isotrail.exe` on Windows) somewhere on your `PATH`.
+**Prebuilt binaries** for Windows, Linux and macOS are attached to every [release](https://github.com/ErykMajoch/isotrail/releases/latest). Download the archive for your system, unpack it and put `isotrail` (`isotrail.exe` on Windows) somewhere on your `PATH`. Keep the `web` folder next to it: [`embed`](docs/usage.md#embed) copies the web runtime from there.
 
 **With Cargo**, if you have [Rust](https://rustup.rs/) installed:
 
@@ -106,6 +106,7 @@ isotrail render hike.itb --palette aap-64 --mesher smooth
 | --- | --- |
 | [`render`](docs/usage.md#render) | Render a GPX file or scene bundle as a PNG, an animated GIF or an MP4 video |
 | [`bundle`](docs/usage.md#bundle) | Download the terrain around a route and save everything the render needs as a `.itb` file |
+| [`embed`](docs/usage.md#embed) | Write a bundle, a poster and an HTML snippet that put an interactive diorama on a web page |
 | [`stats`](docs/usage.md#stats) | Print distance, elevation gain and loss, moving and elapsed time |
 | [`style-lab`](docs/usage.md#style-lab) | Render every mesher, pixel scale and palette on one contact sheet |
 | [`cache`](docs/usage.md#cache) | Show or clear the cache of downloaded data |
@@ -128,7 +129,6 @@ See [Configuration](docs/configuration.md) for file locations, precedence and en
 
 ## Roadmap
 
-- An `<isotrail-hike>` web component to embed interactive dioramas on a static site
 - Lighting from the real time of day of the hike
 - Historical weather and a seasonal look
 

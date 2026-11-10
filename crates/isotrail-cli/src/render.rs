@@ -98,7 +98,7 @@ enum Format {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-enum AspectArg {
+pub(crate) enum AspectArg {
     Story,
     Feed,
     Square,
@@ -264,16 +264,15 @@ pub fn run(args: &RenderArgs) -> anyhow::Result<()> {
                 .with_context(|| format!("could not write {}", output.display()))?;
             println!("Rendered {frames} frames of {size}");
         } else {
-            let mut frame = render_still(
+            write_still(
                 &gpu,
                 &bundle,
                 mesher.as_ref(),
-                &overlays.diorama_framing(),
-                DEFAULT_YAW_OFFSET_DEG,
+                &overlays,
                 &look,
+                args.scale,
+                output,
             )?;
-            overlays.draw(&mut frame, look.palette.as_ref(), 1.0);
-            write_png(output, &upscale(&frame, args.scale)?)?;
             println!("Rendered {size}");
         }
         println!("Wrote {}", output.display());
@@ -281,6 +280,30 @@ pub fn run(args: &RenderArgs) -> anyhow::Result<()> {
     if let Some(credit) = args.overlay.caption_credit(&bundle) {
         println!("Credit for the caption: {credit}");
     }
+    Ok(())
+}
+
+/// Renders the still with its overlays and saves it as a PNG enlarged `scale`
+/// times
+pub(crate) fn write_still(
+    gpu: &Gpu,
+    bundle: &SceneBundle,
+    mesher: &dyn Mesher,
+    overlays: &Overlays,
+    look: &Look,
+    scale: u32,
+    output: &Path,
+) -> anyhow::Result<()> {
+    let mut frame = render_still(
+        gpu,
+        bundle,
+        mesher,
+        &overlays.diorama_framing(),
+        DEFAULT_YAW_OFFSET_DEG,
+        look,
+    )?;
+    overlays.draw(&mut frame, look.palette.as_ref(), 1.0);
+    write_png(output, &upscale(&frame, scale)?)?;
     Ok(())
 }
 

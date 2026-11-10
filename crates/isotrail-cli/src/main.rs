@@ -5,6 +5,7 @@ mod animation;
 mod bundle;
 mod cache;
 mod config;
+mod embed;
 mod overlay;
 mod render;
 mod stats;
@@ -41,6 +42,9 @@ enum Command {
     Bundle(bundle::BundleArgs),
     /// Render a GPX file or scene bundle as a diorama image
     Render(Box<render::RenderArgs>),
+    /// Write a scene bundle, a poster image and an HTML snippet that put an
+    /// interactive diorama of the hike on a web page
+    Embed(Box<embed::EmbedArgs>),
     /// Render a hike with every mesher, pixel scale and built-in palette, and
     /// lay the images out on a labelled contact sheet
     StyleLab(style_lab::StyleLabArgs),
@@ -55,6 +59,7 @@ fn main() -> anyhow::Result<()> {
         Command::Stats(args) => stats::run(&args),
         Command::Bundle(args) => bundle::run(&args),
         Command::Render(args) => render::run(&args),
+        Command::Embed(args) => embed::run(&args),
         Command::StyleLab(args) => style_lab::run(&args),
         Command::Cache(args) => cache::run(&args),
     }

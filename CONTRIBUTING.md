@@ -41,6 +41,8 @@ cargo test --workspace
 cargo clippy --target wasm32-unknown-unknown -p isotrail-track -p isotrail-bundle -p isotrail-render -p isotrail-web -- -D warnings
 ```
 
+CI also builds the web runtime with wasm-pack and fails if `isotrail-embed.js`, `pkg/isotrail_web.js` and `pkg/isotrail_web_bg.wasm` come to more than 3 MB gzipped. After `sh web/build.sh`, a local build of `isotrail embed` finds the runtime with `--runtime-dir web`.
+
 The device limits are WebGL2's on every platform, so the native tests also catch anything the browser fallback couldn't draw.
 
 Please don't add real recordings to the repository.

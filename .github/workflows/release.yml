@@ -11,8 +11,35 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  web:
+    name: build web runtime
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack@0.15.0
+
+      - name: Build
+        run: |
+          wasm-pack build crates/isotrail-web --target web --release --out-dir ../../web/pkg
+          mkdir -p runtime/pkg
+          cp web/isotrail-embed.js runtime/
+          cp web/pkg/isotrail_web.js web/pkg/isotrail_web_bg.wasm runtime/pkg/
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: web-runtime
+          path: runtime/
+          if-no-files-found: error
+
   build:
     name: build (${{ matrix.target }})
+    needs: web
     strategy:
       fail-fast: false
       matrix:
@@ -40,11 +67,18 @@ jobs:
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }} -p isotrail-cli
 
+      - uses: actions/download-artifact@v8
+        with:
+          name: web-runtime
+          path: runtime
+
       - name: Package
         run: |
           name="isotrail-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir -p "dist/$name"
           cp README.md LICENSE CHANGELOG.md "dist/$name/"
+          # Next to the executable, where `isotrail embed --with-runtime` looks
+          cp -r runtime "dist/$name/web"
           cd dist
           if [ "${{ runner.os }}" = "Windows" ]; then
             cp "../target/${{ matrix.target }}/release/isotrail.exe" "$name/"
@@ -96,6 +130,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: dist
+          pattern: isotrail-*
           merge-multiple: true
 
       - name: Create release
