@@ -10,8 +10,8 @@ pub fn parse_time(value: &str) -> Result<NaiveTime, String> {
         .map_err(|_| "expected a local time such as 20:30".to_owned())
 }
 
-/// The sun and moon at the start of the hike, or at `time` on the hike's
-/// start date in its time zone
+/// The sun, moon and weather at the start of the hike, or at `time` on the
+/// hike's start date in its time zone
 pub fn hike_sun(bundle: &SceneBundle, time: Option<NaiveTime>) -> anyhow::Result<SunState> {
     let grid = &bundle.grid;
     let Some(time) = time else {
@@ -68,7 +68,8 @@ pub fn hike_sun(bundle: &SceneBundle, time: Option<NaiveTime>) -> anyhow::Result
             elevation_deg: moon.elevation_deg,
             illuminated: moon.illuminated,
         }),
-    ))
+    )
+    .with_weather_at(bundle, at.timestamp() as f64))
 }
 
 #[cfg(test)]

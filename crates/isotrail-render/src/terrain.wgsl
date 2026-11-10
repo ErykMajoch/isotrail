@@ -11,7 +11,12 @@ struct Uniforms {
     fill: vec4<f32>,
     // x how far to push lookups along the normal, in metres
     shadow: vec4<f32>,
-    // x the id written to the object-id target
+    // x how deep a passing cloud's shade is (0 for none), y the noise level
+    // clouds start at, z their size and w the cell size they snap to, in metres
+    clouds: vec4<f32>,
+    // xy where the cells start, zw how far the wind has moved the clouds
+    cloud_origin: vec4<f32>,
+    // x the id written to the object-id target, y the clouds' seed
     object: vec4<u32>,
 }
 
@@ -53,6 +58,38 @@ fn sunlit(world: vec3<f32>, normal: vec3<f32>) -> f32 {
     return textureSampleCompareLevel(shadow_map, shadow_sampler, uv, clip.z);
 }
 
+fn hash(x: i32, y: i32, seed: u32) -> f32 {
+    var h = bitcast<u32>(x) * 374761393u + bitcast<u32>(y) * 668265263u + seed * 2246822519u;
+    h = (h ^ (h >> 13u)) * 1274126177u;
+    h = h ^ (h >> 16u);
+    return f32(h & 0xffffu) / 65535.0;
+}
+
+fn value_noise(p: vec2<f32>, seed: u32) -> f32 {
+    let i = vec2<i32>(floor(p));
+    let f = fract(p);
+    let u = f * f * (3.0 - 2.0 * f);
+    let a = hash(i.x, i.y, seed);
+    let b = hash(i.x + 1, i.y, seed);
+    let c = hash(i.x, i.y + 1, seed);
+    let d = hash(i.x + 1, i.y + 1, seed);
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// 1 in the open, less under a passing cloud, the same across each cell
+fn cloud_light(world: vec3<f32>) -> f32 {
+    let depth = uniforms.clouds.x;
+    if depth <= 0.0 {
+        return 1.0;
+    }
+    let cell = uniforms.clouds.w;
+    let snapped = (floor((world.xy - uniforms.cloud_origin.xy) / cell) + 0.5) * cell;
+    let p = (snapped - uniforms.cloud_origin.zw) / uniforms.clouds.z;
+    let seed = uniforms.object.y;
+    let n = 0.65 * value_noise(p, seed) + 0.35 * value_noise(p * 2.3 + 17.0, seed + 1u);
+    return select(1.0, 1.0 - depth, n > uniforms.clouds.y);
+}
+
 struct FragmentOut {
     @location(0) colour: vec4<f32>,
     @location(1) normal: vec4<f32>,
@@ -68,7 +105,7 @@ fn fs_main(in: VertexOut) -> FragmentOut {
 
     // Sampled for every face so the lookup stays in uniform control flow
     let shadow = sunlit(in.world, in.normal);
-    let diffuse = max(dot(in.normal, uniforms.sun.xyz), 0.0) * shadow;
+    let diffuse = max(dot(in.normal, uniforms.sun.xyz), 0.0) * shadow * cloud_light(in.world);
     let banded = ceil(diffuse * bands - 0.25) / bands;
     let direct = uniforms.sun_colour.rgb * (1.0 - ambient) * clamp(banded, 0.0, 1.0);
     var out: FragmentOut;

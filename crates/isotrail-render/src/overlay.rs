@@ -11,6 +11,8 @@ pub const SUBTEXT: [u8; 3] = [164, 221, 219];
 pub const TEXT_SHADOW: [u8; 3] = [16, 20, 31];
 /// Panels blur what lies under them and blend it with this colour
 pub const PANEL_TINT: [u8; 3] = [32, 46, 55];
+/// Joins the drawn credit when the weather is drawn
+pub const WEATHER_CREDIT: &str = "Open-Meteo.com";
 const PANEL_TINT_SHARE: f32 = 0.5;
 const PANEL_BLUR_PX: i32 = 3;
 /// The panel's top edge catches the light
@@ -120,7 +122,13 @@ impl OverlayText {
                 .filter_map(|kind| kind.stat(&meta.stats, units))
                 .collect(),
             profile: bundle.profile.iter().map(|sample| sample.ele_m).collect(),
-            attribution: (!meta.attribution.is_empty()).then(|| meta.attribution.join(" · ")),
+            attribution: {
+                let mut credits: Vec<&str> = meta.attribution.iter().map(String::as_str).collect();
+                if bundle.weather.is_some() {
+                    credits.push(WEATHER_CREDIT);
+                }
+                (!credits.is_empty()).then(|| credits.join(" · "))
+            },
         }
     }
 }

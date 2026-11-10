@@ -4,6 +4,7 @@ use glam::{Vec2, Vec3, Vec4};
 
 use crate::palette::{MAX_COLOURS, srgb_to_oklab};
 use crate::sprite::{Placed, SpriteAtlas};
+use crate::weather::cloud_threshold;
 use crate::{Camera, DEFAULT_PALETTE, Gpu, OffscreenTarget, Palette, SunState, TARGET_FORMAT};
 
 /// The daytime sky's colour at the top and bottom of the frame
@@ -144,6 +145,28 @@ pub(crate) struct Sky {
     /// How far the stars have moved with the view's heading, in pixels
     pub star_shift_px: f32,
     pub moon: Option<MoonPixels>,
+    pub weather: SkyWeather,
+}
+
+/// Clouds, haze, rain and snow as one frame shows them
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct SkyWeather {
+    /// The noise level clouds start at, above 1 for none
+    pub cloud_threshold: f32,
+    /// How far the wind has moved the clouds across the view, in pixels
+    pub cloud_drift_px: f32,
+    pub cloud_lit: Vec3,
+    pub cloud_shade: Vec3,
+    pub haze: f32,
+    pub haze_colour: Vec3,
+    /// How thickly each falls, from 0 to 1
+    pub rain: f32,
+    pub snow: f32,
+    /// Sideways pixels for each pixel of fall
+    pub rain_slant: f32,
+    pub snow_slant: f32,
+    /// Seconds into the clip
+    pub time_s: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -158,12 +181,35 @@ pub(crate) struct MoonPixels {
     pub opacity: f32,
 }
 
+impl SkyWeather {
+    const CLEAR: SkyWeather = SkyWeather {
+        cloud_threshold: 2.0,
+        cloud_drift_px: 0.0,
+        cloud_lit: Vec3::ONE,
+        cloud_shade: Vec3::ONE,
+        haze: 0.0,
+        haze_colour: Vec3::ONE,
+        rain: 0.0,
+        snow: 0.0,
+        rain_slant: 0.0,
+        snow_slant: 0.0,
+        time_s: 0.0,
+    };
+}
+
 /// Height of the horizon and of the zenith on the sky, as shares of the frame
 const HORIZON: f32 = 0.45;
 const ZENITH: f32 = 0.05;
 
 impl Sky {
-    pub fn new(camera: &Camera, sun: &SunState, star_seed: u32, width: u32, height: u32) -> Sky {
+    pub fn new(
+        camera: &Camera,
+        sun: &SunState,
+        star_seed: u32,
+        time_s: f32,
+        width: u32,
+        height: u32,
+    ) -> Sky {
         let ahead = (camera.forward * Vec3::new(1.0, 1.0, 0.0)).normalize_or(Vec3::Y);
         let right = ahead.cross(Vec3::Z);
         let (width, height) = (width as f32, height as f32);
@@ -186,12 +232,43 @@ impl Sky {
                 opacity: moon.opacity,
             }
         });
+        let weather = sun.weather.map_or(SkyWeather::CLEAR, |weather| {
+            let light =
+                sun.colour * sun.intensity * (1.0 - sun.ambient) + sun.ambient_colour * sun.ambient;
+            // Mostly white, with a little of the light's colour at dawn and dusk
+            let grey = light.dot(Vec3::new(0.2126, 0.7152, 0.0722));
+            let cloud_lit = light.lerp(Vec3::splat(grey), 0.6).min(Vec3::ONE);
+            let sky_top = Vec3::from_array(sun.sky[0].map(f32::from)) / 255.0;
+            let sky_bottom = Vec3::from_array(sun.sky[1].map(f32::from)) / 255.0;
+            let across = weather.wind.dot(right.truncate());
+            let (rain, snow) = weather.rain_and_snow();
+            SkyWeather {
+                cloud_threshold: if weather.cloud_cover > 0.0 {
+                    cloud_threshold(weather.cloud_cover)
+                } else {
+                    SkyWeather::CLEAR.cloud_threshold
+                },
+                // Quicker than the real wind, so a clip shows them move
+                cloud_drift_px: across * time_s * width / 200.0,
+                cloud_lit,
+                cloud_shade: (cloud_lit * 0.7).lerp(sky_top, 0.2),
+                haze: weather.haze,
+                haze_colour: sky_bottom.lerp(cloud_lit, 0.5),
+                rain,
+                snow,
+                // Raindrops fall at about 6 m/s and snowflakes at about 1.5
+                rain_slant: (across / 6.0).clamp(-0.8, 0.8),
+                snow_slant: (across / 1.5).clamp(-1.5, 1.5),
+                time_s,
+            }
+        });
         Sky {
             gradient: sun.sky,
             stars: sun.stars,
             star_seed,
             star_shift_px: (ahead.y.atan2(ahead.x) * px_per_rad).round(),
             moon,
+            weather,
         }
     }
 }
@@ -209,6 +286,11 @@ struct Uniforms {
     night: [f32; 4],
     moon: [f32; 4],
     moon_phase: [f32; 4],
+    weather: [f32; 4],
+    falling: [f32; 4],
+    cloud_lit: [f32; 4],
+    cloud_shade: [f32; 4],
+    haze_colour: [f32; 4],
     sprite_frame: [[i32; 4]; MAX_SPRITES],
     sprite_atlas: [[i32; 4]; MAX_SPRITES],
     palette_lab: [[f32; 4]; MAX_COLOURS],
@@ -399,6 +481,7 @@ impl PostPass {
             Background::Colour(rgb) => ([rgb, rgb], 1),
             Background::Transparent => (sky.gradient, 2),
         };
+        let weather = sky.weather;
         let moon = sky.moon.unwrap_or(MoonPixels {
             centre: Vec2::ZERO,
             radius: 0.0,
@@ -440,6 +523,21 @@ impl PostPass {
                 moon.lit_side.y,
             ],
             moon_phase: [moon.terminator, 0.0, 0.0, 0.0],
+            weather: [
+                weather.cloud_threshold,
+                weather.cloud_drift_px,
+                weather.haze,
+                weather.time_s,
+            ],
+            falling: [
+                weather.rain,
+                weather.snow,
+                weather.rain_slant,
+                weather.snow_slant,
+            ],
+            cloud_lit: weather.cloud_lit.extend(1.0).to_array(),
+            cloud_shade: weather.cloud_shade.extend(1.0).to_array(),
+            haze_colour: weather.haze_colour.extend(1.0).to_array(),
             sprite_frame: [[0; 4]; MAX_SPRITES],
             sprite_atlas: [[0; 4]; MAX_SPRITES],
             palette_lab: [[0.0; 4]; MAX_COLOURS],
@@ -526,7 +624,7 @@ mod tests {
             }),
             ..SunState::at(&grid(10, 10, 10.0), 0.0, -20.0)
         };
-        Sky::new(camera, &night, 7, 180, 180)
+        Sky::new(camera, &night, 7, 0.0, 180, 180)
     }
 
     #[test]

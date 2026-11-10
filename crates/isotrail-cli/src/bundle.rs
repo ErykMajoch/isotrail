@@ -69,9 +69,9 @@ pub struct DataArgs {
     #[arg(long, value_name = "URL", env = "ISOTRAIL_OVERPASS_URL", default_value = OVERPASS_URL)]
     overpass_url: String,
 
-    /// Don't look up the weather during the hike
+    /// Leave the weather out: don't look it up, or draw what a bundle holds
     #[arg(long)]
-    no_weather: bool,
+    pub no_weather: bool,
 }
 
 /// A scene bundle and what went into it

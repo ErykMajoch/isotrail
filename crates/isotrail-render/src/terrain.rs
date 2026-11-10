@@ -5,6 +5,7 @@ use crate::lighting::{BANDS, FILL};
 use crate::post::{DEPTH_FORMAT, ID_FORMAT, NORMAL_FORMAT, PostPass, Sky, TERRAIN_ID};
 use crate::route::{RoutePass, to_pixel};
 use crate::sprite::Sprite;
+use crate::weather::cloud_threshold;
 use crate::{
     Camera, Gpu, Look, OffscreenTarget, RouteLine, SunState, TARGET_FORMAT, TerrainMesh, Vertex,
 };
@@ -19,6 +20,7 @@ pub struct GpuMesh {
     vertices: wgpu::Buffer,
     count: u32,
     corners: [Vec3; 8],
+    cell_m: f32,
 }
 
 impl Drop for GpuMesh {
@@ -34,8 +36,10 @@ pub struct Scene<'a> {
     /// Share of the route drawn, by distance: 1 draws all of it with the
     /// finish marker, anything less ends in the head marker
     pub progress: f32,
-    /// Scatters the night sky's stars
+    /// Scatters the night sky's stars and the clouds
     pub star_seed: u32,
+    /// Seconds into the clip, which move the clouds, rain and snow
+    pub time_s: f32,
 }
 
 impl<'a> Scene<'a> {
@@ -45,6 +49,7 @@ impl<'a> Scene<'a> {
             route: None,
             progress: 1.0,
             star_seed: 0,
+            time_s: 0.0,
         }
     }
 }
@@ -59,6 +64,8 @@ struct Uniforms {
     ambient_colour: [f32; 4],
     fill: [f32; 4],
     shadow: [f32; 4],
+    clouds: [f32; 4],
+    cloud_origin: [f32; 4],
     object: [u32; 4],
 }
 
@@ -274,9 +281,11 @@ impl TerrainRenderer {
             .fold((Vec3::INFINITY, Vec3::NEG_INFINITY), |(min, max), p| {
                 (min.min(p), max.max(p))
             });
+        let cols = mesh.surface.cols().max(1) as f32;
         GpuMesh {
             vertices,
             count: mesh.vertices.len() as u32,
+            cell_m: ((max.x - min.x) / cols).max(f32::EPSILON),
             corners: std::array::from_fn(|i| {
                 Vec3::select(
                     glam::BVec3::new(i & 1 != 0, i & 2 != 0, i & 4 != 0),
@@ -310,6 +319,7 @@ impl TerrainRenderer {
         let row_scale = |row: usize| light_view_proj.row(row).truncate().length();
         let texel_m = 2.0 / (row_scale(0).min(row_scale(1)) * SHADOW_MAP_SIZE as f32);
         let towards_camera = (-camera.forward * Vec3::new(1.0, 1.0, 0.0)).normalize_or_zero();
+        let (clouds, cloud_origin) = cloud_shadows(mesh, sun, scene.time_s);
         let uniforms = Uniforms {
             view_proj: camera.view_proj.to_cols_array(),
             light_view_proj: light_view_proj.to_cols_array(),
@@ -318,7 +328,9 @@ impl TerrainRenderer {
             ambient_colour: sun.ambient_colour.extend(1.0).to_array(),
             fill: towards_camera.extend(FILL).to_array(),
             shadow: [texel_m, 0.0, 0.0, 0.0],
-            object: [TERRAIN_ID, 0, 0, 0],
+            clouds,
+            cloud_origin,
+            object: [TERRAIN_ID, scene.star_seed, 0, 0],
         };
         gpu.queue()
             .write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&uniforms));
@@ -412,6 +424,7 @@ impl TerrainRenderer {
             camera,
             sun,
             scene.star_seed,
+            scene.time_s,
             target.width(),
             target.height(),
         );
@@ -419,4 +432,26 @@ impl TerrainRenderer {
             .encode(&mut encoder, target, camera, &sky, look, &sprites);
         gpu.queue().submit([encoder.finish()]);
     }
+}
+
+/// The shade of passing clouds: their depth, the noise level they start at,
+/// their size and the cell size they snap to, then where the cells start,
+/// moved by the wind
+fn cloud_shadows(mesh: &GpuMesh, sun: &SunState, time_s: f32) -> ([f32; 4], [f32; 4]) {
+    let Some(weather) = sun.weather else {
+        return ([0.0; 4], [0.0; 4]);
+    };
+    let (min, max) = (mesh.corners[0], mesh.corners[7]);
+    let size_m = ((max - min).truncate().max_element() / 5.0).max(mesh.cell_m);
+    // A 5 m/s wind carries a cloud its own size in about eight seconds
+    let drift = weather.wind * time_s * size_m / 40.0;
+    (
+        [
+            weather.cloud_shadow(),
+            cloud_threshold(weather.cloud_cover),
+            size_m,
+            mesh.cell_m,
+        ],
+        [min.x, min.y, drift.x, drift.y],
+    )
 }

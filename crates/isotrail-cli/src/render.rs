@@ -387,8 +387,13 @@ fn write_clip(
 pub(crate) fn read_scene(path: &Path, data: &DataArgs) -> anyhow::Result<SceneBundle> {
     let bytes = crate::read_file(path)?;
     if crate::is_bundle_file(path, &bytes) {
-        return SceneBundle::from_bytes(&bytes)
-            .with_context(|| format!("could not read {}", path.display()));
+        let mut bundle = SceneBundle::from_bytes(&bytes)
+            .with_context(|| format!("could not read {}", path.display()))?;
+        if data.no_weather {
+            bundle.weather = None;
+            bundle.meta.provenance.weather = None;
+        }
+        return Ok(bundle);
     }
     Ok(crate::bundle::prepare(path, data)?.bundle)
 }

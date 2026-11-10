@@ -308,7 +308,7 @@ mod tests {
             Some("© Mappers · Tiles · Weather data by Open-Meteo.com")
         );
         let drawn = parse(&[]).unwrap().text(&with_weather).unwrap().attribution;
-        assert_eq!(drawn.as_deref(), Some("© Mappers · Tiles"));
+        assert_eq!(drawn.as_deref(), Some("© Mappers · Tiles · Open-Meteo.com"));
     }
 
     #[test]

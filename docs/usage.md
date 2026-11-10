@@ -84,6 +84,12 @@ The data credit under the stats is required by the map and elevation data licenc
 Credit for the caption: © OpenStreetMap contributors · Terrain Tiles (AWS)
 ```
 
+When the weather is drawn, the credit on the image ends in "Open-Meteo.com", and the printed one in "Weather data by Open-Meteo.com".
+
+### Weather
+
+When the bundle holds the weather during the hike, the render shows it as it was at the start (or at `--time`): clouds in the sky and, on a partly cloudy day, their shade drifting over the ground; a grey sky and duller light when it is overcast; rain or snow slanted by the wind; and haze in fog and heavy rain. Thin high cloud shows in the sky but doesn't dim the light. Animations follow the weather hour by hour as the route draws, with the rain, snow and clouds moving from frame to frame. `--no-weather` draws a clear sky instead.
+
 ### Animation
 
 A `.gif` or `.mp4` output renders an animation in three parts. It opens on the scene with only the start flag (the first 5%). Then the route draws itself with a marker at its head, while the elevation profile fills in and the stats count up (80%). It ends on the finished hike (15%). The camera starts turned away by `--orbit` and eases round to the same view as the PNG by the time the route reaches the finish.
@@ -111,7 +117,7 @@ The animation options only apply to `.gif` and `.mp4` output. PNG renders ignore
 | `--detail N` | `256` | Grid cells along the slab's long side, from `8` to `1024` |
 | `--offline` | off | Only use data that is already in the cache |
 | `--overpass-url URL` | public Overpass API | Another [Overpass](https://overpass-api.de/) endpoint for map data (also `ISOTRAIL_OVERPASS_URL`) |
-| `--no-weather` | off | Don't look up the weather during the hike |
+| `--no-weather` | off | Leave the weather out: don't look it up, or draw the weather a bundle holds |
 | `--config FILE` | none | Read settings from a TOML file (see [Configuration](configuration.md)) |
 
 ## bundle
@@ -141,7 +147,7 @@ Wrote hike.itb (92 KB)
 
 On long routes, where a grid cell is wider than 100 m, footpaths, streams and minor roads are left out, because they would be too small to show and would make the download much larger.
 
-The weather comes from [Open-Meteo](https://open-meteo.com/) (see [How it works](how-it-works.md#preparing-the-scene)). It needs the track's times, so tracks without them are bundled without weather. If it can't be fetched, for example offline with nothing in the cache, isotrail says why and makes the bundle without it; `--no-weather` skips it on purpose. The weather isn't drawn yet, but `isotrail stats --weather` shows what a bundle holds.
+The weather comes from [Open-Meteo](https://open-meteo.com/) (see [How it works](how-it-works.md#preparing-the-scene)). It needs the track's times, so tracks without them are bundled without weather. If it can't be fetched, for example offline with nothing in the cache, isotrail says why and makes the bundle without it; `--no-weather` skips it on purpose. `isotrail stats --weather` shows what a bundle holds.
 
 ### Debug images
 

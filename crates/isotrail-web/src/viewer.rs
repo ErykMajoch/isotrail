@@ -42,6 +42,7 @@ pub struct Viewer {
     view: View,
     progress: f32,
     sun: SunState,
+    time_s: f32,
     id: u32,
 }
 
@@ -119,6 +120,7 @@ impl Viewer {
             view: View::default(),
             progress: 1.0,
             sun,
+            time_s: 0.0,
             id,
         })
     }
@@ -204,6 +206,20 @@ impl Viewer {
         }
     }
 
+    /// Moves the rain, snow and clouds on to `seconds`, any steadily rising
+    /// clock
+    #[wasm_bindgen(js_name = setTime)]
+    pub fn set_time(&mut self, seconds: f32) {
+        self.time_s = seconds;
+    }
+
+    /// Whether rain or snow is falling under the current light, so frames
+    /// keep changing
+    #[wasm_bindgen(getter, js_name = weatherMoves)]
+    pub fn weather_moves(&self) -> bool {
+        self.sun.weather.is_some_and(|weather| weather.moves())
+    }
+
     /// Degrees the view turns from the still's
     #[wasm_bindgen(js_name = setYaw)]
     pub fn set_yaw(&mut self, degrees: f32) {
@@ -239,7 +255,7 @@ impl Viewer {
 
     /// Draws a frame into the canvas
     pub fn draw(&mut self) {
-        let Some(stage) = &self.stage else {
+        let Some(stage) = &mut self.stage else {
             return;
         };
         let texture = match self.surface.get_current_texture() {
@@ -251,6 +267,7 @@ impl Viewer {
             }
             _ => return,
         };
+        stage.diorama.set_time(self.time_s);
         stage.diorama.draw(
             &self.gpu,
             &self.renderer,

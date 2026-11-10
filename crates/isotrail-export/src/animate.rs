@@ -50,6 +50,7 @@ pub fn render_clip<E: From<ExportError>>(
                             .map_or(start, |time_s| SunState::during(bundle, time_s)),
                     );
                 }
+                diorama.set_time(moment.time_s);
                 diorama.draw(
                     gpu,
                     &renderer,

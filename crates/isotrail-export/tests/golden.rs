@@ -1,9 +1,12 @@
-use isotrail_bundle::{MoonSample, SunSample, Units};
+use isotrail_bundle::{
+    MoonSample, SceneBundle, SunSample, Units, Weather, WeatherDataset, WeatherSample,
+};
 use isotrail_export::{ExportError, GifWriter, render_clip, render_still, upscale};
 use isotrail_render::{
-    Aspect, Background, DEFAULT_PALETTE, DEFAULT_STATS, DEFAULT_YAW_OFFSET_DEG, DateFormat, Frame,
-    Gpu, Look, Mesher, Motion, OffscreenTarget, OverlayStyle, OverlayText, Overlays, Pace, Palette,
-    SmoothMesher, SunState, Timeline, VoxelMesher, Walk, draw_test_scene,
+    Aspect, Background, DEFAULT_PALETTE, DEFAULT_STATS, DEFAULT_YAW_OFFSET_DEG, DateFormat,
+    Diorama, Frame, Gpu, Look, Mesher, Motion, OffscreenTarget, OverlayStyle, OverlayText,
+    Overlays, Pace, Palette, SmoothMesher, SunState, TerrainRenderer, Timeline, View, VoxelMesher,
+    Walk, draw_test_scene,
 };
 use isotrail_testkit::{assert_golden, decode_gif, diorama_bundle, hike_bundle};
 
@@ -99,6 +102,138 @@ fn low_suns_and_night_match_goldens() {
     }
     assert!(mean[0] > mean[1] && mean[1] * 2 > mean[2] * 3, "{mean:?}");
     assert!(mean[3] > mean[2], "{mean:?}");
+}
+
+const NOON: i64 = 1_750_000_000;
+
+/// The same weather for two hours around a day-time sun
+fn under(weather: WeatherSample) -> SceneBundle {
+    let mut bundle = diorama_bundle();
+    bundle.sun = vec![SunSample {
+        time: NOON,
+        azimuth_deg: 150.0,
+        elevation_deg: 40.0,
+    }];
+    bundle.weather = Some(Weather {
+        dataset: WeatherDataset::Archive,
+        samples: [NOON - 1_800, NOON + 1_800]
+            .map(|time| WeatherSample { time, ..weather })
+            .to_vec(),
+    });
+    bundle
+}
+
+fn sky(code: u8, cover_pct: f32, low_pct: f32) -> WeatherSample {
+    WeatherSample {
+        time: 0,
+        temperature_c: 12.0,
+        weather_code: code,
+        cloud_cover_pct: cover_pct,
+        cloud_low_pct: low_pct,
+        cloud_mid_pct: cover_pct / 2.0,
+        cloud_high_pct: 0.0,
+        precipitation_mm: 0.0,
+        rain_mm: 0.0,
+        snowfall_cm: 0.0,
+        snow_depth_m: 0.0,
+        wind_speed_m_s: 8.0,
+        wind_direction_deg: 250.0,
+    }
+}
+
+fn rain() -> WeatherSample {
+    WeatherSample {
+        precipitation_mm: 3.0,
+        rain_mm: 3.0,
+        ..sky(63, 100.0, 90.0)
+    }
+}
+
+#[test]
+fn weather_matches_goldens() {
+    let gpu = isotrail_testkit::gpu();
+    let framing = Aspect::Story.framing(6).unwrap();
+    let snow = WeatherSample {
+        temperature_c: -3.0,
+        precipitation_mm: 2.0 / 0.7,
+        snowfall_cm: 2.0,
+        ..sky(73, 100.0, 90.0)
+    };
+    let mut means = Vec::new();
+    for (name, weather) in [
+        ("weather-clear", sky(1, 15.0, 5.0)),
+        ("weather-partly-cloudy", sky(2, 45.0, 30.0)),
+        ("weather-overcast", sky(3, 100.0, 100.0)),
+        ("weather-rain", rain()),
+        ("weather-snow", snow),
+        ("weather-fog", sky(45, 100.0, 100.0)),
+    ] {
+        let bundle = under(weather);
+        let frame = render_still(
+            &gpu,
+            &bundle,
+            &VoxelMesher::default(),
+            &framing,
+            DEFAULT_YAW_OFFSET_DEG,
+            &SunState::for_hike(&bundle),
+            &Look::default(),
+        )
+        .unwrap();
+        means.push(mean(&frame));
+        assert_golden(name, frame.width(), frame.height(), frame.rgba());
+    }
+    // White clouds brighten a blue sky, and grey ones darken it
+    let [clear, partly, overcast, rain, snow, fog] = means[..] else {
+        unreachable!()
+    };
+    assert!(
+        partly > clear && overcast < clear && fog < clear,
+        "{means:?}"
+    );
+    assert!(rain != overcast && snow > rain, "{means:?}");
+}
+
+/// Rain falls on as the clock runs, the same way every time
+#[test]
+fn rain_moves_with_the_clock_and_repeats() {
+    let gpu = isotrail_testkit::gpu();
+    let bundle = under(rain());
+    let framing = Aspect::Square.framing(6).unwrap();
+    let renderer = TerrainRenderer::new(&gpu);
+    let sun = SunState::for_hike(&bundle);
+    assert!(sun.weather.is_some_and(|weather| weather.moves()));
+    let mut diorama = Diorama::new(
+        &gpu,
+        &renderer,
+        &bundle,
+        VoxelMesher::default().mesh(&bundle),
+        &framing,
+        &[0.0],
+        sun,
+    );
+    let target = OffscreenTarget::new(&gpu, framing.width, framing.height);
+    let mut at = |time_s| {
+        diorama.set_time(time_s);
+        diorama.draw(
+            &gpu,
+            &renderer,
+            &target,
+            &View::default(),
+            1.0,
+            &Look::default(),
+        );
+        target.read_back(&gpu).unwrap()
+    };
+    let (first, later, again) = (at(0.0), at(0.25), at(0.0));
+    assert_eq!(first.rgba(), again.rgba());
+    let moved = first
+        .rgba()
+        .chunks(4)
+        .zip(later.rgba().chunks(4))
+        .filter(|(a, b)| a != b)
+        .count();
+    let pixels = (framing.width * framing.height) as usize;
+    assert!(moved > pixels / 100 && moved < pixels / 3, "{moved}");
 }
 
 fn mean(frame: &Frame) -> f64 {

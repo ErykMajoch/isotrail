@@ -17,6 +17,7 @@ pub struct Diorama {
     turntable: Turntable,
     sun: SunState,
     star_seed: u32,
+    time_s: f32,
 }
 
 impl Diorama {
@@ -44,6 +45,7 @@ impl Diorama {
             turntable,
             sun,
             star_seed: bundle.prop_seed as u32,
+            time_s: 0.0,
         }
     }
 
@@ -54,6 +56,11 @@ impl Diorama {
     /// Lights the frames drawn from now on with `sun`
     pub fn set_sun(&mut self, sun: SunState) {
         self.sun = sun;
+    }
+
+    /// Moves the clouds, rain and snow on to `time_s` seconds
+    pub fn set_time(&mut self, time_s: f32) {
+        self.time_s = time_s;
     }
 
     /// Draws the diorama as `view` shows it, with `progress` of the route
@@ -73,6 +80,7 @@ impl Diorama {
             route: Some(&self.route),
             progress,
             star_seed: self.star_seed,
+            time_s: self.time_s,
         };
         renderer.draw(gpu, target, &scene, &camera, &self.sun, look);
     }

@@ -21,6 +21,7 @@ mod terrain;
 mod test_scene;
 mod text;
 mod timeline;
+mod weather;
 
 pub use camera::{
     Aspect, Camera, DEFAULT_YAW_OFFSET_DEG, Framing, Insets, MAX_ZOOM, PITCH_DEG, Turntable, View,
@@ -37,7 +38,7 @@ pub use lighting::{
 pub use mesh::{Mesher, SmoothMesher, Surface, TerrainMesh, Vertex, VoxelMesher};
 pub use overlay::{
     DEFAULT_STATS, DateFormat, OverlayStyle, OverlayText, Overlays, PANEL_TINT, PanelStyle,
-    SUBTEXT, Stat, StatKind, Subtitle, TEXT, TEXT_SHADOW, TitleSize, format_date,
+    SUBTEXT, Stat, StatKind, Subtitle, TEXT, TEXT_SHADOW, TitleSize, WEATHER_CREDIT, format_date,
 };
 pub use palette::{DEFAULT_PALETTE, MAX_COLOURS, Palette, PaletteError, srgb_to_oklab};
 pub use post::{Background, Edges, Look, RouteStyle, SKY_BOTTOM, SKY_TOP};
@@ -51,3 +52,4 @@ pub use timeline::{
     DEFAULT_DURATION_S, DEFAULT_FPS, DEFAULT_ORBIT_DEG, DRAW_SHARE, INTRO_SHARE, Moment, Motion,
     Orbit, Pace, Step, Timeline, Walk,
 };
+pub use weather::Atmosphere;

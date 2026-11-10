@@ -20,6 +20,15 @@ struct Uniforms {
     moon: vec4<f32>,
     // x where the terminator crosses the moon's axis, from -1 (full) to 1 (new)
     moon_phase: vec4<f32>,
+    // x the noise level clouds start at (above 1 for none), y how far they
+    // have drifted in pixels, z how hazy the air is, w seconds into the clip
+    weather: vec4<f32>,
+    // x how thickly rain falls and y snow, z and w their sideways pixels for
+    // each pixel of fall
+    falling: vec4<f32>,
+    cloud_lit: vec4<f32>,
+    cloud_shade: vec4<f32>,
+    haze_colour: vec4<f32>,
     // xy each sprite's top-left pixel, zw its size
     sprite_frame: array<vec4<i32>, 4>,
     // xy each sprite's top-left texel in the atlas
@@ -183,13 +192,123 @@ fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
             colour *= 1.0 - uniforms.look.w;
         }
     }
-    return vec4<f32>(quantise(colour), 1.0);
+    return vec4<f32>(quantise(falling(pixel, colour)), 1.0);
 }
 
 fn hash(x: u32, y: u32, seed: u32) -> u32 {
     var h = x * 374761393u + y * 668265263u + seed * 2246822519u;
     h = (h ^ (h >> 13u)) * 1274126177u;
     return h ^ (h >> 16u);
+}
+
+fn unit(h: u32) -> f32 {
+    return f32(h & 0xffffu) / 65535.0;
+}
+
+// Value noise whose lattice repeats every `period` cells across
+fn wrapped_noise(p: vec2<f32>, period: i32, seed: u32) -> f32 {
+    let i = vec2<i32>(floor(p));
+    let f = fract(p);
+    let u = f * f * (3.0 - 2.0 * f);
+    let x0 = u32(((i.x % period) + period) % period);
+    let x1 = u32((((i.x + 1) % period) + period) % period);
+    let y0 = bitcast<u32>(i.y);
+    let y1 = bitcast<u32>(i.y + 1);
+    let a = unit(hash(x0, y0, seed));
+    let b = unit(hash(x1, y0, seed));
+    let c = unit(hash(x0, y1, seed));
+    let d = unit(hash(x1, y1, seed));
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// The clouds wrap after a whole turn of the view, like the stars
+fn cloud_noise(x: f32, y: f32) -> f32 {
+    let cell = 2.0 * f32(textureDimensions(id_map).x) / 10.0;
+    let p = vec2<f32>(x / cell, y / (cell * 0.3));
+    let seed = uniforms.counts.w + 101u;
+    return 0.65 * wrapped_noise(p, 10, seed) + 0.35 * wrapped_noise(p * 2.0 + vec2<f32>(0.0, 7.0), 20, seed + 1u);
+}
+
+// Clouds over the sky's colour, lit on top and shaded underneath, thinning
+// out towards the horizon
+fn clouds(pixel: vec2<i32>, sky: vec3<f32>, t: f32) -> vec3<f32> {
+    let level = uniforms.weather.x + smoothstep(0.2, 0.42, t);
+    if level >= 1.0 {
+        return sky;
+    }
+    let x = f32(pixel.x) - uniforms.night.y - uniforms.weather.y;
+    let y = f32(pixel.y);
+    if cloud_noise(x, y) <= level {
+        return sky;
+    }
+    if cloud_noise(x, y - 2.0) <= level {
+        return uniforms.cloud_lit.rgb;
+    }
+    if cloud_noise(x, y + 2.0) <= level {
+        return uniforms.cloud_shade.rgb;
+    }
+    return mix(uniforms.cloud_lit.rgb, uniforms.cloud_shade.rgb, 0.3);
+}
+
+// Whether a `width` × `length` particle covers the pixel. Particles fall
+// through a grid of `cell`-sized cells, `fallen` pixels so far and `slant`
+// pixels sideways for each pixel down, and a cell holds one with a chance
+// of `chance`
+fn particle(pixel: vec2<i32>, cell: vec2<i32>, width: i32, length: i32, fallen: f32, slant: f32, chance: f32, salt: u32) -> bool {
+    let p = vec2<f32>(pixel) + 0.5;
+    // Sheared so that each particle falls straight down its column of cells
+    let q = vec2<i32>(floor(vec2<f32>(p.x - slant * p.y, p.y - fallen)));
+    let c = vec2<i32>(floor(vec2<f32>(q) / vec2<f32>(cell)));
+    let local = q - c * cell;
+    let seed = uniforms.counts.w + salt;
+    if unit(hash(bitcast<u32>(c.x), bitcast<u32>(c.y), seed)) >= chance {
+        return false;
+    }
+    let h = hash(bitcast<u32>(c.x), bitcast<u32>(c.y), seed + 7u);
+    let at = vec2<i32>(
+        i32((h & 0xffffu) % u32(cell.x - width + 1)),
+        i32((h >> 16u) % u32(cell.y - length + 1)),
+    );
+    return all(local >= at) && all(local < at + vec2<i32>(width, length));
+}
+
+// Rain streaks and snowflakes in front of everything, the far layer fainter
+fn falling(pixel: vec2<i32>, colour: vec3<f32>) -> vec3<f32> {
+    var out = colour;
+    let rain = uniforms.falling.x;
+    let snow = uniforms.falling.y;
+    let height = f32(textureDimensions(id_map).y);
+    let time = uniforms.weather.w;
+    let lit = uniforms.cloud_lit.rgb;
+    if rain > 0.0 {
+        let slant = uniforms.falling.z;
+        // Drops catch the light against dark ground and darken a light sky
+        let luma = vec3<f32>(0.2126, 0.7152, 0.0722);
+        let dark = dot(out, luma) < 0.6 * dot(lit, luma);
+        let drop = select(lit * vec3<f32>(0.55, 0.6, 0.7), min(lit * vec3<f32>(1.0, 1.05, 1.15), vec3<f32>(1.0)), dark);
+        if particle(pixel, vec2<i32>(5, 19), 1, 2, height * 1.2 * time, slant, rain * 0.6, 11u) {
+            out = mix(out, drop, 0.45);
+        }
+        if particle(pixel, vec2<i32>(7, 26), 1, 4, height * 1.6 * time, slant, rain * 0.8, 23u) {
+            out = mix(out, drop, 0.7);
+        }
+    }
+    if snow > 0.0 {
+        let slant = uniforms.falling.w;
+        let flake = mix(lit, vec3<f32>(1.0), 0.6);
+        if particle(pixel, vec2<i32>(6, 7), 1, 1, height * 0.14 * time, slant, snow * 0.5, 37u) {
+            out = mix(out, flake, 0.7);
+        }
+        if particle(pixel, vec2<i32>(9, 10), 2, 2, height * 0.22 * time, slant, snow * 0.7, 41u) {
+            out = flake;
+        }
+    }
+    return out;
+}
+
+// Distant terrain and the low sky fade into the haze
+fn hazed(colour: vec3<f32>, distance: f32) -> vec3<f32> {
+    return mix(colour, uniforms.haze_colour.rgb, uniforms.weather.z * distance);
 }
 
 // The stars and the moon over the sky's colour, `t` down from the top
@@ -232,7 +351,8 @@ fn scene(pixel: vec2<i32>) -> vec3<f32> {
         let t = (f32(pixel.y) + 0.5) / f32(size.y);
         // Rounded like the terrain's colour target, so both quantise the same way
         let sky = round(mix(uniforms.sky_top.rgb, uniforms.sky_bottom.rgb, t) * 255.0) / 255.0;
-        return night_sky(pixel, sky + bayer(pixel) * uniforms.look.y, t);
+        let night = night_sky(pixel, sky + bayer(pixel) * uniforms.look.y, t);
+        return hazed(clouds(pixel, night, t), smoothstep(0.15, 0.6, t));
     }
 
     var silhouette = false;
@@ -267,5 +387,5 @@ fn scene(pixel: vec2<i32>) -> vec3<f32> {
     } else if crease {
         colour = min(colour * (1.0 + uniforms.edges.z), vec3<f32>(1.0));
     }
-    return colour;
+    return hazed(colour, mix(0.3, 1.0, centre.depth));
 }

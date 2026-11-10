@@ -3,7 +3,7 @@ use glam::{Mat4, Vec3};
 use isotrail_bundle::{GridInfo, MoonSample, SceneBundle, SunSample};
 
 use crate::camera::slab_angle;
-use crate::{SKY_BOTTOM, SKY_TOP};
+use crate::{Atmosphere, SKY_BOTTOM, SKY_TOP};
 
 /// The late-morning sun of hikes without times
 pub const SUN_AZIMUTH_DEG: f64 = 150.0;
@@ -94,6 +94,8 @@ pub struct SunState {
     pub stars: f32,
     /// The moon's disc, while it shows in the sky
     pub moon: Option<MoonDisc>,
+    /// `None` under a clear sky with nothing falling
+    pub weather: Option<Atmosphere>,
 }
 
 /// Where the moon stands, as the sky shows it
@@ -156,6 +158,7 @@ impl SunState {
             sky: key.sky,
             stars: smoothstep(-6.0, -14.0, elevation_deg as f32),
             moon: None,
+            weather: None,
         };
         let Some(moon) = moon.filter(|moon| moon.elevation_deg > -2.0) else {
             return sun;
@@ -187,15 +190,74 @@ impl SunState {
         sun
     }
 
-    /// The sun and moon at the start of the hike, or the late-morning sun
-    /// when the track has no times
+    /// The sun, moon and weather at the start of the hike, or the
+    /// late-morning sun when the track has no times
     pub fn for_hike(bundle: &SceneBundle) -> SunState {
-        SunState::sample(bundle, 0)
+        let sun = SunState::sample(bundle, 0);
+        match bundle.sun.first() {
+            Some(first) => sun.with_weather_at(bundle, first.time as f64),
+            None => sun,
+        }
     }
 
-    /// The sun and moon at Unix time `time_s`, between the bundle's samples;
-    /// before the first and after the last, they stand as at those
+    /// The light under `weather`: cloud dims and greys the sun and the sky,
+    /// and hides the stars and the moon
+    pub fn with_weather(mut self, weather: Option<Atmosphere>) -> SunState {
+        self.weather = weather;
+        let Some(weather) = weather else {
+            return self;
+        };
+        let overcast = weather.overcast;
+        self.intensity *= 1.0 - 0.65 * overcast;
+        self.colour = self
+            .colour
+            .lerp(Vec3::splat(luminance(self.colour)), 0.6 * overcast);
+        self.ambient_colour = self
+            .ambient_colour
+            .lerp(Vec3::splat(luminance(self.ambient_colour)), 0.5 * overcast);
+        self.sky = self.sky.map(|rgb| {
+            let colour = Vec3::from_array(rgb.map(f32::from));
+            let grey = Vec3::splat(luminance(colour) * 0.92) * Vec3::new(0.97, 1.0, 1.04);
+            colour
+                .lerp(grey, 0.85 * overcast)
+                .round()
+                .clamp(Vec3::ZERO, Vec3::splat(255.0))
+                .to_array()
+                .map(|c| c as u8)
+        });
+        let clear = 1.0 - weather.cloud_cover;
+        self.stars *= clear;
+        if let Some(moon) = &mut self.moon {
+            moon.opacity *= clear;
+            if moon.opacity <= 0.0 {
+                self.moon = None;
+            }
+        }
+        self
+    }
+
+    /// The light under the bundle's weather at Unix time `time_s`
+    pub fn with_weather_at(self, bundle: &SceneBundle, time_s: f64) -> SunState {
+        let weather = bundle
+            .weather
+            .as_ref()
+            .filter(|weather| !weather.samples.is_empty())
+            .map(|weather| Atmosphere::new(&bundle.grid, &weather.at(time_s)));
+        self.with_weather(weather)
+    }
+
+    /// The sun, moon and weather at Unix time `time_s`, between the
+    /// bundle's samples; before the first and after the last, they stand as
+    /// at those
     pub fn during(bundle: &SceneBundle, time_s: f64) -> SunState {
+        let sun = SunState::sun_and_moon(bundle, time_s);
+        if bundle.sun.is_empty() {
+            return sun;
+        }
+        sun.with_weather_at(bundle, time_s)
+    }
+
+    fn sun_and_moon(bundle: &SceneBundle, time_s: f64) -> SunState {
         let track = &bundle.sun;
         let i = track.partition_point(|s| (s.time as f64) <= time_s);
         if i == 0 || i == track.len() {
@@ -295,7 +357,7 @@ fn luminance(rgb: Vec3) -> f32 {
 }
 
 /// 0 at `from` and 1 at `to`, eased between; `to` may be the smaller
-fn smoothstep(from: f32, to: f32, x: f32) -> f32 {
+pub(crate) fn smoothstep(from: f32, to: f32, x: f32) -> f32 {
     let t = ((x - from) / (to - from)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
@@ -560,6 +622,66 @@ mod tests {
             SunState::during(&bundle, 1_150.0),
             SunState::late_morning(&grid)
         );
+    }
+
+    fn weather(cloud_cover: f32, overcast: f32) -> Option<Atmosphere> {
+        Some(Atmosphere {
+            cloud_cover,
+            solid: 1.0,
+            overcast,
+            haze: 0.0,
+            precipitation: isotrail_bundle::Precipitation::None,
+            density: 0.0,
+            wind: glam::Vec2::ZERO,
+        })
+    }
+
+    #[test]
+    fn cloud_dims_the_light_and_greys_the_sky() {
+        let grid = grid(10, 10, 10.0);
+        let day = SunState::at(&grid, 150.0, 40.0);
+        assert_eq!(day.with_weather(None), day);
+        let suns: Vec<SunState> = (0..=4)
+            .map(|i| day.with_weather(weather(i as f32 / 4.0, i as f32 / 4.0)))
+            .collect();
+        for pair in suns.windows(2) {
+            assert!(brightness(&pair[1]) < brightness(&pair[0]));
+            assert!(sky_luminance(&pair[1]) <= sky_luminance(&pair[0]) + 1.0);
+        }
+        let blue = |sun: &SunState| f32::from(sun.sky[0][2]) - f32::from(sun.sky[0][0]);
+        assert!(blue(&suns[4]) < blue(&day) * 0.3);
+        assert_eq!(suns[2].direction, day.direction);
+    }
+
+    #[test]
+    fn cloud_hides_the_stars_and_the_moon() {
+        let grid = grid(10, 10, 10.0);
+        let night = SunState::with_moon(&grid, 0.0, -25.0, full_moon(30.0));
+        let broken = night.with_weather(weather(0.5, 0.0));
+        assert_eq!(broken.stars, 0.5);
+        assert_eq!(broken.moon.unwrap().opacity, 0.5);
+        let covered = night.with_weather(weather(1.0, 1.0));
+        assert_eq!((covered.stars, covered.moon), (0.0, None));
+    }
+
+    #[test]
+    fn the_bundle_weather_follows_the_clock() {
+        let mut bundle = bundle(grid(2, 2, 10.0), &[0.0; 4], &[Landcover::Grassland; 4]);
+        bundle.sun = vec![SunSample {
+            time: 3_600,
+            azimuth_deg: 150.0,
+            elevation_deg: 40.0,
+        }];
+        assert_eq!(SunState::for_hike(&bundle).weather, None);
+        let mut weather = isotrail_testkit::synthetic_weather(0, 3);
+        weather.samples[1].cloud_cover_pct = 100.0;
+        weather.samples[2].cloud_cover_pct = 0.0;
+        bundle.weather = Some(weather);
+        let cover = |sun: SunState| sun.weather.unwrap().cloud_cover;
+        assert_eq!(cover(SunState::for_hike(&bundle)), 1.0);
+        assert_eq!(cover(SunState::during(&bundle, 5_400.0)), 0.5);
+        bundle.sun.clear();
+        assert_eq!(SunState::during(&bundle, 5_400.0).weather, None);
     }
 
     #[test]

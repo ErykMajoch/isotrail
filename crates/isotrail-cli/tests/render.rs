@@ -498,6 +498,53 @@ fn a_credit_left_off_the_image_is_printed_for_the_caption() {
 }
 
 #[test]
+fn no_weather_leaves_out_the_weather_a_bundle_holds() {
+    let temp = tempfile::tempdir().unwrap();
+    let cache = temp.path().join("cache");
+    let mut bundle = hike_bundle();
+    bundle.weather = Some(isotrail_testkit::synthetic_weather(1_750_000_000, 3));
+    bundle.sun = vec![isotrail_bundle::SunSample {
+        time: 1_750_003_600,
+        azimuth_deg: 150.0,
+        elevation_deg: 40.0,
+    }];
+    bundle.moon = vec![isotrail_bundle::MoonSample {
+        time: 1_750_003_600,
+        azimuth_deg: 20.0,
+        elevation_deg: -30.0,
+        illuminated: 0.5,
+    }];
+    fs::write(temp.path().join("wet.itb"), bundle.to_bytes()).unwrap();
+    let render = |extra: &[&str], output: &str| {
+        let mut args = vec!["render", "wet.itb", "--no-attribution", "-o", output];
+        args.extend_from_slice(extra);
+        let output = isotrail(&cache, temp.path(), &args);
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        (
+            text(&output.stdout),
+            fs::read(temp.path().join(args[4])).unwrap(),
+        )
+    };
+    let (wet, wet_png) = render(&[], "wet.png");
+    assert!(
+        wet.ends_with(
+            "Made-up Tiles · Weather data by Open-Meteo.com
+"
+        ),
+        "{wet}"
+    );
+    let (dry, dry_png) = render(&["--no-weather"], "dry.png");
+    assert!(
+        dry.ends_with(
+            "Made-up Tiles
+"
+        ),
+        "{dry}"
+    );
+    assert!(wet_png != dry_png, "the weather made no difference");
+}
+
+#[test]
 fn settings_come_from_flags_then_the_given_file_then_the_user_file() {
     let temp = with_hike();
     let cache = temp.path().join("cache");

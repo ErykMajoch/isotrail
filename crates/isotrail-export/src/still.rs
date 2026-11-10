@@ -38,6 +38,7 @@ pub fn render_still(
             route: Some(&route),
             progress: 1.0,
             star_seed: bundle.prop_seed as u32,
+            time_s: 0.0,
         },
         &camera,
         sun,

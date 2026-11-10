@@ -133,7 +133,7 @@ See [Configuration](docs/configuration.md) for file locations, precedence and en
 
 ## Roadmap
 
-- Historical weather and a seasonal look
+- A seasonal look: snow cover, autumn colours and frozen lakes
 
 ## Contributing
 

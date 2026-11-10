@@ -21,6 +21,12 @@ impl Default for Surface {
 }
 
 impl Surface {
+    pub fn cols(&self) -> usize {
+        match self {
+            Surface::Steps { cols, .. } | Surface::Triangles { cols, .. } => *cols,
+        }
+    }
+
     /// Height at `at` of the face that holds `inside`, so a point on a step's
     /// edge can take either side's height
     pub fn height(&self, inside: Vec2, at: Vec2) -> f32 {

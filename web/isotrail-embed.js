@@ -300,7 +300,7 @@ class IsotrailHike extends HTMLElement {
       ([entry]) => {
         this.#near = entry.isIntersecting;
         if (this.#near && !this.#started) this.#start();
-        if (this.#near && this.#playing) this.#schedule();
+        if (this.#near && (this.#playing || this.#weatherMoves())) this.#schedule();
       },
       { rootMargin: '200px' },
     );
@@ -483,6 +483,7 @@ class IsotrailHike extends HTMLElement {
     }
     if (this.#moved) viewer.setProgress(this.#progress);
     viewer.setYaw(this.#yaw + (this.#settling ? orbit(this.#time) : 0));
+    viewer.setTime(reducedMotion() ? 0 : now / 1000);
     viewer.draw();
     if (!this.#drawn && this.#canvas.width > 0) {
       this.#drawn = true;
@@ -491,7 +492,14 @@ class IsotrailHike extends HTMLElement {
     if (this.#playing) {
       if (this.#near) this.#schedule();
       else this.#last = null;
+    } else if (this.#near && this.#weatherMoves()) {
+      this.#schedule();
     }
+  }
+
+  // Rain and snow keep falling while the hike is on screen
+  #weatherMoves() {
+    return !!this.#viewer?.weatherMoves && !reducedMotion();
   }
 
   #cancelSettle() {
