@@ -1225,6 +1225,7 @@ version = "1.2.0"
 dependencies = [
  "gif",
  "isotrail-bundle",
+ "isotrail-render",
  "png",
  "tempfile",
 ]

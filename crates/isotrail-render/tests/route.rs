@@ -1,7 +1,7 @@
 use glam::{Vec2, Vec3};
 use isotrail_bundle::{Landcover, Route, RoutePoint, SceneBundle};
 use isotrail_render::{
-    Aspect, Camera, Frame, Gpu, Look, Mesher, OffscreenTarget, RouteLine, RouteStyle, Scene,
+    Aspect, Camera, Frame, Look, Mesher, OffscreenTarget, RouteLine, RouteStyle, Scene,
     SmoothMesher, SunState, TerrainRenderer, VoxelMesher,
 };
 use isotrail_testkit::{assert_golden, bundle, grid};
@@ -67,7 +67,7 @@ impl Render {
         look: &Look,
         progress: Option<f32>,
     ) -> Render {
-        let gpu = Gpu::headless().unwrap();
+        let gpu = isotrail_testkit::gpu();
         let framing = Aspect::Story.framing(3).unwrap();
         let mesh = mesher.mesh(bundle);
         let camera = Camera::diorama(HEADING, mesh.positions(), &framing);

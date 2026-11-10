@@ -49,7 +49,7 @@ Please don't add real recordings to the repository.
 
 ## Rendering in tests
 
-Rendering runs on the GPU without a window. It uses a real GPU when there is one, and falls back to a software renderer otherwise. Set `ISOTRAIL_GPU` to `hardware` or `software` to choose. CI uses `software`: WARP on Windows, and Mesa lavapipe on Linux (the `mesa-vulkan-drivers` package).
+Rendering runs on the GPU without a window. It uses a real GPU when there is one, and falls back to a software renderer otherwise. Set `ISOTRAIL_GPU` to `hardware` or `software` to choose. CI uses `software`: WARP on Windows, and Mesa lavapipe on Linux (the `mesa-vulkan-drivers` package). Tests take the GPU from `isotrail_testkit::gpu()`, which opens one device per test binary and lends it to one test at a time: lavapipe has crashed when every test opened its own at once.
 
 Render tests compare their output with golden images in `fixtures/golden/`, and allow up to 0.5% of pixels to differ. When a comparison fails, the actual image and a diff are written to `target/golden-failures/`. After an intended change to the look, regenerate the goldens and review the new images before committing them:
 

@@ -8,7 +8,7 @@ fn present(gpu: &Gpu, frame: &OffscreenTarget, (width, height): (u32, u32), scal
 
 #[test]
 fn each_pixel_becomes_a_square_block() {
-    let gpu = Gpu::headless().unwrap();
+    let gpu = isotrail_testkit::gpu();
     let frame = OffscreenTarget::new(&gpu, 90, 60);
     draw_test_scene(&gpu, &frame);
     let source = frame.read_back(&gpu).unwrap();
@@ -27,7 +27,7 @@ fn each_pixel_becomes_a_square_block() {
 
 #[test]
 fn frame_is_centred_and_cropped_or_bordered() {
-    let gpu = Gpu::headless().unwrap();
+    let gpu = isotrail_testkit::gpu();
     let frame = OffscreenTarget::new(&gpu, 90, 60);
     draw_test_scene(&gpu, &frame);
     let source = frame.read_back(&gpu).unwrap();

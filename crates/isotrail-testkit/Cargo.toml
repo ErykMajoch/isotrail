@@ -10,6 +10,7 @@ publish = false
 [dependencies]
 gif.workspace = true
 isotrail-bundle = { path = "../isotrail-bundle" }
+isotrail-render = { path = "../isotrail-render" }
 png.workspace = true
 
 [dev-dependencies]

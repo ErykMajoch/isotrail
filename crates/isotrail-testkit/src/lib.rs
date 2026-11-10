@@ -1,6 +1,6 @@
-//! Test helpers for isotrail: golden-image comparison with a tolerance, GIF
-//! decoding, video probing with ffmpeg, and synthetic scene bundles built in
-//! code
+//! Test helpers for isotrail: a shared GPU, golden-image comparison with a
+//! tolerance, GIF decoding, video probing with ffmpeg, and synthetic scene
+//! bundles built in code
 //!
 //! Goldens live in `fixtures/golden/<name>.png`. Run the tests with
 //! `UPDATE_GOLDENS=1` to create or refresh them. When a comparison fails, the
@@ -14,12 +14,25 @@ mod video;
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
 pub use gif::{GifFrame, decode_gif};
 pub use scene::{bundle, diorama_bundle, grid, hike_bundle};
 pub use video::{VideoInfo, first_video_frame, has_ffmpeg, probe_video};
 
 pub const UPDATE_ENV: &str = "UPDATE_GOLDENS";
+
+/// The test process's one GPU, held until the guard drops. Tests run on
+/// parallel threads, and Mesa's lavapipe has crashed with a device opened
+/// for each of them at once
+pub fn gpu() -> MutexGuard<'static, isotrail_render::Gpu> {
+    static GPU: OnceLock<Mutex<isotrail_render::Gpu>> = OnceLock::new();
+    GPU.get_or_init(|| {
+        Mutex::new(isotrail_render::Gpu::headless().expect("render tests need a GPU adapter"))
+    })
+    .lock()
+    .unwrap_or_else(PoisonError::into_inner)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tolerance {

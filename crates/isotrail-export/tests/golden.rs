@@ -9,7 +9,7 @@ use isotrail_testkit::{assert_golden, decode_gif, diorama_bundle, hike_bundle};
 
 #[test]
 fn test_scene_matches_golden() {
-    let gpu = Gpu::headless().unwrap();
+    let gpu = isotrail_testkit::gpu();
     let target = OffscreenTarget::new(&gpu, 90, 60);
     draw_test_scene(&gpu, &target);
     let frame = upscale(&target.read_back(&gpu).unwrap(), 3).unwrap();
@@ -17,7 +17,7 @@ fn test_scene_matches_golden() {
 }
 
 fn assert_terrain_golden(name: &str, mesher: &dyn Mesher, look: &Look) {
-    let gpu = Gpu::headless().unwrap();
+    let gpu = isotrail_testkit::gpu();
     let framing = Aspect::Story.framing(6).unwrap();
     let frame = render_still(
         &gpu,
@@ -60,7 +60,7 @@ fn other_palettes_match_goldens() {
 
 #[test]
 fn overlays_on_the_diorama_match_golden() {
-    let gpu = Gpu::headless().unwrap();
+    let gpu = isotrail_testkit::gpu();
     let mut bundle = diorama_bundle();
     bundle.meta.title = "Zażółć gęślą jaźń | Łańcuch".into();
     bundle.meta.local_date = Some("2025-06-14".into());
@@ -110,7 +110,7 @@ fn render_hike(gpu: &Gpu, aspect: Aspect, look: &Look) -> Frame {
 
 #[test]
 fn every_preset_matches_its_golden() {
-    let gpu = Gpu::headless().unwrap();
+    let gpu = isotrail_testkit::gpu();
     for aspect in Aspect::ALL {
         let frame = render_hike(&gpu, aspect, &Look::default());
         let (width, height) = aspect.output_size();
@@ -126,7 +126,7 @@ fn every_preset_matches_its_golden() {
 
 #[test]
 fn backgrounds_replace_only_the_sky() {
-    let gpu = Gpu::headless().unwrap();
+    let gpu = isotrail_testkit::gpu();
     let sky = render_hike(&gpu, Aspect::Square, &Look::default());
     let render = |background| {
         let look = Look {
@@ -152,7 +152,7 @@ fn backgrounds_replace_only_the_sky() {
 /// times, with the stats counting up, decoded back from the GIF
 #[test]
 fn animation_frames_match_goldens() {
-    let gpu = Gpu::headless().unwrap();
+    let gpu = isotrail_testkit::gpu();
     let mut bundle = hike_bundle();
     // Ten minutes between points, with an hour's stop at the fourth
     for (i, point) in bundle.route.points.iter_mut().enumerate() {

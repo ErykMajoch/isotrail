@@ -4,8 +4,8 @@ use std::f32::consts::FRAC_PI_2;
 use glam::{Vec2, Vec3};
 use isotrail_bundle::{Landcover, SceneBundle};
 use isotrail_render::{
-    Aspect, BANDS, Camera, Frame, Gpu, Look, Mesher, OffscreenTarget, Scene, SmoothMesher,
-    SunState, TerrainRenderer, VoxelMesher,
+    Aspect, BANDS, Camera, Frame, Look, Mesher, OffscreenTarget, Scene, SmoothMesher, SunState,
+    TerrainRenderer, VoxelMesher,
 };
 use isotrail_testkit::{bundle, grid};
 
@@ -40,7 +40,7 @@ impl Render {
     /// Looks along slab-frame angle `heading` under the late-morning sun, with
     /// no outlines or palette
     fn new(bundle: &SceneBundle, mesher: &dyn Mesher, heading: f32) -> Render {
-        let gpu = Gpu::headless().unwrap();
+        let gpu = isotrail_testkit::gpu();
         let framing = Aspect::Story.framing(3).unwrap();
         let mesh = mesher.mesh(bundle);
         let camera = Camera::diorama(heading, mesh.positions(), &framing);

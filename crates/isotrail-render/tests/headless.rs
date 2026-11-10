@@ -1,11 +1,11 @@
-use isotrail_render::{AdapterMode, Gpu, OffscreenTarget, RenderError, draw_test_scene};
+use isotrail_render::{AdapterMode, OffscreenTarget, RenderError, draw_test_scene};
 
 const CLEAR: [u8; 4] = [32, 48, 80, 255];
 const QUAD: [u8; 4] = [240, 200, 64, 255];
 
 #[test]
 fn readback_strips_row_padding() {
-    let gpu = Gpu::headless().unwrap();
+    let gpu = isotrail_testkit::gpu();
     // 90 px rows are 360 bytes, padded to 512 for the copy
     let target = OffscreenTarget::new(&gpu, 90, 60);
     draw_test_scene(&gpu, &target);

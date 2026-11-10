@@ -2,15 +2,15 @@ use std::collections::HashSet;
 
 use isotrail_bundle::{Landcover, SceneBundle};
 use isotrail_render::{
-    Aspect, Camera, DEFAULT_PALETTE, Edges, Frame, Gpu, Look, Mesher, OffscreenTarget, Palette,
-    Scene, SmoothMesher, SunState, TerrainRenderer, VoxelMesher,
+    Aspect, Camera, DEFAULT_PALETTE, Edges, Frame, Look, Mesher, OffscreenTarget, Palette, Scene,
+    SmoothMesher, SunState, TerrainRenderer, VoxelMesher,
 };
 use isotrail_testkit::{bundle, diorama_bundle, grid};
 
 const HEADING: f32 = 0.6;
 
 fn render(bundle: &SceneBundle, mesher: &dyn Mesher, look: &Look) -> Frame {
-    let gpu = Gpu::headless().unwrap();
+    let gpu = isotrail_testkit::gpu();
     let framing = Aspect::Story.framing(3).unwrap();
     let mesh = mesher.mesh(bundle);
     let camera = Camera::diorama(HEADING, mesh.positions(), &framing);
