@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 
 use isotrail_bundle::{Precipitation, WeatherDataset};
 use isotrail_geo::{
-    ARCHIVE_LAG_S, FetchError, Fetcher, OPEN_METEO_ARCHIVE_URL, OPEN_METEO_FORECAST_URL,
-    OpenMeteoSource, RecordedFetcher, WeatherError, WeatherLocation, WeatherRequest, WeatherSource,
+    ARCHIVE_LAG_S, DAYS_BEFORE, FetchError, Fetcher, OPEN_METEO_ARCHIVE_URL,
+    OPEN_METEO_FORECAST_URL, OpenMeteoSource, RecordedFetcher, WeatherError, WeatherLocation,
+    WeatherRequest, WeatherSource,
 };
 use isotrail_track::{GpxReader, TrackReader};
 
@@ -231,4 +232,106 @@ fn missing_recordings_name_the_request() {
     let source = OpenMeteoSource::new(RecordedFetcher::new(dir.path()));
     let err = source.weather(&snowdon(0)).unwrap_err();
     assert!(matches!(err, WeatherError::Fetch { .. }), "{err}");
+}
+
+/// A daily response for the fortnight before the hike, with `null` where
+/// `gap` says so
+fn days_response(elevation: f32, mean: f32, gap: impl Fn(usize) -> bool) -> String {
+    let column = |value: f32| {
+        let values: Vec<String> = (0..DAYS_BEFORE)
+            .map(|i| {
+                if gap(i) {
+                    "null".into()
+                } else {
+                    value.to_string()
+                }
+            })
+            .collect();
+        format!("[{}]", values.join(","))
+    };
+    let times: Vec<String> = (0..DAYS_BEFORE)
+        .map(|i| (1_748_649_600 + i as i64 * 86_400).to_string())
+        .collect();
+    format!(
+        r#"{{"latitude":53.07,"longitude":-4.07,"elevation":{elevation},"daily":{{"time":[{}],"temperature_2m_max":{},"temperature_2m_min":{},"snowfall_sum":{}}}}}"#,
+        times.join(","),
+        column(mean + 3.0),
+        column(mean - 3.0),
+        column(0.5),
+    )
+}
+
+#[test]
+fn recorded_archive_covers_the_fortnight_before_the_hike() {
+    let request = snowdon(LATER);
+    let source = OpenMeteoSource::new(RecordedFetcher::new(fixtures().join("weather")));
+    let before = source.days_before(&request).unwrap();
+    assert_eq!(before.len(), 1);
+    assert_eq!(before[0].ele_m, 830.0);
+    assert_eq!(before[0].mean_c.len(), DAYS_BEFORE);
+    assert_eq!(before[0].snowfall_cm.len(), DAYS_BEFORE);
+    assert!(
+        before[0].mean_c.iter().all(|t| (-5.0..25.0).contains(t)),
+        "{before:?}"
+    );
+    assert!(
+        before[0].snowfall_cm.iter().all(|&s| s >= 0.0),
+        "{before:?}"
+    );
+}
+
+#[test]
+fn the_days_before_end_the_day_before_the_hike() {
+    let url = OpenMeteoSource::<RecordedFetcher>::days_url(OPEN_METEO_ARCHIVE_URL, &snowdon(LATER));
+    for part in [
+        "start_date=2025-05-31",
+        "end_date=2025-06-13",
+        "daily=temperature_2m_max%2Ctemperature_2m_min%2Csnowfall_sum",
+        "elevation=830&",
+    ] {
+        assert!(url.contains(part), "{part} in {url}");
+    }
+}
+
+#[test]
+fn the_days_before_use_the_model_height_and_fall_back_like_the_hours() {
+    let dir = tempfile::tempdir().unwrap();
+    let fetcher = Logged::new(dir.path());
+    let request = snowdon(snowdon(0).last_hour() + ARCHIVE_LAG_S);
+    let archive = OpenMeteoSource::<Logged>::days_url(OPEN_METEO_ARCHIVE_URL, &request);
+    let forecast = OpenMeteoSource::<Logged>::days_url(OPEN_METEO_FORECAST_URL, &request);
+    fetcher.record(&archive, &days_response(830.0, 1.0, |i| i == 3));
+    fetcher.record(&forecast, &days_response(845.0, -2.0, |_| false));
+
+    let before = OpenMeteoSource::new(&fetcher)
+        .days_before(&request)
+        .unwrap();
+    assert_eq!(before[0].ele_m, 845.0);
+    assert_eq!(before[0].mean_c, vec![-2.0; DAYS_BEFORE]);
+    assert_eq!(before[0].snowfall_cm, vec![0.5; DAYS_BEFORE]);
+    assert_eq!(*fetcher.forgotten.borrow(), vec![archive]);
+}
+
+#[test]
+fn gaps_in_the_days_before_say_how_many_are_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let fetcher = Logged::new(dir.path());
+    let request = snowdon(0);
+    let forecast = OpenMeteoSource::<Logged>::days_url(OPEN_METEO_FORECAST_URL, &request);
+    fetcher.record(&forecast, &days_response(830.0, 1.0, |i| i < 3));
+
+    let err = OpenMeteoSource::new(&fetcher)
+        .days_before(&request)
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            WeatherError::IncompleteDays {
+                missing: 3,
+                days: DAYS_BEFORE
+            }
+        ),
+        "{err}"
+    );
+    assert!(err.to_string().contains("3 of the 14 days before"), "{err}");
 }

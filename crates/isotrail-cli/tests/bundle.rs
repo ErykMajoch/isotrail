@@ -72,8 +72,12 @@ fn warm_weather(cache_dir: &Path) {
         RecordedFetcher::new(fixtures().join("weather")),
         Cache::new(cache_dir),
     );
-    let url = OpenMeteoSource::<RecordedFetcher>::url(OPEN_METEO_ARCHIVE_URL, &request);
-    weather.get(&url).unwrap();
+    for url in [
+        OpenMeteoSource::<RecordedFetcher>::url(OPEN_METEO_ARCHIVE_URL, &request),
+        OpenMeteoSource::<RecordedFetcher>::days_url(OPEN_METEO_ARCHIVE_URL, &request),
+    ] {
+        weather.get(&url).unwrap();
+    }
 }
 
 fn text(bytes: &[u8]) -> String {
@@ -145,6 +149,11 @@ fn offline_bundle_writes_the_bundle_and_debug_images_from_the_cache() {
     assert_eq!((bundle.grid.cols, bundle.grid.rows), (32, 16));
     assert_eq!(bundle.meta.title, "Synthetic Snowdon Descent");
     assert!(!bundle.route.points.is_empty());
+    assert_eq!(bundle.season.leaf_day, Some(165));
+    assert_eq!(
+        (bundle.season.snow_line_m, bundle.season.ice_line_m),
+        (None, None)
+    );
     let weather = bundle.weather.unwrap();
     assert_eq!(weather.samples.len(), 4);
     assert_eq!(
@@ -309,7 +318,7 @@ fn stats_of_a_damaged_bundle_explains_why() {
     for (name, bytes, reason) in [
         (
             "damaged.itb",
-            &b"ITB1\x04\x00not deflate"[..],
+            &b"ITB1\x05\x00not deflate"[..],
             "the bundle is damaged",
         ),
         (

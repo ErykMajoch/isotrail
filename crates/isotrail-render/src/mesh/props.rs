@@ -4,7 +4,8 @@ use glam::{Vec2, Vec3};
 use isotrail_bundle::{Landcover, SceneBundle};
 use tracing::debug;
 
-use super::{TerrainMesh, hash, slab_position};
+use super::season::{FRESH, Leaves, SNOW, Seasonal};
+use super::{TerrainMesh, blend, hash, slab_position};
 
 /// Internal pixels between neighbouring spots where a prop may stand
 const SPACING_PX: f32 = 4.0;
@@ -23,6 +24,8 @@ const LEAVES: [u8; 4] = [84, 148, 62, 255];
 const BUSH: [u8; 4] = [108, 138, 58, 255];
 const TRUNK: [u8; 4] = [98, 68, 46, 255];
 const BOULDER: [u8; 4] = [152, 148, 140, 255];
+const TWIGS: [u8; 4] = [112, 96, 84, 255];
+const BARE_BUSH: [u8; 4] = [120, 104, 80, 255];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Prop {
@@ -34,6 +37,7 @@ enum Prop {
 
 /// A box of a prop in internal pixels: its half-width and its bottom and
 /// top above the ground
+#[derive(Clone, Copy)]
 struct Block(f32, f32, f32, [u8; 4]);
 
 impl Prop {
@@ -63,6 +67,34 @@ impl Prop {
             Prop::Bush => &[Block(1.0, 0.0, 1.5, BUSH)],
             Prop::Boulder => &[Block(0.75, 0.0, 1.0, BOULDER)],
         }
+    }
+
+    /// The blocks as the season has them: leaves in its colours or bare
+    /// twigs, fresh growth on conifers in spring, and snow on whatever
+    /// stands in it
+    fn dressed(self, leaves: Leaves, spring: f32, snowy: bool) -> impl Iterator<Item = Block> {
+        let frost = move |colour, share| {
+            if snowy {
+                blend(colour, SNOW, share)
+            } else {
+                colour
+            }
+        };
+        self.blocks()
+            .iter()
+            .map(move |&Block(half, bottom, top, colour)| {
+                let colour = match colour {
+                    LEAVES if leaves == Leaves::Bare => {
+                        return Block(half - 0.5, bottom, top - 0.5, TWIGS);
+                    }
+                    LEAVES => frost(leaves.on(LEAVES, TWIGS), 0.35),
+                    BUSH => frost(blend(BUSH, leaves.on(BUSH, BARE_BUSH), 0.8), 0.6),
+                    NEEDLES => frost(blend(NEEDLES, FRESH, 0.3 * spring), 0.5),
+                    BOULDER => frost(BOULDER, 0.5),
+                    other => other,
+                };
+                Block(half, bottom, top, colour)
+            })
     }
 
     fn half_width(self) -> f32 {
@@ -96,6 +128,7 @@ impl TerrainMesh {
         let widest = Prop::Conifer.half_width();
         let route = RouteClearance::new(bundle, (CLEARING_PX + widest) * px);
 
+        let seasonal = Seasonal::new(bundle);
         let seed = bundle.prop_seed;
         let unit = |i: usize, j: usize, k: u64| {
             (hash(seed, [PROP_KEY, i as u64, j as u64, k]) >> 40) as f32 / (1u64 << 24) as f32
@@ -147,7 +180,10 @@ impl TerrainMesh {
                     .fold(ground, f32::min);
                 let at = slab_position(grid, centre.x.into(), centre.y.into());
                 let height = metres_per_px * (1.0 + (unit(i, j, 4) * 2.0 - 1.0) * HEIGHT_JITTER);
-                for &Block(half, bottom, top, colour) in prop.blocks() {
+                let leaves = seasonal.leaves(cell, [5, 6, 7].map(|k| unit(i, j, k)));
+                for Block(half, bottom, top, colour) in
+                    prop.dressed(leaves, seasonal.spring(cell), seasonal.snowy(cell))
+                {
                     let half = Vec2::splat(half * metres_per_px);
                     let foot = if bottom == 0.0 {
                         lowest
@@ -248,7 +284,7 @@ impl RouteClearance {
 
 #[cfg(test)]
 mod tests {
-    use isotrail_bundle::{RoutePoint, line_mask};
+    use isotrail_bundle::{RoutePoint, Season, line_mask};
     use isotrail_testkit::{bundle, grid};
 
     use super::*;
@@ -332,6 +368,42 @@ mod tests {
         assert_eq!(colours(Landcover::Scrub), [BUSH]);
         assert_eq!(colours(Landcover::Scree), [BOULDER]);
         assert_eq!(colours(Landcover::MixedForest).len(), 3);
+    }
+
+    #[test]
+    fn winter_strips_broadleaves_and_snows_on_everything() {
+        let colours = |class, season: Season| {
+            let mut bundle = forest(40, 20, class);
+            bundle.season = season;
+            let mesh = props(&bundle, &VoxelMesher::default(), 5.0);
+            let mut colours: Vec<[u8; 4]> = mesh.vertices.iter().map(|v| v.colour).collect();
+            colours.sort_unstable();
+            colours.dedup();
+            colours
+        };
+        let bare = Season {
+            leaf_day: Some(20),
+            ..Season::default()
+        };
+        assert_eq!(colours(Landcover::Broadleaf, bare), [TRUNK, TWIGS]);
+        assert_eq!(colours(Landcover::Coniferous, bare), [NEEDLES, TRUNK]);
+        let snowy = Season {
+            snow_line_m: Some(-1000.0),
+            ..bare
+        };
+        assert_eq!(
+            colours(Landcover::Coniferous, snowy),
+            [TRUNK, blend(NEEDLES, SNOW, 0.5)]
+        );
+        assert_eq!(colours(Landcover::Broadleaf, snowy), [TRUNK, TWIGS]);
+        let autumn = colours(
+            Landcover::Broadleaf,
+            Season {
+                leaf_day: Some(290),
+                ..Season::default()
+            },
+        );
+        assert!(autumn.len() > 3 && autumn.contains(&TRUNK), "{autumn:?}");
     }
 
     #[test]

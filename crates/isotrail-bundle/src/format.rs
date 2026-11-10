@@ -5,7 +5,7 @@ use crate::{BundleError, Landcover, SceneBundle};
 
 pub const MAGIC: [u8; 4] = *b"ITB1";
 /// Bumped whenever the payload layout changes
-pub const FORMAT_VERSION: u16 = 4;
+pub const FORMAT_VERSION: u16 = 5;
 const HEADER_LEN: usize = MAGIC.len() + 2;
 const COMPRESSION_LEVEL: u8 = 9;
 const MAX_PAYLOAD_BYTES: usize = 256 << 20;
@@ -152,6 +152,15 @@ impl SceneBundle {
                 return corrupt("weather samples out of order".into());
             }
         }
+        let season = &self.season;
+        if season.leaf_day.is_some_and(|day| !(1..=366).contains(&day))
+            || [season.snow_line_m, season.ice_line_m]
+                .iter()
+                .flatten()
+                .any(|line| !line.is_finite())
+        {
+            return corrupt(format!("season {season:?}"));
+        }
         Ok(())
     }
 }
@@ -167,7 +176,7 @@ mod tests {
     use super::*;
     use crate::{
         Bounds, GridInfo, HikeStats, Metadata, MoonSample, ProfileSample, Provenance, Route,
-        RoutePoint, SunSample, Terrain, WaterBody, Weather, WeatherDataset, WeatherSample,
+        RoutePoint, Season, SunSample, Terrain, WaterBody, Weather, WeatherDataset, WeatherSample,
         line_mask,
     };
 
@@ -285,6 +294,11 @@ mod tests {
                     })
                     .collect(),
             }),
+            season: Season {
+                leaf_day: Some(166),
+                snow_line_m: Some(1450.5),
+                ice_line_m: None,
+            },
         }
     }
 
@@ -293,7 +307,7 @@ mod tests {
         let bundle = bundle();
         let bytes = bundle.to_bytes();
         assert!(is_bundle(&bytes));
-        assert_eq!(&bytes[..6], b"ITB1\x04\x00");
+        assert_eq!(&bytes[..6], b"ITB1\x05\x00");
         assert_eq!(SceneBundle::from_bytes(&bytes).unwrap(), bundle);
         assert_eq!(bundle.to_bytes(), bytes, "encoding is deterministic");
     }
@@ -336,12 +350,12 @@ mod tests {
 
     #[test]
     fn bundles_from_older_versions_ask_to_be_made_again() {
-        for old in [1u16, 2, 3] {
+        for old in [1u16, 2, 3, 4] {
             let mut bytes = bundle().to_bytes();
             bytes[4..6].copy_from_slice(&old.to_le_bytes());
             let message = SceneBundle::from_bytes(&bytes).unwrap_err().to_string();
             assert!(
-                message.contains(&format!("version {old}")) && message.contains("reads version 4"),
+                message.contains(&format!("version {old}")) && message.contains("reads version 5"),
                 "{message}"
             );
             assert!(message.contains("`isotrail bundle`"), "{message}");
@@ -414,6 +428,12 @@ mod tests {
         let mut b = bundle();
         b.weather.as_mut().unwrap().samples.clear();
         cases.push((b, "weather without samples"));
+        let mut b = bundle();
+        b.season.leaf_day = Some(0);
+        cases.push((b, "season"));
+        let mut b = bundle();
+        b.season.ice_line_m = Some(f32::INFINITY);
+        cases.push((b, "season"));
         for (bundle, expected) in cases {
             let message = SceneBundle::from_bytes(&bundle.to_bytes())
                 .unwrap_err()

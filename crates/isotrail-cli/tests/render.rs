@@ -545,6 +545,66 @@ fn no_weather_leaves_out_the_weather_a_bundle_holds() {
 }
 
 #[test]
+fn seasons_can_be_forced_and_snow_and_ice_go_with_the_weather() {
+    let temp = tempfile::tempdir().unwrap();
+    let cache = temp.path().join("cache");
+    let mut snowy = diorama_bundle();
+    snowy.season = isotrail_bundle::Season {
+        leaf_day: Some(15),
+        snow_line_m: Some(400.0),
+        ice_line_m: Some(0.0),
+    };
+    let mut bare = snowy.clone();
+    bare.season.snow_line_m = None;
+    bare.season.ice_line_m = None;
+    fs::write(temp.path().join("snowy.itb"), snowy.to_bytes()).unwrap();
+    fs::write(temp.path().join("bare.itb"), bare.to_bytes()).unwrap();
+    fs::write(
+        temp.path().join("winter.toml"),
+        "[render]
+season = \"winter\"
+",
+    )
+    .unwrap();
+    let render = |input: &str, image: &str, extra: &[&str]| {
+        let mut args = vec!["render", input, "-o", image];
+        args.extend_from_slice(extra);
+        let output = isotrail(&cache, temp.path(), &args);
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        fs::read(temp.path().join(image)).unwrap()
+    };
+    let bare_png = render("bare.itb", "bare.png", &[]);
+    assert_ne!(render("snowy.itb", "snowy.png", &[]), bare_png);
+    assert_eq!(
+        render("snowy.itb", "dry.png", &["--no-weather"]),
+        bare_png,
+        "snow and ice come from the weather"
+    );
+    let winter = render("bare.itb", "winter.png", &["--season", "winter"]);
+    assert_ne!(winter, bare_png);
+    assert_eq!(
+        render("bare.itb", "configured.png", &["--config", "winter.toml"]),
+        winter
+    );
+    assert_ne!(
+        render("bare.itb", "autumn.png", &["--season", "autumn"]),
+        bare_png
+    );
+
+    let output = isotrail(
+        &cache,
+        temp.path(),
+        &["render", "bare.itb", "--season", "monsoon"],
+    );
+    assert!(!output.status.success());
+    let stderr = text(&output.stderr);
+    assert!(
+        stderr.contains("spring, summer, autumn, winter"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn settings_come_from_flags_then_the_given_file_then_the_user_file() {
     let temp = with_hike();
     let cache = temp.path().join("cache");

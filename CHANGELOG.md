@@ -11,15 +11,19 @@ All notable changes to `isotrail` are documented here.
 - **Night sky:** after dusk, stars come out and the moon rises, in its real place and phase for the date. A bright moon lights the terrain with a cool light and casts shadows; on a moonless night the scene is lit by a dim blue glow.
 - **Weather during the hike:** `bundle`, `render` and `embed` look up the hour-by-hour weather on [Open-Meteo](https://open-meteo.com/) (temperature, conditions, cloud at three heights, rain, snow, snow depth and wind) and keep it in the scene bundle, ready to be drawn. If it can't be found, the bundle is made without it; `--no-weather` skips it.
 - **Weather on the diorama:** the weather during the hike is drawn in stills, animations and the web embed. Clouds drift across the sky, and on a partly cloudy day their shade passes over the ground. Overcast skies turn grey and dull the light, rain falls in streaks and snow in flakes, both slanted by the wind, and fog and heavy rain fade the far side of the slab into haze. In the web embed, rain and snow keep falling while the diorama is on screen, unless the visitor prefers reduced motion.
+- **Seasons:** the landscape matches the time of year. In spring, woods come into fresh leaf and blossom and meadows flower; in autumn, broadleaf woods turn yellow, orange and rust, grass turns golden and moorland tan; in winter, trees stand bare over brown grass. When there was snow on the ground, the slopes above the snowline are white, with patches of snow below it, and lakes that froze in a cold spell before the hike are drawn as ice. The seasons are turned round south of the equator.
+- **`--season spring|summer|autumn|winter`** on `render`, `embed` and `bundle` shows a hike in another season. A forced winter covers the whole slab in snow and freezes every lake.
+- `bundle` reports the season it found, such as `Season: autumn colours, snow above 1650 m`.
 - **`stats --weather`** prints the weather during the hike, as a summary and hour by hour in local time, and adds it to `--json`.
 - **The sun moves in animations:** GIFs, MP4s and the web embed light each frame by the time the route's head was walked, from the start to the finish, with either `--pace`. On multi-day treks, each night becomes a short pause in which the head waits while the sun sets, the night passes and the sun rises again. The elapsed time keeps counting through it.
 
 ### Changed
 
 - `--no-attribution` now prints Open-Meteo's credit along with the others when the bundle holds weather, and the credit drawn on the image ends in "Open-Meteo.com" when weather is drawn.
-- `--no-weather` on `render` and `embed` also leaves out the weather a scene bundle holds, for a clear-sky render of a rainy hike.
+- `--no-weather` on `render` and `embed` also leaves out the weather a scene bundle holds, for a clear-sky render of a rainy hike, along with its snow and ice.
+- Looking up the weather also fetches the daily temperatures and snowfall of the fortnight before the hike, to tell whether lakes had frozen.
 
-- Scene bundles now carry the sun's and the moon's paths across the sky and the weather during the hike. Bundles made by earlier versions can't be read any more; make them again with `isotrail bundle` (or `isotrail embed`).
+- Scene bundles now carry the sun's and the moon's paths across the sky, the weather during the hike and the season. Bundles made by earlier versions can't be read any more; make them again with `isotrail bundle` (or `isotrail embed`).
 - Animations end on the light at the finish of the hike, while the still image keeps the light at the start. The web embed opens under the start's light, like its poster, and follows the route's head once it is played or scrubbed.
 - `--pace time` no longer cuts the nights of a multi-day trek to a minute: they become the night pauses above. Other stops are still cut to a minute.
 

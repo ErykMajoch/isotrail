@@ -20,4 +20,7 @@ pub enum WeatherError {
     /// Some hours are missing or have gaps, as for hikes still in progress
     #[error("Open-Meteo has no weather for {missing} of the hike's {hours} hours")]
     Incomplete { missing: usize, hours: usize },
+
+    #[error("Open-Meteo has no weather for {missing} of the {days} days before the hike")]
+    IncompleteDays { missing: usize, days: usize },
 }

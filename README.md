@@ -131,10 +131,6 @@ units = "imperial"
 
 See [Configuration](docs/configuration.md) for file locations, precedence and environment variables.
 
-## Roadmap
-
-- A seasonal look: snow cover, autumn colours and frozen lakes
-
 ## Contributing
 
 Bug reports, ideas and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test and update the reference images.

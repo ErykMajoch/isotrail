@@ -1,6 +1,7 @@
 use isotrail_bundle::{Landcover, SceneBundle, line_mask};
 
-use super::{hash, landcover_rgba};
+use super::season::Seasonal;
+use super::{blend, hash, landcover_rgba};
 
 const GLINT_KEY: u64 = 1 << 32;
 const GLINT_PER_MILLE: u64 = 30;
@@ -12,10 +13,12 @@ const GLINT: [u8; 4] = [214, 236, 250, 255];
 const TRODDEN: [u8; 4] = [226, 204, 160, 255];
 const PAVED: [u8; 4] = [196, 194, 190, 255];
 
-/// Each cell's top colour: its landcover, with lighter lake shores, rare
-/// glints on open water, and the line mask's paths, roads and streams
-pub(super) fn top_colours(bundle: &SceneBundle) -> Vec<[u8; 4]> {
+/// Each cell's top colour: its ground in the season's colours, with lighter
+/// lake shores, rare glints on open water or cracks in ice, and the line
+/// mask's paths, roads and streams
+pub(super) fn top_colours(bundle: &SceneBundle, seasonal: &Seasonal) -> Vec<[u8; 4]> {
     let (grid, terrain) = (&bundle.grid, &bundle.terrain);
+    let ground = seasonal.ground(bundle);
     let (cols, rows) = (grid.cols as usize, grid.rows as usize);
     let water = u8::from(Landcover::Water);
     let mut lake = vec![false; grid.cells()];
@@ -44,7 +47,15 @@ pub(super) fn top_colours(bundle: &SceneBundle) -> Vec<[u8; 4]> {
                 let around = |offsets: [(isize, isize); 4]| {
                     offsets.iter().all(|&(dc, dr)| wet(col, row, dc, dr))
                 };
-                if !around([(1, 0), (-1, 0), (0, 1), (0, -1)]) {
+                let shore = !around([(1, 0), (-1, 0), (0, 1), (0, -1)]);
+                if seasonal.frozen(cell) {
+                    return if shore {
+                        ground[cell]
+                    } else {
+                        seasonal.ice(cell)
+                    };
+                }
+                if shore {
                     return SHORE;
                 }
                 let open = around([(1, 1), (1, -1), (-1, 1), (-1, -1)]);
@@ -54,7 +65,7 @@ pub(super) fn top_colours(bundle: &SceneBundle) -> Vec<[u8; 4]> {
                 }
                 return landcover_rgba(class);
             }
-            let ground = landcover_rgba(class);
+            let ground = ground[cell];
             let lines = terrain.lines.get(cell).copied().unwrap_or(0);
             if lines & line_mask::PATH != 0 {
                 blend(ground, TRODDEN, PATH_BLEND)
@@ -69,12 +80,6 @@ pub(super) fn top_colours(bundle: &SceneBundle) -> Vec<[u8; 4]> {
         .collect()
 }
 
-fn blend(from: [u8; 4], to: [u8; 4], share: f32) -> [u8; 4] {
-    std::array::from_fn(|i| {
-        (f32::from(from[i]) + (f32::from(to[i]) - f32::from(from[i])) * share).round() as u8
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use isotrail_bundle::WaterBody;
@@ -86,6 +91,10 @@ mod tests {
         landcover_rgba(u8::from(class))
     }
 
+    fn tops(bundle: &SceneBundle) -> Vec<[u8; 4]> {
+        top_colours(bundle, &Seasonal::new(bundle))
+    }
+
     /// A 12 × 12 lake with a 2-cell dry rim
     fn lake(seed: u64) -> (SceneBundle, Vec<[u8; 4]>) {
         let mut classes = vec![Landcover::Grassland; 16 * 16];
@@ -94,7 +103,7 @@ mod tests {
         }
         let mut bundle = bundle(grid(16, 16, 10.0), &[50.0; 256], &classes);
         bundle.prop_seed = seed;
-        let colours = top_colours(&bundle);
+        let colours = tops(&bundle);
         (bundle, colours)
     }
 
@@ -146,7 +155,7 @@ mod tests {
     fn rivers_keep_the_water_colour() {
         let (mut bundle, _) = lake(1);
         bundle.water.clear();
-        let colours = top_colours(&bundle);
+        let colours = tops(&bundle);
         assert_eq!(colours[2 * 16 + 2], rgba(Landcover::Water));
         assert_eq!(colours[7 * 16 + 7], rgba(Landcover::Water));
         assert!(!colours.contains(&SHORE) && !colours.contains(&GLINT));
@@ -158,7 +167,7 @@ mod tests {
         let classes = [Landcover::Heath; 6];
         let mut bundle = bundle(grid(6, 1, 10.0), &[0.0; 6], &classes);
         bundle.terrain.lines = vec![0, PATH, ROAD, STREAM, PATH | STREAM, ROAD | STREAM];
-        let colours = top_colours(&bundle);
+        let colours = tops(&bundle);
         let heath = rgba(Landcover::Heath);
         let trodden = blend(heath, TRODDEN, PATH_BLEND);
         let paved = blend(heath, PAVED, ROAD_BLEND);
@@ -185,6 +194,6 @@ mod tests {
             level_m: 0.0,
             cells: vec![7],
         });
-        assert_eq!(top_colours(&bundle), [rgba(Landcover::Rock); 2]);
+        assert_eq!(tops(&bundle), [rgba(Landcover::Rock); 2]);
     }
 }

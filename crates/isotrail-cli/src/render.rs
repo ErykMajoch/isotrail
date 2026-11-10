@@ -392,7 +392,9 @@ pub(crate) fn read_scene(path: &Path, data: &DataArgs) -> anyhow::Result<SceneBu
         if data.no_weather {
             bundle.weather = None;
             bundle.meta.provenance.weather = None;
+            crate::season::without_weather(&mut bundle.season);
         }
+        crate::season::apply(&mut bundle, data.season);
         return Ok(bundle);
     }
     Ok(crate::bundle::prepare(path, data)?.bundle)

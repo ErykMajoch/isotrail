@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::Weather;
+use crate::{Season, Weather};
 
 /// Everything a renderer needs, with no further downloads
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -19,6 +19,8 @@ pub struct SceneBundle {
     pub moon: Vec<MoonSample>,
     /// None when it wasn't looked up or couldn't be found
     pub weather: Option<Weather>,
+    /// Neutral when the date or the weather to judge it by is missing
+    pub season: Season,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

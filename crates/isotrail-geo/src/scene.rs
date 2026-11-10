@@ -1,10 +1,10 @@
 use isotrail_bundle::{
     Bounds, GridInfo, HikeStats, Metadata, MoonSample, ProfileSample, Provenance, Route,
-    RoutePoint, SceneBundle, SunSample, Terrain,
+    RoutePoint, SceneBundle, Season, SunSample, Terrain,
 };
 use isotrail_track::{Track, TrackPoint, TrackStats, haversine_m, moon_position, sun_position};
 
-use crate::{GeoError, Grid, Heightmap, LandcoverMap, vertical_exaggeration};
+use crate::{GeoError, Grid, Heightmap, LandcoverMap, leaf_day, vertical_exaggeration};
 
 /// Consecutive segments further apart than this are drawn with a gap
 pub const ROUTE_BREAK_M: f64 = 50.0;
@@ -69,6 +69,12 @@ pub fn scene_bundle(
         sun: Vec::new(),
         moon: Vec::new(),
         weather: None,
+        season: Season {
+            leaf_day: stats
+                .start_local()
+                .and_then(|t| leaf_day(t.date_naive(), origin_lat)),
+            ..Season::default()
+        },
     };
     (bundle.sun, bundle.moon) = sky_track(&stats, origin_lat, origin_lon);
     bundle.prop_seed = bundle.content_seed();

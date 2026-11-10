@@ -16,10 +16,7 @@ const HOUR_S: i64 = 3600;
 /// The weather during the hike and where it came from, or a warning and
 /// nothing when it can't be found
 pub fn look_up(track: &Track, fetcher: impl Fetcher) -> Option<(Weather, String)> {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64);
-    let Some(request) = WeatherRequest::from_track(track, now) else {
+    let Some(request) = WeatherRequest::from_track(track, now()) else {
         warn!("the track has no times, so the weather is left out");
         return None;
     };
@@ -41,6 +38,13 @@ pub fn look_up(track: &Track, fetcher: impl Fetcher) -> Option<(Weather, String)
             None
         }
     }
+}
+
+/// Unix seconds, for choosing between the archive and the forecast
+pub fn now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
 }
 
 pub fn dataset_name(dataset: WeatherDataset) -> &'static str {

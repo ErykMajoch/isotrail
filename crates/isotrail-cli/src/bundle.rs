@@ -15,6 +15,7 @@ use isotrail_geo::{
 use png::ColorType;
 use tracing::info;
 
+use crate::season::{self, SeasonArg};
 use crate::weather;
 
 const PREVIEW_SCALE: u32 = 4;
@@ -69,9 +70,15 @@ pub struct DataArgs {
     #[arg(long, value_name = "URL", env = "ISOTRAIL_OVERPASS_URL", default_value = OVERPASS_URL)]
     overpass_url: String,
 
-    /// Leave the weather out: don't look it up, or draw what a bundle holds
+    /// Leave the weather out: don't look it up, or draw what a bundle holds,
+    /// along with the snow and ice it brings
     #[arg(long)]
     pub no_weather: bool,
+
+    /// Season to show: the hike's own, from its date, place and weather, or
+    /// spring, summer, autumn or winter (snow everywhere and frozen lakes)
+    #[arg(long, value_enum, value_name = "SEASON", default_value_t = SeasonArg::Auto)]
+    pub season: SeasonArg,
 }
 
 /// A scene bundle and what went into it
@@ -139,6 +146,8 @@ pub fn prepare(file: &Path, data: &DataArgs) -> anyhow::Result<Prepared> {
         provenance,
     )?;
     bundle.weather = weather.map(|(weather, _)| weather);
+    season::estimate(&mut bundle, &track, &fetcher);
+    season::apply(&mut bundle, data.season);
     Ok(Prepared {
         bundle,
         grid,
@@ -207,6 +216,7 @@ pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
         Some(summary.line(weather.dataset))
     });
     println!("Weather: {}", weather.as_deref().unwrap_or("none"));
+    println!("Season: {}", season::describe(&bundle.season));
     let pieces = bundle.route.breaks.len() + 1;
     println!(
         "Route: {} points in {pieces} piece{}",

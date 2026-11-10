@@ -29,6 +29,7 @@ mod osm;
 mod projection;
 mod relief;
 mod scene;
+mod season;
 mod weather;
 
 pub use dem::{
@@ -57,8 +58,12 @@ pub use scene::{
     DEM_ATTRIBUTION, OSM_ATTRIBUTION, PROFILE_SAMPLES, ROUTE_BREAK_M, ROUTE_TOLERANCE_CELLS,
     scene_bundle,
 };
+pub use season::{
+    ICE_DEGREE_DAYS, LAPSE_C_PER_M, SNOWY_DEPTH_M, SeasonKind, SnowReading, TROPICS_DEG,
+    forced_season, ice_line, leaf_day, snow_line, snow_readings,
+};
 pub use weather::{
-    ARCHIVE_LAG_S, LOCATION_SPACING_M, MAX_LOCATIONS, OPEN_METEO_ARCHIVE_URL,
-    OPEN_METEO_FORECAST_URL, OpenMeteoSource, WeatherError, WeatherLocation, WeatherRequest,
-    WeatherSource,
+    ARCHIVE_LAG_S, DAYS_BEFORE, DaysBefore, LOCATION_SPACING_M, MAX_LOCATIONS,
+    OPEN_METEO_ARCHIVE_URL, OPEN_METEO_FORECAST_URL, OpenMeteoSource, WeatherError,
+    WeatherLocation, WeatherRequest, WeatherSource,
 };

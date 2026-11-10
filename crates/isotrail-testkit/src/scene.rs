@@ -1,6 +1,6 @@
 use isotrail_bundle::{
     Bounds, GridInfo, HikeStats, Landcover, Metadata, ProfileSample, Provenance, Route, RoutePoint,
-    SceneBundle, Terrain, WaterBody, Weather, WeatherDataset, WeatherSample, line_mask,
+    SceneBundle, Season, Terrain, WaterBody, Weather, WeatherDataset, WeatherSample, line_mask,
 };
 
 /// An unrotated grid centred on the origin
@@ -86,6 +86,7 @@ pub fn bundle(grid: GridInfo, heights_m: &[f32], landcover: &[Landcover]) -> Sce
         sun: Vec::new(),
         moon: Vec::new(),
         weather: None,
+        season: Season::default(),
     };
     bundle.prop_seed = bundle.content_seed();
     bundle

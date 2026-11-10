@@ -1,5 +1,5 @@
 use isotrail_bundle::{
-    MoonSample, SceneBundle, SunSample, Units, Weather, WeatherDataset, WeatherSample,
+    MoonSample, SceneBundle, Season, SunSample, Units, Weather, WeatherDataset, WeatherSample,
 };
 use isotrail_export::{ExportError, GifWriter, render_clip, render_still, upscale};
 use isotrail_render::{
@@ -191,6 +191,57 @@ fn weather_matches_goldens() {
         "{means:?}"
     );
     assert!(rain != overcast && snow > rain, "{means:?}");
+}
+
+#[test]
+fn seasons_match_goldens() {
+    let gpu = isotrail_testkit::gpu();
+    let framing = Aspect::Story.framing(6).unwrap();
+    let summer = diorama_bundle();
+    let terrain = &summer.terrain;
+    let low = (0..terrain.heights.len())
+        .map(|cell| terrain.height_m(cell))
+        .fold(f32::MAX, f32::min);
+    let day = |leaf_day| Season {
+        leaf_day: Some(leaf_day),
+        ..Season::default()
+    };
+    let winter = Season {
+        snow_line_m: Some(low - 1.0),
+        ice_line_m: Some(low - 1.0),
+        ..day(15)
+    };
+    let mut means = Vec::new();
+    for (name, season) in [
+        ("season-summer", Season::default()),
+        ("season-spring", day(125)),
+        ("season-autumn", day(290)),
+        ("season-winter", winter),
+    ] {
+        let bundle = SceneBundle {
+            season,
+            ..summer.clone()
+        };
+        let frame = render_still(
+            &gpu,
+            &bundle,
+            &VoxelMesher::default(),
+            &framing,
+            DEFAULT_YAW_OFFSET_DEG,
+            &SunState::for_hike(&bundle),
+            &Look::default(),
+        )
+        .unwrap();
+        means.push(mean(&frame));
+        if name != "season-summer" {
+            assert_golden(name, frame.width(), frame.height(), frame.rgba());
+        }
+    }
+    let [summer, spring, autumn, winter] = means[..] else {
+        unreachable!()
+    };
+    assert!(spring != summer && autumn != summer, "{means:?}");
+    assert!(winter > summer, "{means:?}");
 }
 
 /// Rain falls on as the clock runs, the same way every time

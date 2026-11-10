@@ -7,6 +7,7 @@ mod error;
 mod format;
 mod landcover;
 mod scene;
+mod season;
 mod units;
 mod weather;
 
@@ -17,6 +18,7 @@ pub use scene::{
     Bounds, GridInfo, HikeStats, Metadata, MoonSample, ProfileSample, Provenance, Route,
     RoutePoint, SceneBundle, SunSample, Terrain, WaterBody,
 };
+pub use season::Season;
 pub use units::Units;
 pub use weather::{
     Precipitation, WEATHER_ATTRIBUTION, Weather, WeatherDataset, WeatherSample, WeatherState,

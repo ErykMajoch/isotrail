@@ -1,6 +1,6 @@
 use isotrail_bundle::SceneBundle;
 
-use super::{Columns, Mesher, Side, Surface, TerrainMesh, cover, side_rgba, strata};
+use super::{Columns, Mesher, Seasonal, Side, Surface, TerrainMesh, cover, strata};
 
 /// One column per cell, its height rounded to whole blocks, with a top in the
 /// cell's landcover colour and darker sides
@@ -20,11 +20,12 @@ impl Mesher for VoxelMesher {
     fn mesh(&self, bundle: &SceneBundle) -> TerrainMesh {
         let step = bundle.grid.cell_size_m as f32 * self.block_height;
         let tops = column_tops(bundle, step);
-        let colours = cover::top_colours(bundle);
-        let columns = Columns::new(&bundle.grid, bundle.terrain.landcover.clone());
+        let seasonal = Seasonal::new(bundle);
+        let colours = cover::top_colours(bundle, &seasonal);
+        let columns = Columns::new(&bundle.grid, bundle.terrain.landcover.clone())
+            .in_season(bundle, &seasonal);
         let lowest = tops.iter().copied().fold(f32::INFINITY, f32::min);
         let (cols, rows) = (columns.cols, columns.rows);
-        let landcover = &columns.landcover;
 
         let mut mesh = TerrainMesh::default();
         for row in 0..rows {
@@ -48,7 +49,7 @@ impl Mesher for VoxelMesher {
                     let below = tops[r * cols + c];
                     if below < top {
                         let wall = side.wall(col, row).map(|corner| columns.corner(corner));
-                        mesh.push_wall(wall, below, top, side_rgba(landcover[cell]));
+                        mesh.push_wall(wall, below, top, columns.side(cell));
                     }
                 }
             }
@@ -85,8 +86,8 @@ mod tests {
     use isotrail_testkit::{bundle, grid};
 
     use super::*;
-    use crate::mesh::landcover_rgba;
     use crate::mesh::strata::base;
+    use crate::mesh::{landcover_rgba, shade};
 
     fn mesh(grid: GridInfo, heights: &[f32], classes: &[Landcover]) -> TerrainMesh {
         VoxelMesher::default().mesh(&bundle(grid, heights, classes))
@@ -154,7 +155,7 @@ mod tests {
             assert_eq!(triangle[0].normal, [-1.0, 0.0, 0.0]);
             assert_eq!(
                 triangle[0].colour,
-                side_rgba(u8::from(Landcover::Coniferous))
+                shade(landcover_rgba(u8::from(Landcover::Coniferous)))
             );
             for vertex in triangle {
                 let z = vertex.position[2];
@@ -183,7 +184,7 @@ mod tests {
         classes[6] = Landcover::Water;
         let bundle = bundle(grid(4, 3, 10.0), &heights, &classes);
         let mesh = VoxelMesher::default().mesh(&bundle);
-        let water = cover::top_colours(&bundle)[5];
+        let water = cover::top_colours(&bundle, &Seasonal::new(&bundle))[5];
         let lake: Vec<_> = mesh.triangles().filter(|t| t[0].colour == water).collect();
         assert_eq!(lake.len(), 4);
         for vertex in lake.into_iter().flatten() {

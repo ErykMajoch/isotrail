@@ -8,6 +8,7 @@ mod config;
 mod embed;
 mod overlay;
 mod render;
+mod season;
 mod stats;
 mod style_lab;
 mod sun;

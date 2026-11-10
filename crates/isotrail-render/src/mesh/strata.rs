@@ -1,7 +1,8 @@
 use glam::Vec2;
 use isotrail_bundle::Landcover;
 
-use super::{BASE_BLOCKS, Columns, Side, TerrainMesh, hash, side_rgba};
+use super::season::ICE;
+use super::{BASE_BLOCKS, Columns, Side, TerrainMesh, hash};
 
 /// Block rows above the base that are deep stone
 const DEEP_BLOCKS: u32 = 2;
@@ -61,7 +62,8 @@ pub(super) fn cut_faces(
                     2 + (hash(seed, [key[0], key[1], u64::MAX]) % 2) as u32
                 },
                 water,
-                topsoil: side_rgba(landcover[cell]),
+                frozen: columns.frozen[cell],
+                topsoil: columns.side(cell),
             };
             let corners = side.wall(col, row);
             let heights = corners.map(|corner| surface(cell, corner));
@@ -73,7 +75,7 @@ pub(super) fn cut_faces(
                 let depth = (depth - EPSILON).ceil().max(0.0) as u32;
                 let stratum = column.stratum(depth, block_row);
                 let noise = hash(seed, [key[0], key[1], u64::from(block_row)]);
-                let colour = column.colour(stratum, noise);
+                let colour = column.colour(stratum, depth, noise);
                 let point = |p: Vec2| wall[0].lerp(wall[1], p.x).extend(p.y);
                 for k in 1..polygon.len() - 1 {
                     let triangle = [polygon[0], polygon[k], polygon[k + 1]].map(point);
@@ -98,6 +100,7 @@ pub(super) fn base(block: f32) -> f32 {
 struct Column {
     dirt: u32,
     water: u32,
+    frozen: bool,
     topsoil: [u8; 4],
 }
 
@@ -124,8 +127,9 @@ impl Column {
         }
     }
 
-    fn colour(&self, stratum: Stratum, noise: u64) -> [u8; 4] {
+    fn colour(&self, stratum: Stratum, depth: u32, noise: u64) -> [u8; 4] {
         match stratum {
+            Stratum::Water if self.frozen && depth == 0 => ICE,
             Stratum::Water => WATER,
             Stratum::Topsoil => self.topsoil,
             Stratum::Dirt => speckle(noise, 60, DIRT, &[PEBBLE]),
@@ -216,6 +220,7 @@ mod tests {
         Column {
             dirt,
             water,
+            frozen: false,
             topsoil: [0; 4],
         }
     }
@@ -325,19 +330,30 @@ mod tests {
     }
 
     #[test]
+    fn frozen_lakes_show_ice_over_their_water() {
+        let frozen = Column {
+            frozen: true,
+            ..column(2, 3)
+        };
+        let colours = (0..3).map(|depth| frozen.colour(frozen.stratum(depth, 5), depth, 0));
+        assert_eq!(colours.collect::<Vec<_>>(), [ICE, WATER, WATER]);
+        assert_eq!(column(2, 3).colour(Stratum::Water, 0, 0), WATER);
+    }
+
+    #[test]
     fn rare_specks_are_seeded() {
         let stone: Vec<_> = (0..20_000)
-            .map(|i| column(2, 0).colour(Stratum::Stone, hash(7, [0, i, 3])))
+            .map(|i| column(2, 0).colour(Stratum::Stone, 3, hash(7, [0, i, 3])))
             .collect();
         let specks = stone.iter().filter(|&&c| c != STONE).count() as f32 / 20_000.0;
         assert!((0.04..0.06).contains(&specks), "{specks}");
         assert!(stone.contains(&COPPER) && stone.contains(&GOLD));
 
         let again: Vec<_> = (0..20_000)
-            .map(|i| column(2, 0).colour(Stratum::Stone, hash(7, [0, i, 3])))
+            .map(|i| column(2, 0).colour(Stratum::Stone, 3, hash(7, [0, i, 3])))
             .collect();
         let other: Vec<_> = (0..20_000)
-            .map(|i| column(2, 0).colour(Stratum::Stone, hash(8, [0, i, 3])))
+            .map(|i| column(2, 0).colour(Stratum::Stone, 3, hash(8, [0, i, 3])))
             .collect();
         assert_eq!(stone, again);
         assert_ne!(stone, other);

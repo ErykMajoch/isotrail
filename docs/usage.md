@@ -90,6 +90,21 @@ When the weather is drawn, the credit on the image ends in "Open-Meteo.com", and
 
 When the bundle holds the weather during the hike, the render shows it as it was at the start (or at `--time`): clouds in the sky and, on a partly cloudy day, their shade drifting over the ground; a grey sky and duller light when it is overcast; rain or snow slanted by the wind; and haze in fog and heavy rain. Thin high cloud shows in the sky but doesn't dim the light. Animations follow the weather hour by hour as the route draws, with the rain, snow and clouds moving from frame to frame. `--no-weather` draws a clear sky instead.
 
+### Season
+
+The landscape matches the time of year, across the whole slab:
+
+- **Spring:** broadleaf woods and bushes come into pale fresh leaf, some of them in white or pink blossom first, conifers show light new growth, meadows are dotted with wildflowers and fields are green with young crops.
+- **Summer:** the colours of the map.
+- **Autumn:** broadleaf woods and bushes turn yellow, orange and rust, tree by tree, before they drop their leaves; grass turns golden, moorland turns tan with dying bracken, and fields are ploughed brown.
+- **Winter:** broadleaf trees stand bare over fallen leaves, grass and fields are a dull winter brown and moorland darkens.
+
+Each cell takes a little more or less of its season's colour than the next, so the ground looks mottled rather than painted. Higher ground runs a little behind in spring and ahead in autumn. South of the equator the seasons are turned round, and in the tropics the trees keep their summer look.
+
+When there was snow on the ground, the slopes above the snowline are white, with snow lying in patches that thin out for 150 m below it, and lakes that froze over in a cold spell are drawn as ice (see [How it works](how-it-works.md#preparing-the-scene)). Snow and ice come with the weather, so `--no-weather` leaves them out too.
+
+`--season spring`, `summer`, `autumn` or `winter` shows the hike in another season. A forced winter covers the whole slab in snow, except for cliffs, and freezes every lake. Animations and the web embed keep one season throughout.
+
 ### Animation
 
 A `.gif` or `.mp4` output renders an animation in three parts. It opens on the scene with only the start flag (the first 5%). Then the route draws itself with a marker at its head, while the elevation profile fills in and the stats count up (80%). It ends on the finished hike (15%). The camera starts turned away by `--orbit` and eases round to the same view as the PNG by the time the route reaches the finish.
@@ -117,13 +132,14 @@ The animation options only apply to `.gif` and `.mp4` output. PNG renders ignore
 | `--detail N` | `256` | Grid cells along the slab's long side, from `8` to `1024` |
 | `--offline` | off | Only use data that is already in the cache |
 | `--overpass-url URL` | public Overpass API | Another [Overpass](https://overpass-api.de/) endpoint for map data (also `ISOTRAIL_OVERPASS_URL`) |
-| `--no-weather` | off | Leave the weather out: don't look it up, or draw the weather a bundle holds |
+| `--no-weather` | off | Leave the weather out: don't look it up, or draw the weather a bundle holds, along with its snow and ice |
+| `--season SEASON` | `auto` | The [season](#season) to show: the hike's own, or `spring`, `summer`, `autumn` or `winter` |
 | `--config FILE` | none | Read settings from a TOML file (see [Configuration](configuration.md)) |
 
 ## bundle
 
 ```text
-isotrail bundle <hike.gpx> -o <hike.itb> [--debug-dir DIR] [--exaggeration X] [--detail N] [--offline] [--overpass-url URL] [--no-weather]
+isotrail bundle <hike.gpx> -o <hike.itb> [--debug-dir DIR] [--exaggeration X] [--detail N] [--offline] [--overpass-url URL] [--no-weather] [--season SEASON]
 ```
 
 Downloads the elevation and OpenStreetMap data around the route and works out what covers every grid cell: from the map data where there is some, and from the slope and height of the ground elsewhere. Lakes and reservoirs get a level surface. The result is saved with the route, its elevation profile, the hike's statistics, the sun's and moon's paths across the sky and the hour-by-hour weather during the hike as a **scene bundle**: one compact file (usually under 100 KB) that holds everything a render needs, with no further downloads.
@@ -139,6 +155,7 @@ Map data: 1840 areas and 2210 lines from OpenStreetMap
 Landcover: heath and moorland 52%, grassland 18%, broadleaf forest 11%, water 7%, ...
 Water: 3 lakes levelled
 Weather: partly cloudy, 11 – 16 °C, 0.4 mm rain (Open-Meteo archive)
+Season: spring leaves
 Route: 1650 points in 1 piece
 Wrote hike.itb (92 KB)
 ```
@@ -148,6 +165,8 @@ Wrote hike.itb (92 KB)
 On long routes, where a grid cell is wider than 100 m, footpaths, streams and minor roads are left out, because they would be too small to show and would make the download much larger.
 
 The weather comes from [Open-Meteo](https://open-meteo.com/) (see [How it works](how-it-works.md#preparing-the-scene)). It needs the track's times, so tracks without them are bundled without weather. If it can't be fetched, for example offline with nothing in the cache, isotrail says why and makes the bundle without it; `--no-weather` skips it on purpose. `isotrail stats --weather` shows what a bundle holds.
+
+The season line names how the trees look, and where there is snow or ice, the heights above which the ground is white (`snow above 650 m`) and the lakes frozen (`lakes frozen above 400 m`). `--season` saves another season in the bundle instead.
 
 ### Debug images
 

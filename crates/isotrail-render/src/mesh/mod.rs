@@ -1,5 +1,6 @@
 mod cover;
 mod props;
+mod season;
 mod smooth;
 mod strata;
 mod surface;
@@ -7,7 +8,9 @@ mod voxel;
 
 use glam::{Vec2, Vec3};
 use isotrail_bundle::{GridInfo, Landcover, SceneBundle};
+use season::Seasonal;
 
+pub use season::foliage;
 pub use smooth::SmoothMesher;
 pub use surface::Surface;
 pub use voxel::VoxelMesher;
@@ -143,6 +146,9 @@ struct Columns {
     /// Slab-frame y of the row boundaries, from +y to -y
     ys: Vec<f32>,
     landcover: Vec<u8>,
+    /// Each cell's ground colour, which tops its cut-face column
+    ground: Vec<[u8; 4]>,
+    frozen: Vec<bool>,
 }
 
 impl Columns {
@@ -156,8 +162,26 @@ impl Columns {
             ys: (0..=grid.rows)
                 .map(|row| slab_position(grid, 0.0, row.into()).y)
                 .collect(),
+            ground: landcover
+                .iter()
+                .map(|&class| landcover_rgba(class))
+                .collect(),
+            frozen: vec![false; landcover.len()],
             landcover,
         }
+    }
+
+    /// The ground and lakes as the season has them
+    fn in_season(mut self, bundle: &SceneBundle, seasonal: &Seasonal) -> Columns {
+        self.ground = seasonal.ground(bundle);
+        self.frozen = (0..self.landcover.len())
+            .map(|cell| seasonal.frozen(cell))
+            .collect();
+        self
+    }
+
+    fn side(&self, cell: usize) -> [u8; 4] {
+        shade(self.ground[cell])
     }
 
     fn corner(&self, (col, row): (usize, usize)) -> Vec2 {
@@ -170,10 +194,15 @@ fn landcover_rgba(value: u8) -> [u8; 4] {
     [r, g, b, 255]
 }
 
-fn side_rgba(value: u8) -> [u8; 4] {
-    let [r, g, b, a] = landcover_rgba(value);
+fn shade([r, g, b, a]: [u8; 4]) -> [u8; 4] {
     let shade = |c: u8| (f32::from(c) * SIDE_SHADE).round() as u8;
     [shade(r), shade(g), shade(b), a]
+}
+
+fn blend(from: [u8; 4], to: [u8; 4], share: f32) -> [u8; 4] {
+    std::array::from_fn(|i| {
+        (f32::from(from[i]) + (f32::from(to[i]) - f32::from(from[i])) * share).round() as u8
+    })
 }
 
 fn hash<const N: usize>(seed: u64, keys: [u64; N]) -> u64 {
