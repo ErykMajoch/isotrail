@@ -11,6 +11,20 @@ isotrail has six commands. Each one prints its options with `--help`, for exampl
 
 The rest of this page also covers [how outputs are written](#writing-files) and [exit codes](#exit-codes).
 
+The commands that draw or prepare a hike share their options. They are described under `render`, and this table shows which command takes which:
+
+| Options | `render` | `embed` | `bundle` | `style-lab` |
+| --- | --- | --- | --- | --- |
+| `--aspect` ([image](#image)) | several | one | – | one |
+| `--scale` ([image](#image)) | yes | for the poster | – | several |
+| `--palette` ([look](#terrain-and-look)) | yes | yes | – | several |
+| `--mesher`, `--block-height`, `--background`, `--time`, `--occlusion`, `--soft-shadows`, `--god-rays` ([look](#terrain-and-look)) | yes | yes | – | – |
+| `--exaggeration` ([look](#terrain-and-look)) | yes | yes | yes | yes |
+| [Text and overlays](#text-and-overlays) | yes | for the poster | `--title` only | – |
+| [Animation](#animation) | yes | – | – | – |
+| [Data](#data) | yes | yes | yes | yes |
+| `--config FILE` ([configuration](configuration.md)) | yes | yes | yes | yes |
+
 isotrail reads GPX 1.0 and 1.1 files, with tracks (`<trk>`) or routes (`<rte>`), saved as UTF-8 or as UTF-16 with a byte-order mark. Every pause in a recording starts a new track segment. Where two segments are more than 50 m apart, the route is drawn with a gap instead of a straight jump. Several tracks in one file are joined into one hike, with a note. Files without timestamps still render, but without time-based stats. Files without elevations take their heights from the terrain.
 
 A recording with a few bad points still renders, and each kind of repair is reported once as a warning:
@@ -151,7 +165,8 @@ The animation options only apply to `.gif` and `.mp4` output. PNG renders ignore
 | `--no-map-data` | off | Build the diorama from the elevation alone, without OpenStreetMap's lakes, woods and paths |
 | `--no-weather` | off | Leave the weather out: don't look it up, or draw the weather a bundle holds, along with its snow and ice |
 | `--season SEASON` | `auto` | The [season](#season) to show: the hike's own, or `spring`, `summer`, `autumn` or `winter` |
-| `--config FILE` | none | Read settings from a TOML file (see [Configuration](configuration.md)) |
+
+`--config FILE` reads settings from a TOML file; see [Configuration](configuration.md).
 
 A scene bundle already holds its terrain and map data, so `--detail`, `--offline`, `--overpass-url` and `--no-map-data` do nothing with one; isotrail warns when you type them for a bundle.
 
@@ -160,7 +175,7 @@ The public Overpass server is sometimes busy. isotrail then tries again six time
 ## bundle
 
 ```text
-isotrail bundle <hike.gpx> -o <hike.itb> [--debug-dir DIR] [--exaggeration X] [--detail N] [--offline] [--overpass-url URL] [--no-map-data] [--no-weather] [--season SEASON]
+isotrail bundle <hike.gpx> -o <hike.itb> [--debug-dir DIR] [--title TEXT] [--exaggeration X] [--config FILE] [--detail N] [--offline] [--overpass-url URL] [--no-map-data] [--no-weather] [--season SEASON]
 ```
 
 Downloads the elevation and OpenStreetMap data around the route and works out what covers every grid cell: from the map data where there is some, and from the slope and height of the ground elsewhere. Lakes and reservoirs get a level surface. The result is saved with the route, its elevation profile, the hike's statistics, the sun's and moon's paths across the sky and the hour-by-hour weather during the hike as a **scene bundle**: one compact file (usually under 100 KB) that holds everything a render needs, with no further downloads.
@@ -181,7 +196,7 @@ Route: 1650 points in 1 piece
 Wrote hike.itb (92 KB)
 ```
 
-`-v` also lists the map features by type.
+`-v` also lists the map features by type. `--title TEXT` saves another title in the bundle instead of the GPX file's name; renders and the web embed then show it.
 
 On long routes, where a grid cell is wider than 100 m, footpaths, streams and minor roads are left out, because they would be too small to show and would make the download much larger.
 
@@ -218,8 +233,9 @@ Writes everything a web page needs to show the hike as an interactive diorama wi
 | File | What it is |
 | --- | --- |
 | `DIR/<name>.itb` | The scene bundle the element draws |
-| `DIR/<name>.png` | The poster, shown until the diorama is ready and kept in browsers that can't draw it. It is the same image as `isotrail render --aspect <aspect>`, overlays included |
+| `DIR/<name>.png` | The poster, shown until the diorama is ready and kept in browsers that can't draw it. It is the same image as `isotrail render --aspect <aspect>` with the same options, overlays included |
 | `DIR/snippet.html` | The two lines to paste into a page, also printed when the command finishes |
+| `DIR/<palette>.hex` | A copy of the palette file, with `--palette FILE` only |
 | `DIR/isotrail-embed.js`, `DIR/pkg/` | The web runtime, with `--with-runtime` only |
 
 `<name>` is the input's file name without its extension. A GPX file is first prepared in the same way as [`bundle`](#bundle), with the same data options.
@@ -235,15 +251,22 @@ The image inside the element shows the poster, at the element's size, on pages w
 | --- | --- | --- |
 | `-o`, `--output DIR` | required | The directory to write to, created if needed |
 | `--aspect SHAPE` | `wide` | `story` (9:16), `feed` (4:5), `square` or `wide` (16:9), for the element and its poster |
+| `--scale N` | `3` | The poster's pixel scale, as for [`render`](#image). The live diorama picks its own to suit the page |
 | `--with-runtime` | off | Also copy the web runtime into `DIR` |
 | `--runtime-dir DIR` | the `web` folder next to `isotrail` | Where to copy the runtime from: a folder with `isotrail-embed.js` and `pkg/` |
 | `--base-url URL` | none | The address `DIR` will be served at, such as `/hikes/derwent/`. Without it, the snippet uses bare file names, relative to the page |
 | `--runtime-url URL` | `isotrail-embed.js` in `DIR` | The address of `isotrail-embed.js`, when one copy serves every hike on the site |
 | `--exaggeration X` | automatic | As for [`render`](#terrain-and-look) |
 
-When the input is a bundle that already sits in `DIR` under the name `embed` would give it, as in `isotrail embed site/hike.itb -o site`, it is left as it is and only the poster and snippet are written. If `--season`, `--no-weather` or `--exaggeration` would change it, the command stops instead, so the bundle you started from is never replaced; write to another folder.
+`embed` also takes `render`'s [terrain and look options](#terrain-and-look), [text and overlay options](#text-and-overlays) and [data options](#data), and reads [config files](configuration.md). The poster is drawn with all of them. The look options reach the live diorama too: each one that isn't the default becomes an attribute of the element in the snippet, as in `--palette resurrect-64 --mesher smooth`:
 
-The poster also takes the [text and overlay options](#text-and-overlays) of `render`, such as `--title` or `--overlay none`, and the [data options](#data). Settings from config files apply to `render` only.
+```html
+<isotrail-hike src="derwent-edge.itb" poster="derwent-edge.png" aspect="wide" palette="resurrect-64" mesher="smooth" …>
+```
+
+A palette file is copied into `DIR` and the `palette` attribute points at the copy. With `--time`, the diorama keeps that light while the route plays, as an animation does. `--title` is saved in the bundle, so the live diorama is labelled with it as well as the poster.
+
+When the input is a bundle that already sits in `DIR` under the name `embed` would give it, as in `isotrail embed site/hike.itb -o site`, it is left as it is and only the poster and snippet are written. If `--title`, `--season`, `--no-weather` or `--exaggeration` would change it, the command stops instead, so the bundle you started from is never replaced; write to another folder.
 
 In Git Bash on Windows, an argument starting with `/` is turned into a Windows path before isotrail sees it, so `--base-url /hikes/derwent/` becomes `C:/Program Files/Git/hikes/derwent/`. isotrail warns when an address looks like that. Run the command as `MSYS_NO_PATHCONV=1 isotrail embed …`, or from PowerShell or Command Prompt.
 
@@ -294,10 +317,20 @@ With `--json`, the bundle's hourly samples are under `weather.samples`, with key
 ## style-lab
 
 ```text
-isotrail style-lab <hike.gpx | hike.itb> -o DIR [--detail N] [--offline] [--overpass-url URL] [--no-map-data]
+isotrail style-lab <hike.gpx | hike.itb> -o DIR [--aspect SHAPE] [--scale LIST] [--palette LIST] [--exaggeration X] [--config FILE] [data options]
 ```
 
-Renders the hike once for every combination of mesher (`voxel`, `smooth`), pixel scale (3, 5, 6) and built-in palette, as `DIR/<mesher>-<scale>-<palette>.png`. It also writes `DIR/contact-sheet.png`, which lays them all out side by side with a label above each, so you can compare looks before choosing your `render` options.
+Renders the hike once for every combination of mesher (`voxel`, `smooth`), pixel scale and palette, as `DIR/<mesher>-<scale>-<palette>.png`. It also writes `DIR/contact-sheet.png`, which lays them all out side by side with a label above each, so you can compare looks before choosing your `render` options.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `-o`, `--output DIR` | required | The directory to write to, created if needed |
+| `--aspect SHAPE` | `story` | `story`, `feed`, `square` or `wide`, for every image |
+| `--scale LIST` | `3,5,6` | The pixel scales to compare, from `2`, `3`, `5`, `6` and `10` |
+| `--palette LIST` | every built-in palette | The palettes to compare: built-in names, `.hex` files or `none`. A file is labelled with its name without `.hex` |
+| `--exaggeration X` | automatic | As for [`render`](#terrain-and-look) |
+
+It also takes the [data options](#data). From config files it takes its own `[style-lab]` table, but only the data settings and `exaggeration` from `[render]`, so a palette or scale you render with doesn't narrow the comparison.
 
 ## cache
 

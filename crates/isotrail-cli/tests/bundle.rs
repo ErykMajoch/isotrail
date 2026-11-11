@@ -27,6 +27,7 @@ fn isotrail_with(cache_dir: &Path, args: &[&str], overpass_env: Option<&str>) ->
     command
         .args(args)
         .env("ISOTRAIL_CACHE_DIR", cache_dir)
+        .env("ISOTRAIL_CONFIG", "")
         .env_remove(OVERPASS_ENV)
         .stdin(Stdio::null());
     if let Some(url) = overpass_env {
@@ -273,6 +274,53 @@ fn no_map_data_builds_from_the_elevation_alone() {
     assert_eq!(bundle.meta.attribution, ["Terrain Tiles (AWS)"]);
     assert!(bundle.water.is_empty());
     assert!(bundle.terrain.lines.iter().all(|&mask| mask == 0));
+}
+
+#[test]
+fn the_title_comes_from_the_flag_or_a_config_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let cache_dir = temp.path().join("cache");
+    warm(&cache_dir, false);
+    let config = temp.path().join("hike.toml");
+    std::fs::write(
+        &config,
+        "[render]
+palette = \"aap-64\"
+title = \"Shared\"
+
+[bundle]
+title = \"Summit day\"
+no-map-data = true
+",
+    )
+    .unwrap();
+    let itb = temp.path().join("hike.itb");
+    let bundle = |extra: &[&str]| {
+        let mut args = vec![
+            "bundle",
+            &gpx(),
+            "-o",
+            itb.to_str().unwrap(),
+            "--detail",
+            "32",
+            "--offline",
+            "--no-weather",
+            "--config",
+            config.to_str().unwrap(),
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+        args.extend(extra.iter().map(|arg| (*arg).to_owned()));
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let output = isotrail(&cache_dir, &args);
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        SceneBundle::from_bytes(&std::fs::read(&itb).unwrap()).unwrap()
+    };
+    let saved = bundle(&[]);
+    assert_eq!(saved.meta.title, "Summit day");
+    assert_eq!(saved.meta.provenance.map_data, "none");
+    assert_eq!(bundle(&["--title", "Łańcuch"]).meta.title, "Łańcuch");
 }
 
 #[test]

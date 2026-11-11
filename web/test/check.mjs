@@ -50,6 +50,7 @@ await writeFile(join(data, 'older.itb'), withVersion(1));
 await writeFile(join(data, 'newer.itb'), withVersion(999));
 await writeFile(join(data, 'damaged.itb'), hike.subarray(0, 40));
 await writeFile(join(data, 'poster.png'), png(160, 90, [58, 122, 90]));
+await writeFile(join(data, 'warm.hex'), '1a1c2c\n5d275d\nb13e53\nef7d57\nffcd75\na7f070\n');
 
 // Pages, the web folder under /web/ and the bundles under /data/
 const requests = [];
@@ -60,6 +61,7 @@ const TYPES = {
   '.wasm': 'application/wasm',
   '.png': 'image/png',
   '.itb': 'application/octet-stream',
+  '.hex': 'text/plain',
 };
 const STRICT_CSP =
   "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self'; connect-src 'self'";
@@ -149,6 +151,18 @@ Object.assign(pages, {
   }),
   '/csp.html': page(embed('id="a" src="/data/hike.itb" aspect="wide"'), { style: false }),
   '/touch.html': page(embed('id="a" src="/data/hike.itb" aspect="wide"')),
+  '/look.html': page(
+    grid([
+      embed('id="d" src="/data/hike.itb" aspect="wide"'),
+      embed('id="p" src="/data/hike.itb" aspect="wide" palette="aap-64"'),
+      embed('id="u" src="/data/hike.itb" aspect="wide" palette="nope" god-rays="sometimes"'),
+      embed('id="h" src="/data/hike.itb" aspect="wide" palette="/data/warm.hex"'),
+      embed('id="t" src="/data/timed.itb" aspect="wide"'),
+      embed('id="tn" src="/data/timed.itb" aspect="wide" time="22:30"'),
+    ]),
+    // Whole-pixel places, so equal frames give equal screenshots
+    { head: '<style>.grid{grid-template-columns:repeat(3,288px)}</style>' },
+  ),
   '/many.html': page(
     Array.from({ length: 20 }, (_, i) =>
       `<isotrail-hike id="m${i}" src="/data/hike.itb" aspect="wide" backend="webgl"></isotrail-hike><p>gap</p>`,
@@ -160,6 +174,9 @@ Object.assign(pages, {
 // WebGPU lets the check lose a device on purpose
 const INSTRUMENT = `
   window.__events = [];
+  window.__warnings = [];
+  const warn = console.warn;
+  console.warn = function (...a) { __warnings.push(a.map(String).join(' ')); return warn.apply(this, a); };
   for (const name of ['isotrail-ready', 'isotrail-error']) {
     addEventListener(name, (e) => __events.push({ name, id: e.target.id, ...e.detail }));
   }
@@ -332,6 +349,38 @@ try {
   check('a failed renderer download reports reason load', JSON.stringify(await errorsOf('a')) === '["load"]', JSON.stringify(await errorsOf('a')));
   await cdp.evaluate(`(() => { const h = ${el('a')}; const parent = h.parentNode; h.remove(); parent.append(h); })()`);
   check('putting the element back loads it', await cdp.waitFor(`${el('a')}.dataset.state === 'ready'`), await stateOf('a'));
+
+  // Look attributes: a palette by name or .hex address, unknown values, a
+  // change on a live element, and a time of day
+  await go('/look.html');
+  const looked = await cdp.waitFor(`['d', 'p', 'u', 'h', 't', 'tn'].every((id) => document.getElementById(id).dataset.state === 'ready')`);
+  check('six look embeds become ready', looked, JSON.stringify(await cdp.evaluate(`['d','p','u','h','t','tn'].map((id) => document.getElementById(id).dataset.state)`)));
+  await sleep(300);
+  const shot = async (id) =>
+    cdp.screenshot(await cdp.evaluate(`(() => { const r = ${el(id)}.shadowRoot.querySelector('canvas').getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), width: Math.floor(r.width) - 1, height: Math.floor(r.height) - 1, scale: 1 }; })()`));
+  const plainShot = await shot('d');
+  check('palette="aap-64" draws different pixels', plainShot !== (await shot('p')));
+  check('a palette from a .hex address draws different pixels', ![plainShot, await shot('p')].includes(await shot('h')));
+  check('unknown values draw the default', plainShot === (await shot('u')));
+  const warnings = await cdp.evaluate('__warnings');
+  check(
+    'and each warns on the console',
+    ['palette "nope"', 'godRays "sometimes"'].every((part) => warnings.some((w) => w.includes(part))),
+    warnings.join(' | '),
+  );
+  check('time="22:30" relights the diorama', (await shot('t')) !== (await shot('tn')));
+  const paletteShot = await shot('p');
+  await cdp.evaluate(`${el('d')}.setAttribute('palette', 'aap-64')`);
+  let redrawn = false;
+  for (let i = 0; i < 50 && !redrawn; i++) {
+    await sleep(100);
+    redrawn = (await shot('d')) === paletteShot;
+  }
+  check('changing the palette attribute redraws in it', redrawn);
+  await cdp.evaluate(`${el('d')}.setAttribute('mesher', 'smooth')`);
+  await sleep(1000);
+  check('changing the mesher builds the terrain again', (await shot('d')) !== paletteShot && (await stateOf('d')) === 'ready');
+  check('no uncaught errors on the look page', cdp.exceptions.length === 0, cdp.exceptions.join(' | '));
 
   // The snippet's poster, with and without the script
   await go('/noscript.html');

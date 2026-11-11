@@ -6,11 +6,12 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, bail};
 use clap::Args;
 use isotrail_export::{DEFAULT_SCALE, encode_png, upscale};
-use isotrail_render::{Aspect, Gpu, Look, Overlays, SunState, VoxelMesher};
+use isotrail_render::{Aspect, Gpu, Overlays};
 use tracing::warn;
 
 use crate::bundle::DataArgs;
 use crate::config::Typed;
+use crate::look::LookArgs;
 use crate::output;
 use crate::overlay::OverlayArgs;
 use crate::render::{AspectArg, Source};
@@ -38,6 +39,12 @@ pub struct EmbedArgs {
     #[arg(long, value_enum, default_value_t = AspectArg::Wide)]
     aspect: AspectArg,
 
+    /// Poster pixels per drawn pixel: 2, 3, 5, 6 or 10; the live embed
+    /// picks its own to suit the page
+    #[arg(long, value_name = "N", default_value_t = DEFAULT_SCALE,
+          value_parser = crate::render::parse_scale)]
+    scale: u32,
+
     /// How many times taller than life to draw the terrain; chosen from the
     /// slab's size and relief by default
     #[arg(long, value_name = "X", value_parser = crate::bundle::parse_exaggeration)]
@@ -62,6 +69,15 @@ pub struct EmbedArgs {
     /// all its hikes; by default it sits in the directory
     #[arg(long, value_name = "URL")]
     runtime_url: Option<String>,
+
+    /// Read settings from the [embed] table of this TOML file, and those of
+    /// its [render] table that embed shares; flags given here take precedence
+    /// over it, and it over the user config file
+    #[arg(long, value_name = "FILE")]
+    config: Option<PathBuf>,
+
+    #[command(flatten)]
+    look: LookArgs,
 
     #[command(flatten)]
     overlay: OverlayArgs,
@@ -104,25 +120,58 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
     let bundle_path = dir.join(format!("{name}.itb"));
     let poster_path = dir.join(format!("{name}.png"));
     let snippet_path = dir.join("snippet.html");
-    let runtime_copies: Vec<(PathBuf, PathBuf)> = runtime
+    let mut copies: Vec<(PathBuf, PathBuf)> = runtime
         .iter()
         .flat_map(|runtime| {
             RUNTIME_FILES.map(|file| (runtime_file(runtime, file), runtime_file(dir, file)))
         })
         .collect();
+    // A palette file goes beside the bundle, for the live embed to fetch
+    let palette_url = match args.look.palette_file() {
+        Some(file) => {
+            let mut copy = file
+                .file_stem()
+                .with_context(|| format!("{} has no file name", file.display()))?
+                .to_owned();
+            copy.push(".hex");
+            let url = format!(
+                "{}{}",
+                base_path(args.base_url.as_deref()),
+                url_segment(&copy.to_string_lossy())
+            );
+            let copy = dir.join(copy);
+            if !output::same_file(file, &copy) {
+                copies.push((file.to_owned(), copy));
+            }
+            Some(url)
+        }
+        None => None,
+    };
     // The bundle being embedded may already sit where it would be written
     let in_place = output::same_file(&args.file, &bundle_path);
     output::folder(dir)?;
     let outputs = [&poster_path, &snippet_path]
         .into_iter()
         .chain((!in_place).then_some(&bundle_path))
-        .chain(runtime_copies.iter().map(|(_, to)| to));
-    output::plan(outputs.map(PathBuf::as_path), &[&args.file])?;
+        .chain(copies.iter().map(|(_, to)| to));
+    let inputs: Vec<&Path> = [Some(args.file.as_path()), args.config.as_deref()]
+        .into_iter()
+        .flatten()
+        .chain(args.look.palette_file().filter(|path| path.is_file()))
+        .collect();
+    output::plan(outputs.map(PathBuf::as_path), &inputs)?;
     args.overlay.check()?;
+    let mesher = args.look.mesher(typed);
+    let look = args.look.look()?;
 
     let source = Source::open(&args.file)?;
     if source.is_bundle() {
         args.data.warn_unused_with_bundle(typed);
+    }
+    if args.look.time.is_some() && !source.has_times() {
+        return Err(usage(
+            "--time needs a track with times, to know which day to light",
+        ));
     }
     let original = match (&source, in_place) {
         (Source::Bundle(bundle), true) => Some(bundle.clone()),
@@ -132,6 +181,10 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
     if let Some(exaggeration) = args.exaggeration {
         bundle.grid.exaggeration = exaggeration;
     }
+    // Saved in the bundle, so the live embed is labelled the same
+    if let Some(title) = args.overlay.given_title() {
+        title.clone_into(&mut bundle.meta.title);
+    }
     if original.is_some_and(|original| *original != bundle) {
         return Err(usage(format!(
             "{} is the bundle being embedded, and the flags would change it; write to another folder",
@@ -140,6 +193,7 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
     }
     let text = args.overlay.text(&bundle)?;
     let style = args.overlay.style();
+    let sun = crate::sun::hike_sun(&bundle, args.look.time)?;
 
     if in_place {
         println!("Kept {} as it is", bundle_path.display());
@@ -155,22 +209,22 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
 
     let aspect = Aspect::from(args.aspect);
     let framing = aspect
-        .framing(DEFAULT_SCALE)
+        .framing(args.scale)
         .context("the pixel scale doesn't divide the image size")?;
     let overlays = Overlays::layout(&text, &style, &framing);
     let poster = crate::render::still(
         &Gpu::headless()?,
         &bundle,
-        &VoxelMesher::default(),
+        mesher.as_ref(),
         &overlays,
-        &SunState::for_hike(&bundle),
-        &Look::default(),
+        &sun,
+        &look,
     )?;
-    let poster = upscale(&poster, DEFAULT_SCALE)?;
+    let poster = upscale(&poster, args.scale)?;
     output::write(&poster_path, |file| Ok(encode_png(&poster, file)?))?;
     println!("Wrote {}", poster_path.display());
 
-    for (from, to) in &runtime_copies {
+    for (from, to) in &copies {
         output::write(to, |file| {
             let mut source =
                 File::open(from).with_context(|| format!("could not copy {}", from.display()))?;
@@ -180,13 +234,14 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
         println!("Wrote {}", to.display());
     }
 
-    let html = snippet(
-        &name,
-        args.overlay.title(&bundle),
+    let html = snippet(&Snippet {
+        name: &name,
+        title: args.overlay.title(&bundle),
         aspect,
-        args.base_url.as_deref(),
-        args.runtime_url.as_deref(),
-    );
+        base_url: args.base_url.as_deref(),
+        runtime_url: args.runtime_url.as_deref(),
+        attributes: &args.look.attributes(palette_url.as_deref()),
+    });
     output::write(&snippet_path, |file| Ok(file.write_all(html.as_bytes())?))?;
     println!("Wrote {}\n\n{html}", snippet_path.display());
     if let Some(credit) = args.overlay.caption_credit(&bundle) {
@@ -234,34 +289,51 @@ fn runtime_file(dir: &Path, file: &str) -> PathBuf {
         .fold(dir.to_owned(), |path, part| path.join(part))
 }
 
-/// The script, and the element with its poster inside, so the poster shows
-/// at its size even when the script can't run. The script's address carries
-/// the version, so browsers fetch a new runtime after an update
-fn snippet(
-    name: &str,
-    title: &str,
+/// What goes into snippet.html
+struct Snippet<'a> {
+    name: &'a str,
+    title: &'a str,
     aspect: Aspect,
-    base_url: Option<&str>,
-    runtime_url: Option<&str>,
-) -> String {
+    base_url: Option<&'a str>,
+    runtime_url: Option<&'a str>,
+    /// The look options that aren't the default
+    attributes: &'a [(&'static str, String)],
+}
+
+/// `--base-url` ending in a slash, or nothing
+fn base_path(base_url: Option<&str>) -> String {
     let mut base = base_url.unwrap_or_default().to_owned();
     if !base.is_empty() && !base.ends_with('/') {
         base.push('/');
     }
+    base
+}
+
+/// The script, and the element with its poster inside, so the poster shows
+/// at its size even when the script can't run. The script's address carries
+/// the version, so browsers fetch a new runtime after an update
+fn snippet(snippet: &Snippet) -> String {
+    let base = base_path(snippet.base_url);
+    let name = snippet.name;
     let file = |extension: &str| format!("{base}{}", url_segment(&format!("{name}.{extension}")));
     let version = concat!("v=", env!("CARGO_PKG_VERSION"));
-    let script = match runtime_url {
+    let script = match snippet.runtime_url {
         Some(url) if url.contains('?') => url.to_owned(),
         Some(url) => format!("{url}?{version}"),
         None => format!("{base}{}?{version}", RUNTIME_FILES[0]),
     };
-    let (width, height) = aspect.output_size();
+    let (width, height) = snippet.aspect.output_size();
     let common = gcd(width, height);
-    let alt = match title.trim() {
+    let alt = match snippet.title.trim() {
         "" => "Diorama of a hike".to_owned(),
         title => format!("Diorama of {title}"),
     };
     let poster = html_attr(&file("png"));
+    let look: String = snippet
+        .attributes
+        .iter()
+        .map(|(name, value)| format!(r#" {name}="{}""#, html_attr(value)))
+        .collect();
     let mut html = String::new();
     let _ = writeln!(
         html,
@@ -270,9 +342,9 @@ fn snippet(
     );
     let _ = writeln!(
         html,
-        r#"<isotrail-hike src="{}" poster="{poster}" aspect="{}" style="display:block;aspect-ratio:{}/{}"><img src="{poster}" alt="{}" style="display:block;width:100%"></isotrail-hike>"#,
+        r#"<isotrail-hike src="{}" poster="{poster}" aspect="{}"{look} style="display:block;aspect-ratio:{}/{}"><img src="{poster}" alt="{}" style="display:block;width:100%"></isotrail-hike>"#,
         html_attr(&file("itb")),
-        aspect.name(),
+        snippet.aspect.name(),
         width / common,
         height / common,
         html_attr(&alt),
@@ -330,9 +402,26 @@ mod tests {
         );
     }
 
+    fn plain(
+        name: &str,
+        title: &str,
+        aspect: Aspect,
+        base_url: Option<&str>,
+        runtime_url: Option<&str>,
+    ) -> String {
+        snippet(&Snippet {
+            name,
+            title,
+            aspect,
+            base_url,
+            runtime_url,
+            attributes: &[],
+        })
+    }
+
     #[test]
     fn snippet_paths_follow_the_base_url() {
-        let html = snippet("ridge", "Ridge <walk>", Aspect::Wide, None, None);
+        let html = plain("ridge", "Ridge <walk>", Aspect::Wide, None, None);
         assert_eq!(
             html,
             format!(
@@ -344,7 +433,7 @@ mod tests {
                 env!("CARGO_PKG_VERSION")
             )
         );
-        let html = snippet("Tom & Jo", " ", Aspect::Story, Some("/hikes/x"), None);
+        let html = plain("Tom & Jo", " ", Aspect::Story, Some("/hikes/x"), None);
         assert!(
             html.contains(r#"src="/hikes/x/isotrail-embed.js?v="#),
             "{html}"
@@ -360,7 +449,7 @@ mod tests {
             "{html}"
         );
         assert!(html.contains(r#"aspect="story""#), "{html}");
-        let html = snippet(
+        let html = plain(
             "r",
             "R",
             Aspect::Square,
@@ -376,8 +465,32 @@ mod tests {
         );
         assert!(html.contains(r#"src="https://a.b/h/r.itb""#), "{html}");
         assert!(html.contains("aspect-ratio:1/1"), "{html}");
-        let html = snippet("r", "R", Aspect::Feed, None, Some("/e.js?v=2"));
+        let html = plain("r", "R", Aspect::Feed, None, Some("/e.js?v=2"));
         assert!(html.contains(r#"src="/e.js?v=2""#), "{html}");
         assert!(html.contains("aspect-ratio:4/5"), "{html}");
+    }
+
+    #[test]
+    fn look_options_become_attributes_after_the_aspect() {
+        let html = snippet(&Snippet {
+            name: "ridge",
+            title: "Ridge",
+            aspect: Aspect::Wide,
+            base_url: None,
+            runtime_url: None,
+            attributes: &[
+                ("palette", "a&b.hex".to_owned()),
+                ("mesher", "smooth".to_owned()),
+            ],
+        });
+        assert!(
+            html.contains(
+                r#"aspect="wide" palette="a&amp;b.hex" mesher="smooth" style="display:block;"#
+            ),
+            "{html}"
+        );
+        assert_eq!(base_path(Some("/h")), "/h/");
+        assert_eq!(base_path(Some("/h/")), "/h/");
+        assert_eq!(base_path(None), "");
     }
 }

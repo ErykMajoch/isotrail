@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
+use clap::error::ErrorKind;
 use clap::parser::ValueSource;
 use clap::{Arg, ArgAction, ArgMatches, Command, CommandFactory, FromArgMatches};
 use directories::BaseDirs;
@@ -15,19 +16,42 @@ use tracing::debug;
 use crate::Cli;
 
 const CONFIG_ENV: &str = "ISOTRAIL_CONFIG";
-const TABLE: &str = "render";
+/// The table every command reads, besides its own
+const RENDER: &str = "render";
+/// The commands that read config files, each from the table of its name
+const COMMANDS: [&str; 4] = [RENDER, "embed", "bundle", "style-lab"];
+/// What style-lab takes from [render]: the data settings, not the looks it
+/// lays side by side
+const STYLE_LAB_FROM_RENDER: [&str; 7] = [
+    "detail",
+    "offline",
+    "overpass-url",
+    "no-map-data",
+    "no-weather",
+    "season",
+    "exaggeration",
+];
 /// Flags that only make sense for one run
-const NOT_SETTINGS: [&str; 5] = ["output", "config", "verbose", "help", "version"];
+const NOT_SETTINGS: [&str; 6] = [
+    "output",
+    "config",
+    "debug-dir",
+    "verbose",
+    "help",
+    "version",
+];
 
-/// The command line, with `render` settings it leaves out taken from the
-/// user config file and `--config`, the latter winning, and what was typed
-pub fn parse() -> anyhow::Result<(Cli, Typed)> {
+/// The command line, with settings it leaves out taken from the user config
+/// file and `--config`, the latter winning, and what was typed; on failure,
+/// the error and what was typed
+pub fn parse() -> Result<(Cli, Typed), (anyhow::Error, Typed)> {
     let args: Vec<OsString> = env::args_os().collect();
     let matches = matches(&args);
     let typed = Typed::new(&matches);
-    let args = with_config(args, &matches, user_config())
-        .map_err(|error| crate::usage(format!("{error:#}")))?;
-    Ok((parse_args(args), typed))
+    match with_config(args, &matches, user_config()) {
+        Ok(args) => Ok((parse_args(args), typed)),
+        Err(error) => Err((crate::usage(format!("{error:#}")), typed)),
+    }
 }
 
 fn matches(args: &[OsString]) -> ArgMatches {
@@ -96,7 +120,7 @@ fn user_config() -> Option<UserFile> {
     }
 }
 
-/// `args` with a flag added after `render` for each setting that isn't
+/// `args` with a flag added after the command for each setting that isn't
 /// already given on the command line or through the environment, and
 /// doesn't conflict with a flag that is
 fn with_config(
@@ -104,7 +128,10 @@ fn with_config(
     matches: &ArgMatches,
     user: Option<UserFile>,
 ) -> anyhow::Result<Vec<OsString>> {
-    let Some((TABLE, given)) = matches.subcommand() else {
+    let Some((name, given)) = matches
+        .subcommand()
+        .filter(|(name, _)| COMMANDS.contains(name))
+    else {
         return Ok(args);
     };
     if let Some(user) = user
@@ -125,17 +152,25 @@ fn with_config(
         .chain(config.map(PathBuf::as_path))
         .collect();
 
+    let cli = Cli::command();
+    let command = cli
+        .find_subcommand(name)
+        .with_context(|| format!("the {name} command is missing"))?;
     let mut settings: BTreeMap<String, (Value, &Path)> = BTreeMap::new();
     for &path in &files {
-        for (key, value) in read_table(path)? {
+        let mut tables = read_tables(path, &cli)?;
+        let shared = tables.remove(RENDER).unwrap_or_default();
+        let own = tables.remove(name).unwrap_or_default();
+        for (key, value) in shared {
+            if name == RENDER || takes_from_render(name, command, &key, &value) {
+                settings.insert(key, (value, path));
+            }
+        }
+        for (key, value) in own {
             settings.insert(key, (value, path));
         }
     }
 
-    let command = Cli::command();
-    let render = command
-        .find_subcommand(TABLE)
-        .context("the render command is missing")?;
     let explicit = |arg: &Arg| {
         matches!(
             given.value_source(arg.get_id().as_str()),
@@ -144,20 +179,11 @@ fn with_config(
     };
     let mut flags = Vec::new();
     for (key, (value, path)) in settings {
-        let arg = render
-            .get_arguments()
-            .find(|arg| arg.get_long() == Some(key.as_str()))
-            .filter(|_| !NOT_SETTINGS.contains(&key.as_str()))
-            .with_context(|| {
-                format!(
-                    "unknown setting {key:?} in the [{TABLE}] table of {}",
-                    path.display()
-                )
-            })?;
+        let arg = setting(command, &key).context("a checked setting went missing")?;
         if explicit(arg) {
             continue;
         }
-        if let Some(flag) = conflicting(render, arg)
+        if let Some(flag) = conflicting(command, arg)
             .into_iter()
             .find(|&other| explicit(other))
         {
@@ -173,8 +199,10 @@ fn with_config(
             continue;
         };
         // Checked alone, so a bad value is blamed on its file
-        let alone = ["render", "-", flag.as_str()];
-        if let Err(error) = render.clone().try_get_matches_from(alone) {
+        let alone = [name, "-", flag.as_str()];
+        if let Err(error) = command.clone().try_get_matches_from(alone)
+            && error.kind() != ErrorKind::MissingRequiredArgument
+        {
             let message = error.to_string();
             let first = message.lines().next().unwrap_or_default();
             bail!("{}: {}", in_file(), first.trim_start_matches("error: "));
@@ -185,18 +213,42 @@ fn with_config(
     let at = args
         .iter()
         .skip(1)
-        .position(|arg| arg == TABLE)
-        .context("the render command is missing")?;
+        .position(|arg| arg == name)
+        .with_context(|| format!("the {name} command is missing"))?;
     args.splice(at + 2..at + 2, flags);
     Ok(args)
 }
 
+/// The command's flag a setting stands for, if it is one
+fn setting<'a>(command: &'a Command, key: &str) -> Option<&'a Arg> {
+    command
+        .get_arguments()
+        .find(|arg| arg.get_long() == Some(key))
+        .filter(|_| !NOT_SETTINGS.contains(&key))
+}
+
+/// Whether a command other than render takes this [render] setting
+fn takes_from_render(name: &str, command: &Command, key: &str, value: &Value) -> bool {
+    if setting(command, key).is_none() {
+        return false;
+    }
+    match name {
+        "style-lab" => STYLE_LAB_FROM_RENDER.contains(&key),
+        // The embed has one shape
+        "embed" if key == "aspect" => match value {
+            Value::Array(items) => items.len() == 1,
+            _ => true,
+        },
+        _ => true,
+    }
+}
+
 /// The arguments that can't be given with `arg`, whichever of the two
 /// declares the conflict
-fn conflicting<'a>(render: &'a Command, arg: &Arg) -> Vec<&'a Arg> {
-    let mut found = render.get_arg_conflicts_with(arg);
-    for other in render.get_arguments() {
-        let declared = render
+fn conflicting<'a>(command: &'a Command, arg: &Arg) -> Vec<&'a Arg> {
+    let mut found = command.get_arg_conflicts_with(arg);
+    for other in command.get_arguments() {
+        let declared = command
             .get_arg_conflicts_with(other)
             .iter()
             .any(|conflict| conflict.get_id() == arg.get_id());
@@ -207,25 +259,38 @@ fn conflicting<'a>(render: &'a Command, arg: &Arg) -> Vec<&'a Arg> {
     found
 }
 
-/// The `[render]` table of a config file
-fn read_table(path: &Path) -> anyhow::Result<Table> {
+/// A config file's tables by command, each key checked against that
+/// command's flags
+fn read_tables(path: &Path, cli: &Command) -> anyhow::Result<BTreeMap<String, Table>> {
     let text =
         fs::read_to_string(path).with_context(|| format!("could not open {}", path.display()))?;
-    let mut file: Table = text
+    let file: Table = text
         .parse()
         .with_context(|| format!("could not read {}", path.display()))?;
-    let table = match file.remove(TABLE) {
-        None => Table::new(),
-        Some(Value::Table(table)) => table,
-        Some(_) => bail!("{}: [{TABLE}] must be a table", path.display()),
-    };
-    if let Some(key) = file.keys().next() {
-        bail!(
-            "{}: settings go in a [{TABLE}] table, found {key:?} outside it",
-            path.display()
-        );
+    let mut tables = BTreeMap::new();
+    for (name, value) in file {
+        let Some(command) = COMMANDS
+            .contains(&name.as_str())
+            .then(|| cli.find_subcommand(&name))
+            .flatten()
+        else {
+            bail!(
+                "{}: settings go in a [render], [embed], [bundle] or [style-lab] table, found {name:?} outside them",
+                path.display()
+            );
+        };
+        let Value::Table(table) = value else {
+            bail!("{}: [{name}] must be a table", path.display());
+        };
+        if let Some(key) = table.keys().find(|key| setting(command, key).is_none()) {
+            bail!(
+                "unknown setting {key:?} in the [{name}] table of {}",
+                path.display()
+            );
+        }
+        tables.insert(name, table);
     }
-    Ok(table)
+    Ok(tables)
 }
 
 /// The flag a setting stands for, or none for a switch that is off
@@ -379,7 +444,17 @@ mod tests {
         let message = error("[render]\noffline = \"yes\"\n");
         assert!(message.contains("expected true or false"), "{message}");
         let message = error("palette = \"apollo\"\n");
-        assert!(message.contains("[render] table"), "{message}");
+        assert!(message.contains("settings go in a [render]"), "{message}");
+        let message = error("[stats]\nunits = \"imperial\"\n");
+        assert!(message.contains("found \"stats\" outside"), "{message}");
+        let message = error("[embed]\nduration = 5\n");
+        assert!(
+            message.contains("unknown setting \"duration\" in the [embed] table"),
+            "{message}"
+        );
+        // Another command's table is checked too
+        let message = error("[bundle]\npalette = \"apollo\"\n");
+        assert!(message.contains("[bundle] table"), "{message}");
         let message = error("[render\n");
         assert!(message.contains("could not read"), "{message}");
     }
@@ -487,5 +562,159 @@ time = 07:30:15
         );
         assert!(message.starts_with("time in "), "{message}");
         assert!(message.contains("such as 20:30"), "{message}");
+    }
+
+    #[test]
+    fn each_command_takes_its_own_table_and_what_it_shares_of_render() {
+        let dir = tempfile::tempdir().unwrap();
+        let user = write(
+            dir.path(),
+            "user.toml",
+            "[render]
+palette = \"resurrect-64\"
+mesher = \"smooth\"
+aspect = [\"story\", \"feed\"]
+scale = 5
+season = \"autumn\"
+title = \"Ridge\"
+duration = \"5s\"
+
+[embed]
+base-url = \"/hikes/\"
+
+[style-lab]
+palette = [\"apollo\", \"aap-64\"]
+",
+        );
+        let result = |line: &str| strings(&with_config(args(line), found(user.clone())).unwrap());
+        assert_eq!(
+            result("isotrail embed hike.gpx -o site"),
+            [
+                "isotrail",
+                "embed",
+                "--base-url=/hikes/",
+                "--mesher=smooth",
+                "--palette=resurrect-64",
+                "--scale=5",
+                "--season=autumn",
+                "--title=Ridge",
+                "hike.gpx",
+                "-o",
+                "site"
+            ]
+        );
+        assert_eq!(
+            result("isotrail bundle hike.gpx -o hike.itb"),
+            [
+                "isotrail",
+                "bundle",
+                "--season=autumn",
+                "--title=Ridge",
+                "hike.gpx",
+                "-o",
+                "hike.itb"
+            ]
+        );
+        assert_eq!(
+            result("isotrail style-lab hike.gpx -o lab"),
+            [
+                "isotrail",
+                "style-lab",
+                "--palette=apollo,aap-64",
+                "--season=autumn",
+                "hike.gpx",
+                "-o",
+                "lab"
+            ]
+        );
+        for line in [
+            "isotrail embed hike.gpx -o site",
+            "isotrail bundle hike.gpx -o hike.itb",
+            "isotrail style-lab hike.gpx -o lab",
+            "isotrail render hike.gpx",
+        ] {
+            let cli = parse_args(with_config(args(line), found(user.clone())).unwrap());
+            assert!(!matches!(cli.command, crate::Command::Stats(_)), "{line}");
+        }
+    }
+
+    #[test]
+    fn a_command_table_beats_render_and_embed_takes_one_aspect() {
+        let dir = tempfile::tempdir().unwrap();
+        let user = write(
+            dir.path(),
+            "user.toml",
+            "[render]
+palette = \"resurrect-64\"
+aspect = \"story\"
+",
+        );
+        let hike = write(
+            dir.path(),
+            "hike.toml",
+            "[embed]
+palette = \"aap-64\"
+",
+        );
+        let line = format!(
+            "isotrail embed hike.gpx -o site --config {}",
+            hike.display()
+        );
+        let result = strings(&with_config(args(&line), found(user)).unwrap());
+        assert!(
+            result.contains(&"--palette=aap-64".to_owned()),
+            "{result:?}"
+        );
+        assert!(result.contains(&"--aspect=story".to_owned()), "{result:?}");
+
+        // Within one file too, and a list of shapes stays with render
+        let both = write(
+            dir.path(),
+            "both.toml",
+            "[embed]
+palette = \"apollo\"
+
+[render]
+palette = \"aap-64\"
+aspect = [\"story\", \"wide\"]
+",
+        );
+        let result = strings(
+            &with_config(args("isotrail embed hike.gpx -o site"), found(both.clone())).unwrap(),
+        );
+        assert_eq!(
+            result,
+            [
+                "isotrail",
+                "embed",
+                "--palette=apollo",
+                "hike.gpx",
+                "-o",
+                "site"
+            ]
+        );
+        let result = strings(&with_config(args("isotrail render hike.gpx"), found(both)).unwrap());
+        assert_eq!(
+            result,
+            [
+                "isotrail",
+                "render",
+                "--aspect=story,wide",
+                "--palette=aap-64",
+                "hike.gpx"
+            ]
+        );
+    }
+
+    #[test]
+    fn bad_values_for_other_commands_name_their_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let user = write(dir.path(), "user.toml", "[embed]\nscale = 4\n");
+        let message = format!(
+            "{:#}",
+            with_config(args("isotrail embed hike.gpx -o site"), found(user)).unwrap_err()
+        );
+        assert!(message.starts_with("scale in "), "{message}");
+        assert!(message.contains("must be 2, 3, 5, 6 or 10"), "{message}");
     }
 }

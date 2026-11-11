@@ -220,6 +220,11 @@ impl OverlayArgs {
             .collect()
     }
 
+    /// `--title`, when given
+    pub fn given_title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
     /// The hike's name, as `--title` gives it or the bundle has it
     pub fn title<'a>(&'a self, bundle: &'a SceneBundle) -> &'a str {
         self.title.as_deref().unwrap_or(&bundle.meta.title)

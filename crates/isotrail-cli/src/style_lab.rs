@@ -11,8 +11,10 @@ use tracing::info;
 
 use crate::bundle::DataArgs;
 use crate::config::Typed;
+use crate::look::{palette_file, read_palette};
 use crate::output;
-use crate::render::Source;
+use crate::render::{AspectArg, Source, parse_scale};
+use crate::usage;
 
 const SCALES: [u32; 3] = [3, 5, 6];
 const BACKGROUND: [u8; 4] = [28, 28, 32, 255];
@@ -33,8 +35,79 @@ pub struct StyleLabArgs {
     #[arg(short, long, value_name = "DIR")]
     output: PathBuf,
 
+    /// Shape of the images: story (9:16), feed (4:5), square or wide (16:9)
+    #[arg(long, value_enum, default_value_t = AspectArg::Story)]
+    aspect: AspectArg,
+
+    /// Pixel scales to compare, from 2, 3, 5, 6 and 10
+    #[arg(
+        long,
+        value_delimiter = ',',
+        value_name = "SCALES",
+        default_values_t = SCALES,
+        value_parser = parse_scale
+    )]
+    scale: Vec<u32>,
+
+    /// Palettes to compare: built-in palettes' names, Lospec .hex files or
+    /// none; every built-in palette by default
+    #[arg(long, value_delimiter = ',', value_name = "PALETTES")]
+    palette: Vec<String>,
+
+    /// How many times taller than life to draw the terrain; chosen from the
+    /// slab's size and relief by default
+    #[arg(long, value_name = "X", value_parser = crate::bundle::parse_exaggeration)]
+    exaggeration: Option<f64>,
+
+    /// Read settings from the [style-lab] table of this TOML file, and the
+    /// data settings of its [render] table; flags given here take precedence
+    /// over it, and it over the user config file
+    #[arg(long, value_name = "FILE")]
+    config: Option<PathBuf>,
+
     #[command(flatten)]
     data: DataArgs,
+}
+
+/// A palette on the sheet: its label and what `--palette` said
+struct Choice {
+    label: String,
+    value: String,
+}
+
+impl StyleLabArgs {
+    fn palettes(&self) -> anyhow::Result<Vec<Choice>> {
+        let values: Vec<String> = if self.palette.is_empty() {
+            Palette::builtin_names().map(str::to_owned).collect()
+        } else {
+            self.palette.clone()
+        };
+        let mut choices: Vec<Choice> = Vec::new();
+        for value in values {
+            let label = match palette_file(&value) {
+                Some(path) => path
+                    .file_stem()
+                    .with_context(|| format!("{} has no file name", path.display()))?
+                    .to_string_lossy()
+                    .into_owned(),
+                None => value.to_ascii_lowercase(),
+            };
+            if choices.iter().any(|choice| choice.label == label) {
+                return Err(usage(format!("--palette lists {label} twice")));
+            }
+            choices.push(Choice { label, value });
+        }
+        Ok(choices)
+    }
+
+    fn scales(&self) -> anyhow::Result<Vec<u32>> {
+        for (i, scale) in self.scale.iter().enumerate() {
+            if self.scale[..i].contains(scale) {
+                return Err(usage(format!("--scale lists {scale} twice")));
+            }
+        }
+        Ok(self.scale.clone())
+    }
 }
 
 pub fn run(args: &StyleLabArgs, typed: &Typed) -> anyhow::Result<()> {
@@ -43,7 +116,8 @@ pub fn run(args: &StyleLabArgs, typed: &Typed) -> anyhow::Result<()> {
         ("voxel", Box::new(VoxelMesher::default())),
         ("smooth", Box::new(SmoothMesher)),
     ];
-    let palettes: Vec<&str> = Palette::builtin_names().collect();
+    let palettes = args.palettes()?;
+    let scales = args.scales()?;
     let image = |mesher: &str, scale: u32, palette: &str| {
         dir.join(format!("{mesher}-{scale}-{palette}.png"))
     };
@@ -51,32 +125,55 @@ pub fn run(args: &StyleLabArgs, typed: &Typed) -> anyhow::Result<()> {
     let mut outputs = vec![sheet_path.clone()];
     for palette in &palettes {
         for (mesher, _) in &meshers {
-            outputs.extend(SCALES.map(|scale| image(mesher, scale, palette)));
+            outputs.extend(
+                scales
+                    .iter()
+                    .map(|&scale| image(mesher, scale, &palette.label)),
+            );
         }
     }
+    let inputs: Vec<&Path> = [Some(args.file.as_path()), args.config.as_deref()]
+        .into_iter()
+        .flatten()
+        .chain(
+            palettes
+                .iter()
+                .filter_map(|palette| palette_file(&palette.value))
+                .filter(|path| path.is_file()),
+        )
+        .collect();
     output::folder(dir)?;
-    output::plan(outputs.iter().map(PathBuf::as_path), &[&args.file])?;
+    output::plan(outputs.iter().map(PathBuf::as_path), &inputs)?;
+    let looks = palettes
+        .iter()
+        .map(|palette| {
+            Ok(Look {
+                palette: read_palette(&palette.value)?,
+                ..Look::default()
+            })
+        })
+        .collect::<anyhow::Result<Vec<Look>>>()?;
     let source = Source::open(&args.file)?;
     if source.is_bundle() {
         args.data.warn_unused_with_bundle(typed);
     }
-    let bundle = source.into_bundle(&args.file, &args.data)?;
+    let mut bundle = source.into_bundle(&args.file, &args.data)?;
+    if let Some(exaggeration) = args.exaggeration {
+        bundle.grid.exaggeration = exaggeration;
+    }
 
-    let aspect = Aspect::Story;
+    let aspect = Aspect::from(args.aspect);
     let (width, height) = aspect.output_size();
-    let columns = meshers.len() * SCALES.len();
+    let columns = meshers.len() * scales.len();
     let mut sheet = Sheet::new(columns, palettes.len(), width, height);
 
     let gpu = Gpu::headless()?;
     let sun = SunState::for_hike(&bundle);
     let mut index = 0;
-    for palette in palettes {
-        let look = Look {
-            palette: Palette::builtin(palette),
-            ..Look::default()
-        };
+    for (palette, look) in palettes.iter().zip(&looks) {
+        let palette = palette.label.as_str();
         for (mesher_name, mesher) in &meshers {
-            for scale in SCALES {
+            for &scale in &scales {
                 info!(mesher = mesher_name, scale, palette, "rendering");
                 let framing = aspect
                     .framing(scale)
@@ -88,7 +185,7 @@ pub fn run(args: &StyleLabArgs, typed: &Typed) -> anyhow::Result<()> {
                     &framing,
                     DEFAULT_YAW_OFFSET_DEG,
                     &sun,
-                    &look,
+                    look,
                 )?;
                 let frame = upscale(&frame, scale)?;
                 let path = image(mesher_name, scale, palette);

@@ -7,6 +7,17 @@ const RUNTIME = new URL(`./pkg/isotrail_web.js${QUERY}`, import.meta.url);
 const WASM = new URL(`./pkg/isotrail_web_bg.wasm${QUERY}`, import.meta.url);
 
 const ASPECTS = { story: '9 / 16', feed: '4 / 5', square: '1 / 1', wide: '16 / 9' };
+// The look attributes, by the name the renderer takes them under
+const LOOK = {
+  palette: 'palette',
+  mesher: 'mesher',
+  'block-height': 'blockHeight',
+  occlusion: 'occlusion',
+  'soft-shadows': 'softShadows',
+  'god-rays': 'godRays',
+  background: 'background',
+  time: 'time',
+};
 const INTRO_S = 0.5;
 const DRAW_S = 8;
 const ORBIT_DEG = 30;
@@ -331,7 +342,7 @@ template.innerHTML = `
 `;
 
 class IsotrailHike extends HTMLElement {
-  static observedAttributes = ['src', 'poster', 'aspect'];
+  static observedAttributes = ['src', 'poster', 'aspect', ...Object.keys(LOOK)];
 
   #frameBox;
   #poster;
@@ -357,6 +368,7 @@ class IsotrailHike extends HTMLElement {
   #frame = 0;
   #drawn = false;
   #restartedAt = null;
+  #lookChanges = 0;
 
   #progress = 1;
   // Until played or scrubbed, the viewer shows the poster's light
@@ -426,6 +438,8 @@ class IsotrailHike extends HTMLElement {
       this.#teardown();
       this.#setState('poster');
       if (this.#near) this.#start();
+    } else if (name in LOOK && this.#viewer) {
+      this.#changeLook();
     }
   }
 
@@ -495,8 +509,9 @@ class IsotrailHike extends HTMLElement {
     this.#setState('loading');
     let module;
     let bytes;
+    let look;
     try {
-      [module, bytes] = await Promise.all([loadRuntime(), fetchBytes(src)]);
+      [module, bytes, look] = await Promise.all([loadRuntime(), fetchBytes(src), this.#look()]);
     } catch (error) {
       if (generation === this.#generation) this.#fail('load', error);
       return;
@@ -506,7 +521,7 @@ class IsotrailHike extends HTMLElement {
     const backend = this.getAttribute('backend') === 'webgl' ? 'webgl' : 'auto';
     let viewer;
     try {
-      viewer = await module.Viewer.load(canvas, bytes, backend);
+      viewer = await module.Viewer.load(canvas, bytes, backend, look);
     } catch (error) {
       if (generation === this.#generation) this.#fail(error?.reason ?? 'runtime', error);
       return;
@@ -529,6 +544,28 @@ class IsotrailHike extends HTMLElement {
     if (this.#viewer !== viewer) return;
     this.#resize = new ResizeObserver(([entry]) => this.#onResize(entry));
     this.#resize.observe(canvas);
+  }
+
+  // The look attributes as the renderer takes them, with a .hex palette's
+  // text in place of its address
+  async #look() {
+    const look = {};
+    for (const [attribute, key] of Object.entries(LOOK)) {
+      const value = this.getAttribute(attribute);
+      if (value !== null) look[key] = value;
+    }
+    if (look.palette) look.palette = await readPalette(look.palette);
+    return look;
+  }
+
+  // Only the latest of several quick changes is applied
+  async #changeLook() {
+    const viewer = this.#viewer;
+    const change = ++this.#lookChanges;
+    const look = await this.#look();
+    if (this.#viewer !== viewer || change !== this.#lookChanges) return;
+    this.#guard(() => viewer.setOptions(look));
+    this.#schedule();
   }
 
   // One fresh start, in case the browser reset its GPU; the poster if it
@@ -916,6 +953,20 @@ function pinch(a, b) {
     distance: Math.hypot(b.x - a.x, b.y - a.y),
     angle: Math.atan2(b.y - a.y, b.x - a.x),
   };
+}
+
+// A palette's name as it is, or the text of a .hex file at that address
+async function readPalette(value) {
+  const url = new URL(value, document.baseURI);
+  if (!url.pathname.toLowerCase().endsWith('.hex')) return value;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    return await response.text();
+  } catch (error) {
+    console.warn(`<isotrail-hike> could not load the palette ${value}, so it uses the default:`, error);
+    return undefined;
+  }
 }
 
 async function fetchBytes(src) {

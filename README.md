@@ -134,7 +134,7 @@ palette = "resurrect-64"
 units = "imperial"
 ```
 
-See [Configuration](docs/configuration.md) for file locations, precedence and environment variables.
+`embed`, `bundle` and `style-lab` read the same files, and can have tables of their own. See [Configuration](docs/configuration.md) for file locations, precedence and environment variables.
 
 ## Contributing
 

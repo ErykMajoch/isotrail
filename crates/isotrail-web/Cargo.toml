@@ -10,6 +10,7 @@ repository.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+chrono.workspace = true
 console_error_panic_hook.workspace = true
 glam.workspace = true
 isotrail-bundle = { path = "../isotrail-bundle" }
@@ -17,7 +18,7 @@ isotrail-render = { path = "../isotrail-render" }
 js-sys.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
-web-sys = { workspace = true, features = ["HtmlCanvasElement"] }
+web-sys = { workspace = true, features = ["HtmlCanvasElement", "console"] }
 wgpu = { workspace = true, features = ["webgl"] }
 
 [package.metadata.wasm-pack.profile.release]

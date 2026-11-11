@@ -6,6 +6,7 @@ mod bundle;
 mod cache;
 mod config;
 mod embed;
+mod look;
 mod output;
 mod overlay;
 mod render;
@@ -62,7 +63,7 @@ enum Command {
 fn main() -> ExitCode {
     let (cli, typed) = match config::parse() {
         Ok(parsed) => parsed,
-        Err(error) => return report(&error, Some("render")),
+        Err((error, typed)) => return report(&error, typed.command()),
     };
     init_logging(cli.verbose);
     output::catch_interrupts();

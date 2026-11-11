@@ -196,3 +196,175 @@ fn a_missing_runtime_is_refused_before_any_work() {
     let stderr = text(&output.stderr);
     assert!(stderr.contains("--with-runtime"), "{stderr}");
 }
+
+fn isotrail_with_config(current_dir: &Path, args: &[&str], config: &Path) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_isotrail"))
+        .args(args)
+        .current_dir(current_dir)
+        .env("ISOTRAIL_CACHE_DIR", current_dir.join("cache"))
+        .env("ISOTRAIL_CONFIG", config)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn the_poster_and_snippet_carry_the_look() {
+    let temp = with_hike("ridge.itb");
+    let plain = isotrail(temp.path(), &["embed", "ridge.itb", "-o", "plain"]);
+    assert!(plain.status.success(), "{}", text(&plain.stderr));
+    let output = isotrail(
+        temp.path(),
+        &[
+            "embed",
+            "ridge.itb",
+            "-o",
+            "look",
+            "--palette",
+            "resurrect-64",
+            "--mesher",
+            "smooth",
+            "--god-rays",
+            "off",
+            "--scale",
+            "5",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let (plain, look) = (temp.path().join("plain"), temp.path().join("look"));
+    assert_eq!(png_size(&look.join("ridge.png")), (1920, 1080));
+    assert_ne!(
+        fs::read(plain.join("ridge.png")).unwrap(),
+        fs::read(look.join("ridge.png")).unwrap()
+    );
+    let html = fs::read_to_string(look.join("snippet.html")).unwrap();
+    assert!(
+        html.contains(
+            r#"aspect="wide" palette="resurrect-64" mesher="smooth" god-rays="off" style="#
+        ),
+        "{html}"
+    );
+    // The bundle itself carries no look
+    assert_eq!(
+        fs::read(plain.join("ridge.itb")).unwrap(),
+        fs::read(look.join("ridge.itb")).unwrap()
+    );
+}
+
+#[test]
+fn a_palette_file_is_copied_beside_the_bundle() {
+    let temp = with_hike("ridge.itb");
+    fs::create_dir(temp.path().join("colours")).unwrap();
+    fs::write(
+        temp.path().join("colours/warm.hex"),
+        "1a1c2c\n5d275d\nb13e53\nef7d57\nffcd75\na7f070\n",
+    )
+    .unwrap();
+    let output = isotrail(
+        temp.path(),
+        &[
+            "embed",
+            "ridge.itb",
+            "-o",
+            "site",
+            "--palette",
+            "colours/warm.hex",
+            "--base-url",
+            "/hikes/",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let site = temp.path().join("site");
+    assert_eq!(
+        fs::read(site.join("warm.hex")).unwrap(),
+        fs::read(temp.path().join("colours/warm.hex")).unwrap()
+    );
+    let html = fs::read_to_string(site.join("snippet.html")).unwrap();
+    assert!(html.contains(r#"palette="/hikes/warm.hex""#), "{html}");
+
+    // Embedding again from the copy leaves it where it is
+    let output = isotrail(
+        temp.path(),
+        &[
+            "embed",
+            "ridge.itb",
+            "-o",
+            "site",
+            "--palette",
+            "site/warm.hex",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let html = fs::read_to_string(site.join("snippet.html")).unwrap();
+    assert!(html.contains(r#"palette="warm.hex""#), "{html}");
+}
+
+#[test]
+fn embed_reads_config_files() {
+    let temp = with_hike("ridge.itb");
+    let config = temp.path().join("config.toml");
+    fs::write(
+        &config,
+        "[render]\npalette = \"aap-64\"\naspect = [\"story\", \"feed\"]\nduration = \"5s\"\n\n\
+         [embed]\nmesher = \"smooth\"\n",
+    )
+    .unwrap();
+    let output = isotrail_with_config(temp.path(), &["embed", "ridge.itb", "-o", "site"], &config);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let site = temp.path().join("site");
+    let html = fs::read_to_string(site.join("snippet.html")).unwrap();
+    assert!(
+        html.contains(r#"aspect="wide" palette="aap-64" mesher="smooth" style="#),
+        "{html}"
+    );
+    assert_eq!(png_size(&site.join("ridge.png")), (1920, 1080));
+
+    // A typed flag still wins
+    let output = isotrail_with_config(
+        temp.path(),
+        &["embed", "ridge.itb", "-o", "site", "--palette", "apollo"],
+        &config,
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let html = fs::read_to_string(site.join("snippet.html")).unwrap();
+    assert!(!html.contains("palette="), "{html}");
+}
+
+#[test]
+fn the_title_is_saved_in_the_bundle() {
+    let temp = with_hike("ridge.itb");
+    let output = isotrail(
+        temp.path(),
+        &["embed", "ridge.itb", "-o", "site", "--title", "Łańcuch"],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let site = temp.path().join("site");
+    let bundle = SceneBundle::from_bytes(&fs::read(site.join("ridge.itb")).unwrap()).unwrap();
+    assert_eq!(bundle.meta.title, "Łańcuch");
+    let html = fs::read_to_string(site.join("snippet.html")).unwrap();
+    assert!(html.contains(r#"alt="Diorama of Łańcuch""#), "{html}");
+
+    // In place, the same title keeps the bundle and another is refused
+    let output = isotrail(
+        temp.path(),
+        &[
+            "embed",
+            "site/ridge.itb",
+            "-o",
+            "site",
+            "--title",
+            "Łańcuch",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let output = isotrail(
+        temp.path(),
+        &["embed", "site/ridge.itb", "-o", "site", "--title", "Other"],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        text(&output.stderr).contains("the flags would change it"),
+        "{}",
+        text(&output.stderr)
+    );
+}

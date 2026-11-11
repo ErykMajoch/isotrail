@@ -8,9 +8,11 @@ repository.workspace = true
 
 [dependencies]
 bytemuck.workspace = true
+chrono.workspace = true
 geo.workspace = true
 glam.workspace = true
 isotrail-bundle = { path = "../isotrail-bundle" }
+isotrail-track = { path = "../isotrail-track" }
 png.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

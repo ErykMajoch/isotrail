@@ -11,6 +11,7 @@ mod gpu;
 mod lighting;
 mod mesh;
 mod occlusion;
+mod options;
 mod overlay;
 mod palette;
 mod post;
@@ -38,6 +39,9 @@ pub use lighting::{
 };
 pub use mesh::{
     Mesher, SmoothMesher, Surface, TerrainMesh, Vertex, VoxelMesher, foliage, mesh_within,
+};
+pub use options::{
+    BLOCK_HEIGHT_RANGE, MesherKind, OCCLUSION_RANGE, SOFT_SHADOWS_RANGE, parse_within,
 };
 pub use overlay::{
     DEFAULT_STATS, DateFormat, OverlayStyle, OverlayText, Overlays, PANEL_TINT, PanelStyle,

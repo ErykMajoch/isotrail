@@ -4,11 +4,13 @@ use std::collections::HashMap;
 use glam::Vec2;
 use isotrail_bundle::{BundleError, SceneBundle};
 use isotrail_render::{
-    Diorama, Framing, Gpu, Insets, Look, OffscreenTarget, Pace, PixelGrid, Present, SunState,
-    TerrainMesh, TerrainRenderer, View, VoxelMesher, Walk, credit_line, mesh_within,
+    Diorama, Framing, Gpu, Insets, OffscreenTarget, Pace, PixelGrid, Present, SunState,
+    TerrainMesh, TerrainRenderer, View, Walk, credit_line, mesh_within,
 };
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
+
+use crate::options::Options;
 
 const SAFE_AREA: Insets = Insets {
     top: 0.05,
@@ -36,11 +38,13 @@ pub struct Viewer {
     present: Present,
     bundle: SceneBundle,
     mesh: TerrainMesh,
-    look: Look,
+    options: Options,
     stage: Option<Stage>,
     walk: Walk,
     view: View,
     progress: f32,
+    /// The last share given to `setProgress`, none before the first
+    share: Option<f32>,
     sun: SunState,
     time_s: f32,
     id: u32,
@@ -57,13 +61,15 @@ struct Stage {
 impl Viewer {
     /// Opens the GPU for `canvas` and loads a scene bundle (`.itb` bytes).
     /// `backend` is `"auto"` (the default: WebGPU where the browser has it,
-    /// WebGL2 otherwise) or `"webgl"`. Nothing shows until `resize`;
-    /// a failure is an `Error` whose `reason` is `"version"` (a bundle from
-    /// another isotrail), `"damaged"` (not a bundle, or cut short) or `"gpu"`
+    /// WebGL2 otherwise) or `"webgl"`. `options` sets the look, as
+    /// `setOptions` does. Nothing shows until `resize`; a failure is an
+    /// `Error` whose `reason` is `"version"` (a bundle from another
+    /// isotrail), `"damaged"` (not a bundle, or cut short) or `"gpu"`
     pub async fn load(
         canvas: HtmlCanvasElement,
         bundle: Vec<u8>,
         backend: Option<String>,
+        options: JsValue,
     ) -> Result<Viewer, JsValue> {
         console_error_panic_hook::set_once();
         let webgl_only = match backend.as_deref() {
@@ -115,9 +121,13 @@ impl Viewer {
         }
         let renderer = TerrainRenderer::new(&gpu);
         let present = Present::new(&gpu, config.format);
-        let mesh = mesh_within(&VoxelMesher::default(), &bundle, gpu.max_buffer_size())
+        let options = Options::read(&options, &bundle);
+        let mesh = mesh_within(options.mesher().as_ref(), &bundle, gpu.max_buffer_size())
             .map_err(|err| failure("gpu", err))?;
-        let (walk, sun) = (Walk::new(&bundle), SunState::for_hike(&bundle));
+        let walk = Walk::new(&bundle);
+        let sun = options
+            .held_sun
+            .unwrap_or_else(|| SunState::for_hike(&bundle));
         Ok(Viewer {
             gpu,
             surface,
@@ -126,11 +136,12 @@ impl Viewer {
             present,
             bundle,
             mesh,
-            look: Look::default(),
+            options,
             stage: None,
             walk,
             view: View::default(),
             progress: 1.0,
+            share: None,
             sun,
             time_s: 0.0,
             id,
@@ -183,6 +194,40 @@ impl Viewer {
         if self.stage.as_ref().is_some_and(|stage| stage.grid == grid) {
             return Ok(());
         }
+        self.build_stage(grid)
+    }
+
+    /// Changes the look: an object with any of `palette` (a built-in
+    /// palette's name, `"none"`, or the text of a Lospec .hex file), `mesher`
+    /// (`"voxel"` or `"smooth"`), `blockHeight`, `occlusion`, `softShadows`,
+    /// `godRays` (`"auto"`, `"on"` or `"off"`), `background` (`"sky"`,
+    /// `"transparent"` or `"#rrggbb"`) and `time` (`"HH:MM"`, local to the
+    /// hike, which then holds the sun through playback). Values may be
+    /// strings or numbers; one it can't use stays at its default with a
+    /// console warning. Fails with reason `"gpu"` when the GPU can't hold
+    /// the terrain the new options build
+    #[wasm_bindgen(js_name = setOptions)]
+    pub fn set_options(&mut self, options: JsValue) -> Result<(), JsValue> {
+        let options = Options::read(&options, &self.bundle);
+        let remesh = self.options.remeshes(&options);
+        self.options = options;
+        if remesh {
+            self.mesh = mesh_within(
+                self.options.mesher().as_ref(),
+                &self.bundle,
+                self.gpu.max_buffer_size(),
+            )
+            .map_err(|err| failure("gpu", err))?;
+            if let Some(grid) = self.stage.take().map(|stage| stage.grid) {
+                self.build_stage(grid)?;
+            }
+        }
+        self.light();
+        Ok(())
+    }
+
+    /// The diorama, its frame and turntable for a pixel grid
+    fn build_stage(&mut self, grid: PixelGrid) -> Result<(), JsValue> {
         let framing = Framing {
             width: grid.width,
             height: grid.height,
@@ -220,15 +265,9 @@ impl Viewer {
         if !share.is_finite() {
             return;
         }
-        let step = self.walk.step(Pace::Distance, share);
-        self.progress = step.progress;
-        self.sun = step.time_s.map_or_else(
-            || SunState::for_hike(&self.bundle),
-            |time_s| SunState::during(&self.bundle, time_s),
-        );
-        if let Some(stage) = &mut self.stage {
-            stage.diorama.set_sun(self.sun);
-        }
+        self.share = Some(share);
+        self.progress = self.walk.step(Pace::Distance, share).progress;
+        self.light();
     }
 
     /// Moves the rain, snow and clouds on to `seconds`, any steadily rising
@@ -311,7 +350,7 @@ impl Viewer {
             &stage.frame,
             &self.view,
             self.progress,
-            &self.look,
+            &self.options.look,
         );
         let view = texture
             .texture
@@ -344,6 +383,21 @@ fn failure(reason: &str, err: impl std::fmt::Display) -> JsValue {
 }
 
 impl Viewer {
+    /// The sun held by the options, or the one at the route's head
+    fn light(&mut self) {
+        let step = self
+            .share
+            .map(|share| self.walk.step(Pace::Distance, share));
+        self.sun = match (self.options.held_sun, step.and_then(|step| step.time_s)) {
+            (Some(held), _) => held,
+            (None, Some(time_s)) => SunState::during(&self.bundle, time_s),
+            (None, None) => SunState::for_hike(&self.bundle),
+        };
+        if let Some(stage) = &mut self.stage {
+            stage.diorama.set_sun(self.sun);
+        }
+    }
+
     /// Canvas pixel to internal pixel, with the frame centred as `Present`
     /// draws it
     fn frame_point(&self, stage: &Stage, x: f32, y: f32) -> Vec2 {

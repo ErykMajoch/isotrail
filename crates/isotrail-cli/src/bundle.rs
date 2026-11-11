@@ -56,6 +56,16 @@ pub struct BundleArgs {
     #[arg(long, value_name = "X", value_parser = parse_exaggeration)]
     exaggeration: Option<f64>,
 
+    /// Title to save instead of the hike's name
+    #[arg(long, value_name = "TEXT")]
+    title: Option<String>,
+
+    /// Read settings from the [bundle] table of this TOML file, and those of
+    /// its [render] table that bundle shares; flags given here take
+    /// precedence over it, and it over the user config file
+    #[arg(long, value_name = "FILE")]
+    config: Option<PathBuf>,
+
     #[command(flatten)]
     data: DataArgs,
 }
@@ -246,11 +256,15 @@ pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
     if let Some(dir) = &args.debug_dir {
         output::folder(dir)?;
     }
+    let inputs: Vec<&Path> = [Some(args.file.as_path()), args.config.as_deref()]
+        .into_iter()
+        .flatten()
+        .collect();
     output::plan(
         [args.output.as_path()]
             .into_iter()
             .chain(debug.iter().map(PathBuf::as_path)),
-        &[&args.file],
+        &inputs,
     )?;
     let track = crate::read_track(&args.file)?;
     let Prepared {
@@ -264,6 +278,9 @@ pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
     } = prepare(&track, &args.file, &args.data)?;
     if let Some(exaggeration) = args.exaggeration {
         bundle.grid.exaggeration = exaggeration;
+    }
+    if let Some(title) = &args.title {
+        bundle.meta.title.clone_from(title);
     }
     let bytes = bundle.to_bytes()?;
     let output = &args.output;

@@ -1,5 +1,6 @@
 //! Writes the synthetic bundles the web embed's browser check loads:
-//! `web_check_bundles <dir>` makes `hike.itb` and `weather.itb` in it
+//! `web_check_bundles <dir>` makes `hike.itb`, `weather.itb` and `timed.itb`
+//! in it
 
 use std::path::PathBuf;
 
@@ -12,10 +13,19 @@ fn main() -> std::io::Result<()> {
     let mut weather = hike_bundle();
     weather.meta.attribution[0] = "© OpenStreetMap contributors".into();
     weather.weather = Some(synthetic_weather(1_749_884_400, 12));
-    for (name, bundle) in [("hike.itb", hike_bundle()), ("weather.itb", weather)] {
+    let mut timed = hike_bundle();
+    timed.meta.timezone = Some("Europe/Rome".into());
+    for (name, bundle) in [
+        ("hike.itb", hike_bundle()),
+        ("weather.itb", weather),
+        ("timed.itb", timed),
+    ] {
         let bytes = bundle.to_bytes().map_err(std::io::Error::other)?;
         std::fs::write(dir.join(name), bytes)?;
     }
-    eprintln!("wrote hike.itb and weather.itb to {}", dir.display());
+    eprintln!(
+        "wrote hike.itb, weather.itb and timed.itb to {}",
+        dir.display()
+    );
     Ok(())
 }

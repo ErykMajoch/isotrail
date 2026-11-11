@@ -1,8 +1,8 @@
 use anyhow::{Context, bail};
 use chrono::{NaiveDate, NaiveTime, TimeZone};
 use isotrail_bundle::SceneBundle;
-use isotrail_render::{Moon, SunState};
-use isotrail_track::{Tz, moon_position, sun_position, timezone_at};
+use isotrail_render::SunState;
+use isotrail_track::{Tz, timezone_at};
 use tracing::info;
 
 pub fn parse_time(value: &str) -> Result<NaiveTime, String> {
@@ -48,34 +48,17 @@ pub fn hike_sun(bundle: &SceneBundle, time: Option<NaiveTime>) -> anyhow::Result
                 zone.name()
             )
         })?;
-    let sun = sun_position(grid.origin_lat, grid.origin_lon, at.to_utc());
-    let moon = moon_position(grid.origin_lat, grid.origin_lon, at.to_utc());
-    info!(
-        azimuth = sun.azimuth_deg,
-        elevation = sun.elevation_deg,
-        moon_azimuth = moon.azimuth_deg,
-        moon_elevation = moon.elevation_deg,
-        moon_lit = moon.illuminated,
-        "sun and moon at {}",
-        at.format("%Y-%m-%d %H:%M %Z")
-    );
-    Ok(SunState::with_moon(
-        grid,
-        sun.azimuth_deg,
-        sun.elevation_deg,
-        Some(Moon {
-            azimuth_deg: moon.azimuth_deg,
-            elevation_deg: moon.elevation_deg,
-            illuminated: moon.illuminated,
-        }),
-    )
-    .with_weather_at(bundle, at.timestamp() as f64))
+    let sun = SunState::at_instant(bundle, at.timestamp());
+    info!("sun and moon at {}", at.format("%Y-%m-%d %H:%M %Z"));
+    Ok(sun)
 }
 
 #[cfg(test)]
 mod tests {
     use isotrail_bundle::SunSample;
+    use isotrail_render::Moon;
     use isotrail_testkit::hike_bundle;
+    use isotrail_track::{moon_position, sun_position};
 
     use super::*;
 

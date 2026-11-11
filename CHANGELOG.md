@@ -12,6 +12,10 @@ All notable changes to `isotrail` are documented here.
 - **Events from `<isotrail-hike>`:** `isotrail-ready` once the diorama shows, and `isotrail-error` with a `reason` (`load`, `damaged`, `version`, `gpu` or `runtime`) when it gives up.
 - The web runtime's `Viewer` has a `credit` getter, and its load errors carry a `reason`.
 - A browser check of the embed (`web/test/check.mjs`) runs in CI.
+- **The look of your choice in the web embed.** `embed` takes `render`'s look options (`--palette`, `--mesher`, `--block-height`, `--background`, `--time`, `--occlusion`, `--soft-shadows`, `--god-rays`) and `--scale` for the poster. The poster is drawn with them, and each one that isn't the default becomes an attribute of `<isotrail-hike>` in the snippet, so the live diorama matches its poster. A palette file is copied beside the bundle. The element reads the same attributes on any page and redraws when one changes; the runtime's `Viewer.load` takes the look and `setOptions` changes it.
+- **Config files for every command.** `embed`, `bundle` and `style-lab` read config files and take `--config`. Each takes the `[render]` settings that are its own options, and its own `[embed]`, `[bundle]` or `[style-lab]` table wins over `[render]`.
+- `style-lab` takes `--aspect`, `--exaggeration`, and lists for `--scale` and `--palette` (palette files and `none` included).
+- `bundle --title` saves another title in the bundle.
 
 ### Changed
 
@@ -36,6 +40,7 @@ All notable changes to `isotrail` are documented here.
 - Options typed on the command line win over config file settings they conflict with: `--date` no longer fails when a config file sets `date-format`.
 - A missing file named by `ISOTRAIL_CONFIG` is reported instead of ignored.
 - `time` in a config file accepts a TOML time such as `07:30:00`.
+- `embed --title` reaches the live diorama: the title is saved in the bundle, so the 3D view is labelled with it as well as the poster.
 - `--detail`, `--offline` and `--overpass-url` typed for a scene bundle, which they don't affect, give a warning.
 - Animations of a recording whose times run backwards no longer crash, and its stats no longer show a negative elapsed time: the hike runs from its earliest to its latest time, with a warning.
 - A wrong timestamp, such as a first point stamped 1970, is ignored with a warning, instead of making a bundle of many megabytes with the wrong date, season and weather.

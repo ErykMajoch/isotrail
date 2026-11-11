@@ -1,6 +1,8 @@
+use chrono::DateTime;
 use glam::camera::rh::{proj, view};
 use glam::{Mat4, Vec3};
 use isotrail_bundle::{GridInfo, MoonSample, SceneBundle, SunSample};
+use isotrail_track::{moon_position, sun_position};
 
 use crate::camera::slab_angle;
 use crate::{Atmosphere, SKY_BOTTOM, SKY_TOP};
@@ -188,6 +190,28 @@ impl SunState {
             .normalize_or(sun.direction);
         }
         sun
+    }
+
+    /// The sun, moon and weather over the slab at `unix_s`, which need not
+    /// fall within the hike
+    pub fn at_instant(bundle: &SceneBundle, unix_s: i64) -> SunState {
+        let grid = &bundle.grid;
+        let Some(time) = DateTime::from_timestamp(unix_s, 0) else {
+            return SunState::for_hike(bundle);
+        };
+        let sun = sun_position(grid.origin_lat, grid.origin_lon, time);
+        let moon = moon_position(grid.origin_lat, grid.origin_lon, time);
+        SunState::with_moon(
+            grid,
+            sun.azimuth_deg,
+            sun.elevation_deg,
+            Some(Moon {
+                azimuth_deg: moon.azimuth_deg,
+                elevation_deg: moon.elevation_deg,
+                illuminated: moon.illuminated,
+            }),
+        )
+        .with_weather_at(bundle, unix_s as f64)
     }
 
     /// The sun, moon and weather at the start of the hike, or the
