@@ -113,6 +113,12 @@ isotrail render hike.itb --palette aap-64 --mesher smooth
 
 # An interactive diorama for your website: the bundle, a poster and the HTML to paste
 isotrail embed hike.gpx -o site/hikes/my-hike --with-runtime
+
+# The same in another look: the poster and the live diorama both follow it
+isotrail embed hike.gpx -o site/hikes/my-hike --palette resurrect-64 --mesher smooth
+
+# Build the diorama from the elevation alone when the map server is busy
+isotrail render hike.gpx --no-map-data
 ```
 
 ### Which format for where
@@ -163,7 +169,7 @@ Bug reports, ideas and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBU
 - Time zones from [tzf-rs](https://github.com/ringsaturn/tzf-rs), using [timezone-boundary-builder](https://github.com/evansiroky/timezone-boundary-builder) data © OpenStreetMap contributors (ODbL)
 - Palettes by AdamCYounis, Kerrie Lake and Adigun A. Polack, and the [monogram](https://datagoblin.itch.io/monogram) font by Vinícius Menézio (CC0); see [assets/README.md](assets/README.md)
 
-Every render carries a small data credit by default. If you leave it off with `--no-attribution`, please put the printed credit in your post's caption instead.
+Every render and every web embed carries a small data credit by default. If you leave it off with `--no-attribution` (or `credit="none"` on the embed), please put the printed credit in your post's caption, or near the embed on your page, instead.
 
 The elevation, map and weather services are free and shared by everyone. [Data sources and fair use](docs/how-it-works.md#data-sources-and-fair-use) explains what isotrail downloads, how the cache keeps that to a minimum, and the services' terms: in particular, Open-Meteo's free weather API is for non-commercial use only.
 

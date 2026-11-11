@@ -251,7 +251,7 @@ Writes everything a web page needs to show the hike as an interactive diorama wi
 `<name>` is the input's file name without its extension. A GPX file is first prepared in the same way as [`bundle`](#bundle), with the same data options.
 
 ```html
-<script type="module" src="/hikes/derwent/isotrail-embed.js?v=1.3.0"></script>
+<script type="module" src="/hikes/derwent/isotrail-embed.js?v=1.3.1"></script>
 <isotrail-hike src="/hikes/derwent/derwent-edge.itb" poster="/hikes/derwent/derwent-edge.png" aspect="wide" style="display:block;aspect-ratio:16/9"><img src="/hikes/derwent/derwent-edge.png" alt="Diorama of Derwent Edge" style="display:block;width:100%"></isotrail-hike>
 ```
 
