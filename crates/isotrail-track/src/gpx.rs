@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::mem;
 
 use chrono::{DateTime, NaiveDateTime, Utc};
@@ -13,10 +14,42 @@ pub struct GpxReader;
 
 impl TrackReader for GpxReader {
     fn parse(&self, input: &[u8]) -> Result<Track, TrackError> {
-        let text = std::str::from_utf8(input).map_err(|e| TrackError::Encoding {
-            line: line_at(input, e.valid_up_to()),
-        })?;
-        Parser::new(text).run()
+        Parser::new(&decode(input)?).run()
+    }
+}
+
+/// UTF-8, or UTF-16 when the input starts with its byte-order mark
+fn decode(input: &[u8]) -> Result<Cow<'_, str>, TrackError> {
+    let unit: fn([u8; 2]) -> u16 = match input {
+        [0xFF, 0xFE, ..] => u16::from_le_bytes,
+        [0xFE, 0xFF, ..] => u16::from_be_bytes,
+        _ => {
+            return std::str::from_utf8(input).map(Cow::Borrowed).map_err(|e| {
+                TrackError::Encoding {
+                    line: line_at(input, e.valid_up_to()),
+                }
+            });
+        }
+    };
+    let body = &input[2..];
+    let (pairs, rest) = body.as_chunks::<2>();
+    let units = pairs.iter().map(|&pair| unit(pair));
+    let mut text = String::with_capacity(pairs.len());
+    for c in char::decode_utf16(units) {
+        let Ok(c) = c else {
+            return Err(utf16_error(&text));
+        };
+        text.push(c);
+    }
+    if !rest.is_empty() {
+        return Err(utf16_error(&text));
+    }
+    Ok(Cow::Owned(text))
+}
+
+fn utf16_error(decoded: &str) -> TrackError {
+    TrackError::Encoding {
+        line: 1 + decoded.matches('\n').count(),
     }
 }
 
@@ -67,21 +100,62 @@ struct Labels {
 
 struct Coordinate {
     attribute: &'static str,
-    field: &'static str,
     limit: f64,
 }
 
 const LAT: Coordinate = Coordinate {
     attribute: "lat",
-    field: "latitude",
     limit: 90.0,
 };
 
 const LON: Coordinate = Coordinate {
     attribute: "lon",
-    field: "longitude",
     limit: 180.0,
 };
+
+/// Values that could not be read and were left out
+#[derive(Default)]
+struct Skipped {
+    points: usize,
+    elevations: usize,
+    times: usize,
+    first_line: Option<usize>,
+}
+
+impl Skipped {
+    fn report(&self) {
+        let mut parts = Vec::new();
+        if self.points > 0 {
+            parts.push(format!(
+                "skipped {} without a valid position",
+                count(self.points, "point")
+            ));
+        }
+        let unreadable: Vec<String> = [(self.elevations, "elevation"), (self.times, "time")]
+            .into_iter()
+            .filter(|&(n, _)| n > 0)
+            .map(|(n, what)| count(n, what))
+            .collect();
+        if !unreadable.is_empty() {
+            parts.push(format!(
+                "{} could not be read and {} treated as missing",
+                unreadable.join(" and "),
+                if self.elevations + self.times == 1 {
+                    "is"
+                } else {
+                    "are"
+                }
+            ));
+        }
+        if let Some(line) = self.first_line {
+            warn!("{} (first on line {line})", parts.join("; "));
+        }
+    }
+}
+
+fn count(n: usize, what: &str) -> String {
+    format!("{n} {what}{}", if n == 1 { "" } else { "s" })
+}
 
 struct Parser<'a> {
     src: &'a str,
@@ -95,6 +169,11 @@ struct Parser<'a> {
     route_segments: Vec<Segment>,
     points: Vec<TrackPoint>,
     point: Option<TrackPoint>,
+    /// `<trk>` elements with at least one point
+    tracks: usize,
+    /// Segments before the open `<trk>`
+    track_start: usize,
+    skipped: Skipped,
 }
 
 impl<'a> Parser<'a> {
@@ -111,6 +190,9 @@ impl<'a> Parser<'a> {
             route_segments: Vec::new(),
             points: Vec::new(),
             point: None,
+            tracks: 0,
+            track_start: 0,
+            skipped: Skipped::default(),
         }
     }
 
@@ -176,15 +258,21 @@ impl<'a> Parser<'a> {
             }
         };
         match tag {
+            Tag::Trk => self.track_start = self.track_segments.len(),
             Tag::Trkseg | Tag::Rte => self.points.clear(),
             Tag::Trkpt | Tag::Rtept => {
-                let element = if tag == Tag::Trkpt { "trkpt" } else { "rtept" };
-                self.point = Some(TrackPoint {
-                    lat: self.coordinate(e, element, &LAT, pos)?,
-                    lon: self.coordinate(e, element, &LON, pos)?,
+                let lat = self.coordinate(e, &LAT, pos)?;
+                let lon = self.coordinate(e, &LON, pos)?;
+                self.point = lat.zip(lon).map(|(lat, lon)| TrackPoint {
+                    lat,
+                    lon,
                     ele: None,
                     time: None,
                 });
+                if self.point.is_none() {
+                    self.skipped.points += 1;
+                    self.note_skip(pos);
+                }
             }
             _ if tag.has_text() => self.text.clear(),
             _ => {}
@@ -218,24 +306,36 @@ impl<'a> Parser<'a> {
             }
             Tag::Ele => {
                 let value = self.text.trim();
-                if !value.is_empty() {
-                    let ele = value
-                        .parse::<f64>()
-                        .ok()
-                        .filter(|ele| ele.is_finite())
-                        .ok_or_else(|| self.invalid(pos, "elevation", value))?;
+                if !value.is_empty() && self.point.is_some() {
+                    let ele = value.parse::<f64>().ok().filter(|ele| ele.is_finite());
+                    if ele.is_none() {
+                        self.skipped.elevations += 1;
+                        self.note_skip(pos);
+                    }
                     if let Some(point) = &mut self.point {
-                        point.ele = Some(ele);
+                        point.ele = ele;
                     }
                 }
             }
             Tag::Time => {
                 let value = self.text.trim();
-                if !value.is_empty() {
-                    let time = parse_time(value).ok_or_else(|| self.invalid(pos, "time", value))?;
-                    if let Some(point) = &mut self.point {
-                        point.time = Some(time);
+                if !value.is_empty() && self.point.is_some() {
+                    let time = parse_time(value);
+                    if time.is_none() {
+                        self.skipped.times += 1;
+                        self.note_skip(pos);
                     }
+                    if let Some(point) = &mut self.point {
+                        point.time = time;
+                    }
+                }
+            }
+            Tag::Trk => {
+                if self.track_segments[self.track_start..]
+                    .iter()
+                    .any(|s| !s.points.is_empty())
+                {
+                    self.tracks += 1;
                 }
             }
             Tag::Trkpt | Tag::Rtept => self.points.extend(self.point.take()),
@@ -245,46 +345,41 @@ impl<'a> Parser<'a> {
             Tag::Rte => self.route_segments.push(Segment {
                 points: mem::take(&mut self.points),
             }),
-            Tag::Gpx | Tag::Metadata | Tag::Trk | Tag::Other => {}
+            Tag::Gpx | Tag::Metadata | Tag::Other => {}
         }
         Ok(())
     }
 
+    /// `None` when the attribute is missing or not a valid coordinate
     fn coordinate(
         &self,
         e: &BytesStart,
-        element: &'static str,
         coordinate: &Coordinate,
         pos: u64,
-    ) -> Result<f64, TrackError> {
+    ) -> Result<Option<f64>, TrackError> {
         let xml_error = |source: quick_xml::Error| TrackError::Xml {
             line: self.line(pos),
             source,
         };
-        let attribute = e
+        let Some(attribute) = e
             .try_get_attribute(coordinate.attribute)
             .map_err(|err| xml_error(err.into()))?
-            .ok_or_else(|| TrackError::MissingAttribute {
-                line: self.line(pos),
-                element,
-                attribute: coordinate.attribute,
-            })?;
+        else {
+            return Ok(None);
+        };
         let value = attribute
             .normalized_value(XmlVersion::Implicit1_0)
             .map_err(xml_error)?;
-        value
+        Ok(value
             .trim()
             .parse::<f64>()
             .ok()
-            .filter(|v| v.is_finite() && v.abs() <= coordinate.limit)
-            .ok_or_else(|| self.invalid(pos, coordinate.field, &value))
+            .filter(|v| v.is_finite() && v.abs() <= coordinate.limit))
     }
 
-    fn invalid(&self, pos: u64, field: &'static str, value: &str) -> TrackError {
-        TrackError::InvalidValue {
-            line: self.line(pos),
-            field,
-            value: value.to_owned(),
+    fn note_skip(&mut self, pos: u64) {
+        if self.skipped.first_line.is_none() {
+            self.skipped.first_line = Some(self.line(pos));
         }
     }
 
@@ -296,6 +391,7 @@ impl<'a> Parser<'a> {
     }
 
     fn finish(self) -> Track {
+        self.skipped.report();
         let has_points = |segments: &[Segment]| segments.iter().any(|s| !s.points.is_empty());
         let use_routes = !has_points(&self.track_segments) && has_points(&self.route_segments);
 
@@ -311,6 +407,12 @@ impl<'a> Parser<'a> {
         } else {
             if has_points(&self.route_segments) {
                 debug!("ignoring planned routes in favour of the recorded track");
+            }
+            if self.tracks > 1 {
+                warn!(
+                    "the file has {} tracks; they are joined into one hike",
+                    self.tracks
+                );
             }
             (self.track, self.track_segments)
         };
@@ -331,6 +433,9 @@ impl<'a> Parser<'a> {
 
 fn parse_time(value: &str) -> Option<DateTime<Utc>> {
     if let Ok(time) = DateTime::parse_from_rfc3339(value) {
+        return Some(time.with_timezone(&Utc));
+    }
+    if let Ok(time) = DateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S%.f%z") {
         return Some(time.with_timezone(&Utc));
     }
     NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S%.f")
@@ -581,68 +686,90 @@ mod tests {
     }
 
     #[test]
-    fn rejects_missing_coordinates() {
-        let err = parse("<gpx><trk><trkseg>\n<trkpt lat=\"1\"/></trkseg></trk></gpx>").unwrap_err();
-        assert!(
-            matches!(
-                err,
-                TrackError::MissingAttribute {
-                    line: 2,
-                    element: "trkpt",
-                    attribute: "lon"
-                }
-            ),
-            "{err:?}"
-        );
-        let err = parse(r#"<gpx><rte><rtept lon="1"/></rte></gpx>"#).unwrap_err();
-        assert!(
-            matches!(
-                err,
-                TrackError::MissingAttribute {
-                    element: "rtept",
-                    attribute: "lat",
-                    ..
-                }
-            ),
-            "{err:?}"
-        );
+    fn skips_points_without_a_valid_position() {
+        let track = parse(
+            r#"<gpx><trk><trkseg>
+              <trkpt lat="1" lon="1"/>
+              <trkpt lat="1"><ele>5</ele><time>2025-07-01T08:00:00Z</time></trkpt>
+              <trkpt lon="1"/>
+              <trkpt lat="91" lon="0"/>
+              <trkpt lat="0" lon="-180.5"/>
+              <trkpt lat="NaN" lon="0"/>
+              <trkpt lat="1,5" lon="0"/>
+              <trkpt lat="2" lon="2"/>
+            </trkseg></trk><rte><rtept lon="1"/></rte></gpx>"#,
+        )
+        .unwrap();
+        let points: Vec<_> = track.points().map(|p| (p.lat, p.lon)).collect();
+        assert_eq!(points, [(1.0, 1.0), (2.0, 2.0)]);
     }
 
     #[test]
-    fn rejects_invalid_values() {
-        let cases = [
-            (r#"<trkpt lat="91" lon="0"/>"#, "latitude", "91"),
-            (r#"<trkpt lat="0" lon="-180.5"/>"#, "longitude", "-180.5"),
-            (r#"<trkpt lat="NaN" lon="0"/>"#, "latitude", "NaN"),
-            (r#"<trkpt lat="1,5" lon="0"/>"#, "latitude", "1,5"),
-            (
-                r#"<trkpt lat="1" lon="0"><ele>high</ele></trkpt>"#,
-                "elevation",
-                "high",
-            ),
-            (
-                r#"<trkpt lat="1" lon="0"><ele>inf</ele></trkpt>"#,
-                "elevation",
-                "inf",
-            ),
-            (
-                r#"<trkpt lat="1" lon="0"><time>noon</time></trkpt>"#,
-                "time",
-                "noon",
-            ),
-        ];
-        for (point, expected_field, expected_value) in cases {
-            let gpx = format!("<gpx><trk><trkseg>\n{point}</trkseg></trk></gpx>");
-            match parse(&gpx) {
-                Err(TrackError::InvalidValue { line, field, value }) => {
-                    assert_eq!(
-                        (line, field, value.as_str()),
-                        (2, expected_field, expected_value)
-                    );
-                }
-                other => panic!("{point}: expected an invalid value error, got {other:?}"),
-            }
+    fn unreadable_elevations_and_times_are_missing() {
+        let track = parse(
+            r#"<gpx><trk><trkseg>
+              <trkpt lat="1" lon="0"><ele>high</ele><time>2025-07-01T08:00:00Z</time></trkpt>
+              <trkpt lat="2" lon="0"><ele>inf</ele></trkpt>
+              <trkpt lat="3" lon="0"><ele>nan</ele><time>noon</time></trkpt>
+              <trkpt lat="4" lon="0"><ele>7</ele><time>2025-07-01T08:00:09+0000</time></trkpt>
+            </trkseg></trk></gpx>"#,
+        )
+        .unwrap();
+        let points = &track.segments[0].points;
+        assert_eq!(points.len(), 4);
+        let eles: Vec<_> = points.iter().map(|p| p.ele).collect();
+        assert_eq!(eles, [None, None, None, Some(7.0)]);
+        let times: Vec<_> = points.iter().map(|p| p.time).collect();
+        assert_eq!(times, [Some(utc(8, 0, 0)), None, None, Some(utc(8, 0, 9))]);
+    }
+
+    #[test]
+    fn accepts_offsets_without_a_colon() {
+        assert_eq!(parse_time("2025-07-01T08:00:00+0000"), Some(utc(8, 0, 0)));
+        assert_eq!(parse_time("2025-07-01T10:00:00.5+0200"), {
+            Some(utc(8, 0, 0) + Duration::milliseconds(500))
+        });
+    }
+
+    fn utf16(text: &str, big_endian: bool) -> Vec<u8> {
+        let mut bytes = if big_endian {
+            vec![0xFE, 0xFF]
+        } else {
+            vec![0xFF, 0xFE]
+        };
+        for unit in text.encode_utf16() {
+            bytes.extend(if big_endian {
+                unit.to_be_bytes()
+            } else {
+                unit.to_le_bytes()
+            });
         }
+        bytes
+    }
+
+    #[test]
+    fn reads_utf16_with_a_byte_order_mark() {
+        let gpx = r#"<?xml version="1.0" encoding="UTF-16"?>
+            <gpx><trk><name>Grań nad łąką</name><trkseg>
+              <trkpt lat="1" lon="2"/>
+            </trkseg></trk></gpx>"#;
+        for big_endian in [false, true] {
+            let track = GpxReader.parse(&utf16(gpx, big_endian)).unwrap();
+            assert_eq!(track.name.as_deref(), Some("Grań nad łąką"));
+            assert_eq!(track.point_count(), 1);
+        }
+    }
+
+    #[test]
+    fn rejects_broken_utf16_with_line() {
+        let mut bytes = utf16("<gpx>\n<trk>", false);
+        bytes.extend([0x00, 0xD8, b'<', 0x00]);
+        let err = GpxReader.parse(&bytes).unwrap_err();
+        assert!(matches!(err, TrackError::Encoding { line: 2 }), "{err:?}");
+        let mut odd = utf16("<gpx/>", false);
+        odd.push(b'x');
+        let err = GpxReader.parse(&odd).unwrap_err();
+        assert!(matches!(err, TrackError::Encoding { line: 1 }), "{err:?}");
     }
 
     #[test]

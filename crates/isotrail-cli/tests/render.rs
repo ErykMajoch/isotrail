@@ -127,6 +127,57 @@ fn renders_a_gpx_file_from_cached_data_as_a_story_png() {
 }
 
 #[test]
+fn renders_a_gif_of_a_track_whose_times_run_backwards() {
+    let temp = tempfile::tempdir().unwrap();
+    let cache_dir = temp.path().join("cache");
+    warm(&cache_dir);
+    // The same walk in two segments sharing a point, so the slab is the one
+    // cached, the second stamped a day before the first
+    let gpx = fs::read_to_string(fixtures().join("gpx/snowdon.gpx")).unwrap();
+    let point = |n: usize| gpx.match_indices("<trkpt").nth(n).unwrap().0;
+    let (head, tail) = (&gpx[..point(8)], &gpx[point(7)..]);
+    let tail = tail.replace("2025-06-14", "2025-06-13");
+    fs::write(
+        temp.path().join("jumped.gpx"),
+        format!("{head}</trkseg>\n<trkseg>\n{tail}"),
+    )
+    .unwrap();
+    let output = isotrail(
+        &cache_dir,
+        temp.path(),
+        &[
+            "render",
+            "jumped.gpx",
+            "-o",
+            "jumped.gif",
+            "--detail",
+            "32",
+            "--offline",
+            "--no-weather",
+            "--aspect",
+            "square",
+            "--scale",
+            "10",
+            "--duration",
+            "1s",
+            "--fps",
+            "10",
+            "--pace",
+            "time",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let stderr = text(&output.stderr);
+    assert_eq!(
+        stderr.matches("the times run backwards in 1 place").count(),
+        1,
+        "{stderr}"
+    );
+    let frames = decode_gif(&fs::read(temp.path().join("jumped.gif")).unwrap());
+    assert_eq!(frames.len(), 10);
+}
+
+#[test]
 fn renders_a_bundle_into_the_current_directory_by_default() {
     let temp = tempfile::tempdir().unwrap();
     fs::write(temp.path().join("hill.itb"), diorama_bundle().to_bytes()).unwrap();

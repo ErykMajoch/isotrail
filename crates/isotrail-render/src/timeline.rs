@@ -308,7 +308,8 @@ impl Walk {
         if let (Some(clock), Some(time_s), Some(total)) =
             (&self.clock, moment.hike_time_s, self.stats.elapsed_s)
         {
-            stats.elapsed_s = Some(((time_s - clock.start_s).round() as i64).clamp(0, total));
+            stats.elapsed_s =
+                Some(((time_s - clock.start_s).round() as i64).clamp(0, total.max(0)));
         }
         stats
     }
@@ -421,10 +422,13 @@ impl Clock {
             real_s: vec![0.0],
             nights: Vec::new(),
         };
-        let mut paced = 0.0;
+        let (mut paced, mut real) = (0.0, 0.0);
         for (i, pair) in points.windows(2).enumerate() {
             let (a, b) = (pair[0], pair[1]);
-            let dt = (b.time? - a.time?).max(0) as f64;
+            // Times that run backwards hold the clock where it was
+            let reached = ((b.time? - first) as f64).max(real);
+            let dt = reached - real;
+            real = reached;
             let gap = route.breaks.binary_search(&(i as u32 + 1)).is_ok();
             let walk_s = f64::from((b.distance_m - a.distance_m).max(0.0)) / CRAWL_M_PER_S;
             paced += if dt >= NIGHT_S {
@@ -437,7 +441,7 @@ impl Clock {
             };
             clock.distance_m.push(b.distance_m);
             clock.paced_s.push(paced);
-            clock.real_s.push((b.time? - first) as f64);
+            clock.real_s.push(real);
         }
         (paced > 0.0).then_some(clock)
     }
@@ -889,5 +893,50 @@ mod tests {
         assert_eq!(last.progress, 1.0);
         assert_eq!(last.hike_time_s, Some(START + 4_600.0));
         assert_eq!(last.yaw_offset_deg, 0.0);
+    }
+
+    #[test]
+    fn times_running_backwards_never_turn_the_clock_back() {
+        // The second half stamped a day before the first, as written by a
+        // device whose clock jumped
+        let mut bundle = hike(
+            &[
+                (0.0, Some(86_400)),
+                (250.0, Some(86_650)),
+                (500.0, Some(86_900)),
+                (750.0, Some(0)),
+                (1000.0, Some(250)),
+            ],
+            vec![3],
+        );
+        bundle.meta.stats.elapsed_s = Some(-86_650);
+        let walk = Walk::new(&bundle);
+        assert!(walk.is_timed());
+        for pace in [Pace::Distance, Pace::Time] {
+            let motion = Motion {
+                pace,
+                ..Motion::default()
+            };
+            let mut last = f64::MIN;
+            for index in 0..motion.timeline.frame_count() {
+                let moment = motion.moment(&walk, index);
+                let time = moment.hike_time_s.unwrap();
+                assert!(time >= last, "{pace:?} frame {index}");
+                last = time;
+                let stats = walk.stats_at(&moment);
+                assert!(stats.elapsed_s.unwrap() >= 0, "{pace:?} frame {index}");
+            }
+        }
+    }
+
+    #[test]
+    fn time_pace_keeps_a_slow_logging_interval_whole() {
+        let points: Vec<(f32, Option<i64>)> = (0..=10)
+            .map(|i| (i as f32 * 100.0, Some(i64::from(i) * 61)))
+            .collect();
+        let walk = Walk::new(&hike(&points, Vec::new()));
+        for share in [0.1, 0.25, 0.5, 0.9] {
+            assert_near(walk.progress(Pace::Time, share), share);
+        }
     }
 }

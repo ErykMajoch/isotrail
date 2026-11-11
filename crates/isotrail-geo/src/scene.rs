@@ -4,6 +4,8 @@ use isotrail_bundle::{
 };
 use isotrail_track::{Track, TrackPoint, TrackStats, haversine_m, moon_position, sun_position};
 
+use tracing::warn;
+
 use crate::{GeoError, Grid, Heightmap, LandcoverMap, leaf_day, vertical_exaggeration};
 
 /// Consecutive segments further apart than this are drawn with a gap
@@ -14,6 +16,8 @@ pub const PROFILE_SAMPLES: usize = 256;
 pub const OSM_ATTRIBUTION: &str = "© OpenStreetMap contributors";
 pub const DEM_ATTRIBUTION: &str = "Terrain Tiles (AWS)";
 pub const SUN_STEP_S: i64 = 300;
+/// Longer hikes get no sun, moon or weather
+pub const MAX_TIMED_SPAN_DAYS: i64 = 31;
 
 /// Packs the prepared terrain and the route into a bundle; `heightmap` is
 /// the one [`LandcoverMap::classify`] levelled
@@ -104,11 +108,18 @@ fn hike_stats(stats: &TrackStats) -> HikeStats {
 }
 
 /// The sun and moon over the slab every [`SUN_STEP_S`] from the start, and
-/// at the end
+/// at the end; none past [`MAX_TIMED_SPAN_DAYS`]
 fn sky_track(stats: &TrackStats, lat: f64, lon: f64) -> (Vec<SunSample>, Vec<MoonSample>) {
     let (Some(start), Some(end)) = (stats.start, stats.end) else {
         return Default::default();
     };
+    let days = (end - start).num_days();
+    if days > MAX_TIMED_SPAN_DAYS {
+        warn!(
+            "the hike spans {days} days, more than {MAX_TIMED_SPAN_DAYS}, so the sun and moon are left out"
+        );
+        return Default::default();
+    }
     let step = chrono::TimeDelta::seconds(SUN_STEP_S);
     std::iter::successors(Some(start), |&t| Some(t + step))
         .take_while(|&t| t < end)
@@ -450,6 +461,29 @@ mod tests {
         }
         let untimed = bundle(&untimed);
         assert!(untimed.sun.is_empty() && untimed.moon.is_empty());
+    }
+
+    #[test]
+    fn a_glitched_first_time_leaves_a_normal_sky_track() {
+        let mut glitched = track(&[(0.0, 2000.0), (2600.0, 8000.0)], true);
+        glitched.segments[0].points[0].time = Utc.timestamp_opt(0, 0).single();
+        let sky = bundle(&glitched.clean().unwrap());
+        assert_eq!(sky.sun.len(), 9);
+        assert_eq!(sky.meta.stats.start, Some(1_750_000_060));
+    }
+
+    #[test]
+    fn hikes_longer_than_a_month_get_no_sky_track() {
+        let mut long = track(&[(0.0, 2000.0), (2600.0, 8000.0)], true);
+        let points = long.segments.iter_mut().flat_map(|s| &mut s.points);
+        for (i, point) in points.enumerate() {
+            point.time = Utc
+                .timestamp_opt(1_750_000_000 + i as i64 * 86_400, 0)
+                .single();
+        }
+        let sky = bundle(&long);
+        assert!(sky.meta.stats.elapsed_s.unwrap() > 31 * 86_400);
+        assert!(sky.sun.is_empty() && sky.moon.is_empty());
     }
 
     #[test]

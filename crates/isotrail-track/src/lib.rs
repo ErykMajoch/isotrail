@@ -18,6 +18,7 @@
 //! # Ok::<(), isotrail_track::TrackError>(())
 //! ```
 
+mod clean;
 mod error;
 mod geodesy;
 mod gpx;
@@ -37,6 +38,6 @@ pub use isotrail_bundle::Units;
 pub use model::{MIN_SEGMENT_POINTS, Segment, Track, TrackPoint};
 pub use moon::{MoonPosition, moon_position};
 pub use reader::TrackReader;
-pub use stats::{Bounds, GAIN_THRESHOLD_M, PAUSE_THRESHOLD, SMOOTHING_WINDOW_M, TrackStats};
+pub use stats::{Bounds, GAIN_THRESHOLD_M, MIN_PAUSE, SMOOTHING_WINDOW_M, TrackStats};
 pub use sun::{SunPosition, sun_position};
 pub use timezone::timezone_at;

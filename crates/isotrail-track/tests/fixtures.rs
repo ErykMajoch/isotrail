@@ -222,3 +222,76 @@ fn simplified_track_keeps_its_ends() {
         assert_eq!(a.points.last(), b.points.last());
     }
 }
+
+fn clean(bytes: &[u8]) -> Track {
+    GpxReader.parse(bytes).unwrap().clean().unwrap()
+}
+
+#[test]
+fn bad_values_are_skipped_or_missing() {
+    let track = clean(fixture!("bad-values.gpx"));
+    assert_eq!(track.point_count(), 6);
+    let eles = track.points().filter(|p| p.ele.is_none()).count();
+    let times = track.points().filter(|p| p.time.is_none()).count();
+    assert_eq!((eles, times), (1, 1));
+    let offset = track.segments[0].points[3];
+    assert_eq!(
+        offset.time,
+        Some(Utc.with_ymd_and_hms(2025, 7, 1, 8, 0, 15).unwrap())
+    );
+}
+
+#[test]
+fn utf16_is_read() {
+    let track = clean(fixture!("utf16.gpx"));
+    assert_eq!(track.name.as_deref(), Some("Grań nad łąką"));
+    assert_eq!(track.point_count(), 4);
+}
+
+#[test]
+fn several_tracks_are_joined() {
+    let track = clean(fixture!("multi-track.gpx"));
+    assert_eq!(segment_lengths(&track), [3, 3]);
+}
+
+#[test]
+fn reversed_segments_give_a_positive_elapsed_time() {
+    let stats = clean(fixture!("reversed-segments.gpx")).stats().unwrap();
+    assert_eq!(
+        stats.start,
+        Some(Utc.with_ymd_and_hms(2025, 7, 1, 8, 0, 15).unwrap())
+    );
+    assert_eq!(
+        stats.end,
+        Some(Utc.with_ymd_and_hms(2025, 7, 2, 8, 0, 12).unwrap())
+    );
+    assert_eq!(stats.moving, Some(TimeDelta::seconds(24)));
+}
+
+#[test]
+fn glitched_times_are_ignored() {
+    let track = clean(fixture!("glitched-times.gpx"));
+    assert_eq!(track.points().filter(|p| p.time.is_none()).count(), 2);
+    let stats = track.stats().unwrap();
+    assert_eq!(
+        stats.start,
+        Some(Utc.with_ymd_and_hms(2025, 7, 1, 8, 0, 3).unwrap())
+    );
+    assert_eq!(stats.elapsed, Some(TimeDelta::seconds(24)));
+}
+
+#[test]
+fn stray_points_are_dropped() {
+    let track = clean(fixture!("stray-points.gpx"));
+    assert_eq!(track.point_count(), 10);
+    let stats = track.stats().unwrap();
+    assert!(stats.distance_m < 300.0, "{}", stats.distance_m);
+    assert!(stats.bounds.min_lat > 46.0 && stats.bounds.max_lon < 10.1);
+}
+
+#[test]
+fn a_slow_logger_still_has_moving_time() {
+    let stats = clean(fixture!("cadence-61s.gpx")).stats().unwrap();
+    assert_eq!(stats.moving, Some(TimeDelta::seconds(10 * 61)));
+    assert_eq!(stats.elapsed, Some(TimeDelta::seconds(11 * 61 + 600)));
+}

@@ -11,7 +11,14 @@ isotrail has six commands. Each one prints its options with `--help`, for exampl
 
 The rest of this page also covers [how outputs are written](#writing-files) and [exit codes](#exit-codes).
 
-isotrail reads GPX 1.0 and 1.1 files, with tracks (`<trk>`) or routes (`<rte>`). Every pause in a recording starts a new track segment. Where two segments are more than 50 m apart, the route is drawn with a gap instead of a straight jump. Files without timestamps still render, but without time-based stats. Files without elevations take their heights from the terrain.
+isotrail reads GPX 1.0 and 1.1 files, with tracks (`<trk>`) or routes (`<rte>`), saved as UTF-8 or as UTF-16 with a byte-order mark. Every pause in a recording starts a new track segment. Where two segments are more than 50 m apart, the route is drawn with a gap instead of a straight jump. Several tracks in one file are joined into one hike, with a note. Files without timestamps still render, but without time-based stats. Files without elevations take their heights from the terrain.
+
+A recording with a few bad points still renders, and each kind of repair is reported once as a warning:
+
+- A point without a valid latitude and longitude is skipped. An elevation or time that can't be read is treated as missing.
+- A time before 1990, or weeks away from the points around it and from the rest of the hike, is ignored. Hikes that span more than 31 days get no sun, moon or weather.
+- A stray point far from both its neighbours, while they lie close together (faster than 100 m/s to reach, or for points without times a jump 50 times the usual step), is dropped.
+- When the times run backwards, the hike starts at its earliest time and ends at its latest, and animations keep their clock from going back.
 
 ## render
 
@@ -78,7 +85,7 @@ The available stats are:
 | --- | --- |
 | `distance` | Total distance |
 | `gain`, `loss` | Elevation gained and lost, smoothed to ignore GPS noise |
-| `time` | Moving time, without pauses |
+| `time` | Moving time, without pauses: gaps between points longer than a minute, or than three logging intervals for devices that log less often |
 | `elapsed` | Time from start to finish, as `3d 5h` for multi-day trips |
 | `high`, `low` | Highest and lowest point |
 | `speed`, `pace` | Average speed or pace over the moving time |

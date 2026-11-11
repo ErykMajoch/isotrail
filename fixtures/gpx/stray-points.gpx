@@ -1,0 +1,60 @@
+<?xml version="1.0"?>
+<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1" creator="isotrail test fixture">
+  <metadata>
+    <name><![CDATA[Synthetic Stray Fixes]]></name>
+    <desc><![CDATA[One point at 0, 0 and one three degrees east of the walk.]]></desc>
+  </metadata>
+  <trk>
+    <name><![CDATA[Synthetic Stray Fixes]]></name>
+    <trkseg>
+      <trkpt lat="46.50000" lon="10.00000">
+        <ele>2000.00</ele>
+        <time>2025-07-01T08:00:00Z</time>
+      </trkpt>
+      <trkpt lat="46.50020" lon="10.00000">
+        <ele>2000.50</ele>
+        <time>2025-07-01T08:00:03Z</time>
+      </trkpt>
+      <trkpt lat="46.50040" lon="10.00000">
+        <ele>2001.00</ele>
+        <time>2025-07-01T08:00:06Z</time>
+      </trkpt>
+      <trkpt lat="0.00000" lon="0.00000">
+        <ele>2001.50</ele>
+        <time>2025-07-01T08:00:09Z</time>
+      </trkpt>
+      <trkpt lat="46.50080" lon="10.00000">
+        <ele>2002.00</ele>
+        <time>2025-07-01T08:00:12Z</time>
+      </trkpt>
+      <trkpt lat="46.50100" lon="10.00000">
+        <ele>2002.50</ele>
+        <time>2025-07-01T08:00:15Z</time>
+      </trkpt>
+      <trkpt lat="46.50120" lon="10.00000">
+        <ele>2003.00</ele>
+        <time>2025-07-01T08:00:18Z</time>
+      </trkpt>
+      <trkpt lat="46.50140" lon="10.00000">
+        <ele>2003.50</ele>
+        <time>2025-07-01T08:00:21Z</time>
+      </trkpt>
+      <trkpt lat="46.50160" lon="13.00000">
+        <ele>2004.00</ele>
+        <time>2025-07-01T08:00:24Z</time>
+      </trkpt>
+      <trkpt lat="46.50180" lon="10.00000">
+        <ele>2004.50</ele>
+        <time>2025-07-01T08:00:27Z</time>
+      </trkpt>
+      <trkpt lat="46.50200" lon="10.00000">
+        <ele>2005.00</ele>
+        <time>2025-07-01T08:00:30Z</time>
+      </trkpt>
+      <trkpt lat="46.50220" lon="10.00000">
+        <ele>2005.50</ele>
+        <time>2025-07-01T08:00:33Z</time>
+      </trkpt>
+    </trkseg>
+  </trk>
+</gpx>

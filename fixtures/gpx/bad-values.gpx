@@ -1,0 +1,44 @@
+<?xml version="1.0"?>
+<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1" creator="isotrail test fixture">
+  <metadata>
+    <name><![CDATA[Synthetic Damaged Recording]]></name>
+    <desc><![CDATA[A NaN elevation, a point without a latitude, an unreadable time, a latitude of 91 and a +0000 offset.]]></desc>
+  </metadata>
+  <trk>
+    <name><![CDATA[Synthetic Damaged Recording]]></name>
+    <trkseg>
+      <trkpt lat="46.50000" lon="10.00000">
+        <ele>2000.00</ele>
+        <time>2025-07-01T08:00:00Z</time>
+      </trkpt>
+      <trkpt lat="46.50020" lon="10.00000">
+        <ele>nan</ele>
+        <time>2025-07-01T08:00:03Z</time>
+      </trkpt>
+      <trkpt lon="10.00000">
+        <ele>2001.00</ele>
+        <time>2025-07-01T08:00:06Z</time>
+      </trkpt>
+      <trkpt lat="46.50060" lon="10.00000">
+        <ele>2001.50</ele>
+        <time>noon</time>
+      </trkpt>
+      <trkpt lat="91" lon="10.00000">
+        <ele>2002.00</ele>
+        <time>2025-07-01T08:00:12Z</time>
+      </trkpt>
+      <trkpt lat="46.50100" lon="10.00000">
+        <ele>2002.50</ele>
+        <time>2025-07-01T08:00:15+0000</time>
+      </trkpt>
+      <trkpt lat="46.50120" lon="10.00000">
+        <ele>2003.00</ele>
+        <time>2025-07-01T08:00:18Z</time>
+      </trkpt>
+      <trkpt lat="46.50140" lon="10.00000">
+        <ele>2003.50</ele>
+        <time>2025-07-01T08:00:21Z</time>
+      </trkpt>
+    </trkseg>
+  </trk>
+</gpx>

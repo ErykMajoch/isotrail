@@ -115,3 +115,51 @@ fn unreadable_files_fail_with_context() {
         "{err}"
     );
 }
+
+/// Exit 0, and each warning once
+fn stats_warning_once(file: &str, warnings: &[&str]) -> String {
+    let output = isotrail(&["stats", fixture(file).to_str().unwrap()]);
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    for warning in warnings {
+        assert_eq!(
+            stderr.matches(warning).count(),
+            1,
+            "{warning:?} in\n{stderr}"
+        );
+    }
+    stdout(&output)
+}
+
+#[test]
+fn bad_values_are_reported_and_skipped() {
+    let text = stats_warning_once(
+        "bad-values.gpx",
+        &[
+            "skipped 2 points without a valid position; 1 elevation and 1 time could not be read and are treated as missing (first on line 15)",
+        ],
+    );
+    assert!(text.contains("Points     6 in 1 segment"), "{text}");
+}
+
+#[test]
+fn glitched_times_and_stray_points_are_reported() {
+    let text = stats_warning_once(
+        "glitched-times.gpx",
+        &["ignored 2 timestamps before 1990 or weeks away from the rest of the hike"],
+    );
+    assert!(text.contains("Elapsed    0m 24s"), "{text}");
+    assert!(text.contains("Start      2025-07-01"), "{text}");
+    let text = stats_warning_once(
+        "stray-points.gpx",
+        &["dropped 2 stray points far from their neighbours"],
+    );
+    assert!(text.contains("Distance   0.24 km"), "{text}");
+}
+
+#[test]
+fn several_tracks_are_joined_with_a_note() {
+    stats_warning_once(
+        "multi-track.gpx",
+        &["the file has 2 tracks; they are joined into one hike"],
+    );
+}

@@ -1,0 +1,60 @@
+<?xml version="1.0"?>
+<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1" creator="isotrail test fixture">
+  <metadata>
+    <name><![CDATA[Synthetic Slow Logger]]></name>
+    <desc><![CDATA[A point every 61 seconds and one ten-minute stop.]]></desc>
+  </metadata>
+  <trk>
+    <name><![CDATA[Synthetic Slow Logger]]></name>
+    <trkseg>
+      <trkpt lat="46.50000" lon="10.00000">
+        <ele>2000.00</ele>
+        <time>2025-07-01T08:00:00Z</time>
+      </trkpt>
+      <trkpt lat="46.50050" lon="10.00000">
+        <ele>2000.50</ele>
+        <time>2025-07-01T08:01:01Z</time>
+      </trkpt>
+      <trkpt lat="46.50100" lon="10.00000">
+        <ele>2001.00</ele>
+        <time>2025-07-01T08:02:02Z</time>
+      </trkpt>
+      <trkpt lat="46.50150" lon="10.00000">
+        <ele>2001.50</ele>
+        <time>2025-07-01T08:03:03Z</time>
+      </trkpt>
+      <trkpt lat="46.50200" lon="10.00000">
+        <ele>2002.00</ele>
+        <time>2025-07-01T08:04:04Z</time>
+      </trkpt>
+      <trkpt lat="46.50250" lon="10.00000">
+        <ele>2002.50</ele>
+        <time>2025-07-01T08:05:05Z</time>
+      </trkpt>
+      <trkpt lat="46.50300" lon="10.00000">
+        <ele>2003.00</ele>
+        <time>2025-07-01T08:16:06Z</time>
+      </trkpt>
+      <trkpt lat="46.50350" lon="10.00000">
+        <ele>2003.50</ele>
+        <time>2025-07-01T08:17:07Z</time>
+      </trkpt>
+      <trkpt lat="46.50400" lon="10.00000">
+        <ele>2004.00</ele>
+        <time>2025-07-01T08:18:08Z</time>
+      </trkpt>
+      <trkpt lat="46.50450" lon="10.00000">
+        <ele>2004.50</ele>
+        <time>2025-07-01T08:19:09Z</time>
+      </trkpt>
+      <trkpt lat="46.50500" lon="10.00000">
+        <ele>2005.00</ele>
+        <time>2025-07-01T08:20:10Z</time>
+      </trkpt>
+      <trkpt lat="46.50550" lon="10.00000">
+        <ele>2005.50</ele>
+        <time>2025-07-01T08:21:11Z</time>
+      </trkpt>
+    </trkseg>
+  </trk>
+</gpx>

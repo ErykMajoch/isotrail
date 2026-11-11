@@ -11,6 +11,7 @@ All notable changes to `isotrail` are documented here.
 - `embed` given a bundle that already sits in its output folder leaves it untouched, and refuses when `--season`, `--no-weather` or `--exaggeration` would change it.
 - Mistakes in how a command is called, such as `--step-fps` above `--fps` or a GIF without a palette, exit with code 2 and a usage hint, like unknown options. Ctrl+C exits with 130. The exit codes are listed in the usage guide.
 - `--block-height` with `--mesher smooth` does nothing, with a warning, instead of stopping the render.
+- A GPX file with a few bad points is read instead of refused: a point without a valid position is skipped, and an elevation or time that can't be read (such as `nan`) is treated as missing, with one warning that counts them. Files saved as UTF-16 with a byte-order mark and times with offsets such as `+0000` are read too, and a file with several tracks says that they were joined.
 
 ### Fixed
 
@@ -19,6 +20,10 @@ All notable changes to `isotrail` are documented here.
 - A missing file named by `ISOTRAIL_CONFIG` is reported instead of ignored.
 - `time` in a config file accepts a TOML time such as `07:30:00`.
 - `--detail`, `--offline` and `--overpass-url` typed for a scene bundle, which they don't affect, give a warning.
+- Animations of a recording whose times run backwards no longer crash, and its stats no longer show a negative elapsed time: the hike runs from its earliest to its latest time, with a warning.
+- A wrong timestamp, such as a first point stamped 1970, is ignored with a warning, instead of making a bundle of many megabytes with the wrong date, season and weather.
+- A stray point far from the rest of the recording, such as one at 0°, 0°, is dropped with a warning, instead of stretching the diorama over hundreds of kilometres.
+- Moving time is no longer blank for devices that log a point once a minute or less often.
 
 ## [1.3.0] - 2026-11-10
 

@@ -5,7 +5,7 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use isotrail_bundle::{
     Units, WEATHER_ATTRIBUTION, Weather, WeatherDataset, WeatherSample, weather_condition,
 };
-use isotrail_geo::{Fetcher, OpenMeteoSource, WeatherRequest, WeatherSource};
+use isotrail_geo::{Fetcher, MAX_TIMED_SPAN_DAYS, OpenMeteoSource, WeatherRequest, WeatherSource};
 use isotrail_track::{Track, Tz};
 use serde::Serialize;
 use tracing::warn;
@@ -20,6 +20,13 @@ pub fn look_up(track: &Track, fetcher: impl Fetcher) -> Option<(Weather, String)
         warn!("the track has no times, so the weather is left out");
         return None;
     };
+    let days = (request.last_hour() - request.hours[0]) / (24 * HOUR_S);
+    if days > MAX_TIMED_SPAN_DAYS {
+        warn!(
+            "the hike spans {days} days, more than {MAX_TIMED_SPAN_DAYS}, so the weather is left out"
+        );
+        return None;
+    }
     match OpenMeteoSource::new(fetcher).weather(&request) {
         Ok(weather) => {
             let places = request.locations.len();

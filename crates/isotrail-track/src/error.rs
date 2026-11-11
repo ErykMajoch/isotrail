@@ -10,8 +10,8 @@ pub enum TrackError {
     #[error("the input is empty")]
     EmptyInput,
 
-    /// The input is not valid UTF-8
-    #[error("line {line}: the input is not valid UTF-8")]
+    /// The input is not valid UTF-8, or UTF-16 after a byte-order mark
+    #[error("line {line}: the input is not valid UTF-8 or UTF-16 text")]
     Encoding {
         /// 1-based line of the first invalid byte
         line: usize,
@@ -38,26 +38,6 @@ pub enum TrackError {
     NotGpx {
         /// Local name of the root element that was found
         root: String,
-    },
-
-    /// A required attribute is missing
-    #[error("line {line}: <{element}> has no `{attribute}` attribute")]
-    MissingAttribute {
-        /// 1-based line of the element
-        line: usize,
-        element: &'static str,
-        attribute: &'static str,
-    },
-
-    /// A value is not a valid number or time, or is out of range
-    #[error("line {line}: invalid {field} {value:?}")]
-    InvalidValue {
-        /// 1-based line of the value
-        line: usize,
-        /// What the value describes e.g. `"latitude"`
-        field: &'static str,
-        /// The value as written in the file
-        value: String,
     },
 
     /// No segment is left after cleaning

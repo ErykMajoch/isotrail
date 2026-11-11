@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
-use tracing::debug;
+use tracing::{debug, warn};
 
-use crate::TrackError;
+use crate::{TrackError, clean};
 
 pub const MIN_SEGMENT_POINTS: usize = 2;
 
@@ -26,7 +26,36 @@ pub struct TrackPoint {
 }
 
 impl Track {
+    /// Ignores glitched times, drops stray points and segments too short to
+    /// draw, warning about each, and warns when the times run backwards
     pub fn clean(mut self) -> Result<Track, TrackError> {
+        let glitched = clean::clear_glitched_times(&mut self);
+        if glitched > 0 {
+            warn!(
+                "ignored {glitched} timestamp{} before 1990 or weeks away from the rest of the hike",
+                plural(glitched)
+            );
+        }
+        let strays = clean::drop_stray_points(&mut self);
+        if strays > 0 {
+            warn!(
+                "dropped {strays} stray point{} far from {}",
+                plural(strays),
+                if strays == 1 {
+                    "its neighbours"
+                } else {
+                    "their neighbours"
+                }
+            );
+        }
+        let backward = clean::backward_steps(&self);
+        if backward > 0 {
+            warn!(
+                "the times run backwards in {backward} place{}; the hike starts and ends at its earliest and latest times",
+                plural(backward)
+            );
+        }
+
         let before = self.segments.len();
         self.segments
             .retain(|segment| segment.points.len() >= MIN_SEGMENT_POINTS);
@@ -53,6 +82,10 @@ impl Track {
             .map(|segment| segment.points.len())
             .sum()
     }
+}
+
+fn plural(n: usize) -> &'static str {
+    if n == 1 { "" } else { "s" }
 }
 
 #[cfg(test)]

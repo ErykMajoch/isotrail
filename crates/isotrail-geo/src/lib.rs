@@ -55,8 +55,8 @@ pub use osm::{
 pub use projection::LocalProjection;
 pub use relief::{EXAGGERATION_FACTOR, MAX_EXAGGERATION, MIN_EXAGGERATION, vertical_exaggeration};
 pub use scene::{
-    DEM_ATTRIBUTION, OSM_ATTRIBUTION, PROFILE_SAMPLES, ROUTE_BREAK_M, ROUTE_TOLERANCE_CELLS,
-    scene_bundle,
+    DEM_ATTRIBUTION, MAX_TIMED_SPAN_DAYS, OSM_ATTRIBUTION, PROFILE_SAMPLES, ROUTE_BREAK_M,
+    ROUTE_TOLERANCE_CELLS, scene_bundle,
 };
 pub use season::{
     ICE_DEGREE_DAYS, LAPSE_C_PER_M, SNOWY_DEPTH_M, SeasonKind, SnowReading, TROPICS_DEG,

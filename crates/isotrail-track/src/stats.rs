@@ -9,8 +9,9 @@ use crate::{Segment, Track, TrackError, TrackPoint, timezone_at};
 pub const SMOOTHING_WINDOW_M: f64 = 100.0;
 /// Elevation change needed before a climb or descent counts
 pub const GAIN_THRESHOLD_M: f64 = 3.0;
-/// Longer gaps between consecutive points count as stopped time
-pub const PAUSE_THRESHOLD: TimeDelta = TimeDelta::seconds(60);
+/// Longer gaps between consecutive points count as stopped time, or longer
+/// than three logging intervals for devices that log less often
+pub const MIN_PAUSE: TimeDelta = TimeDelta::seconds(60);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Bounds {
@@ -31,10 +32,12 @@ pub struct TrackStats {
     pub min_ele_m: Option<f64>,
     pub max_ele_m: Option<f64>,
     pub bounds: Bounds,
+    /// Earliest time, in case the times run backwards
     pub start: Option<DateTime<Utc>>,
+    /// Latest time
     pub end: Option<DateTime<Utc>>,
     pub elapsed: Option<TimeDelta>,
-    /// Time inside segments, without gaps over [`PAUSE_THRESHOLD`]
+    /// Time between points inside segments, without pauses (see [`MIN_PAUSE`])
     pub moving: Option<TimeDelta>,
     /// Zone at the first point, for display only
     pub timezone: Option<Tz>,
@@ -70,14 +73,20 @@ impl Track {
             warn!("the track has no elevation data");
         }
 
-        let start = points.iter().find_map(|p| p.time);
-        let end = points.iter().rev().find_map(|p| p.time);
-        let moving = self
+        let start = points.iter().filter_map(|p| p.time).min();
+        let end = points.iter().filter_map(|p| p.time).max();
+        let intervals: Vec<TimeDelta> = self
             .segments
             .iter()
             .flat_map(|segment| segment.points.windows(2))
-            .filter_map(|w| Some(w[1].time? - w[0].time?))
-            .filter(|dt| *dt > TimeDelta::zero() && *dt <= PAUSE_THRESHOLD)
+            .filter_map(|w| Some((w[1].time? - w[0].time?).abs()))
+            .filter(|dt| *dt > TimeDelta::zero())
+            .collect();
+        let pause = pause_threshold(&intervals);
+        let moving = intervals
+            .iter()
+            .filter(|dt| **dt <= pause)
+            .copied()
             .reduce(|a, b| a + b);
         if start.is_none() {
             warn!("the track has no timestamps, so time-based features are off");
@@ -114,6 +123,15 @@ impl Track {
             timezone: timezone_at(first.lat, first.lon),
         })
     }
+}
+
+/// [`MIN_PAUSE`], or three times the median logging interval if longer
+fn pause_threshold(intervals: &[TimeDelta]) -> TimeDelta {
+    let mut sorted = intervals.to_vec();
+    sorted.sort_unstable();
+    sorted
+        .get(sorted.len() / 2)
+        .map_or(MIN_PAUSE, |&median| MIN_PAUSE.max(median * 3))
 }
 
 /// Centred moving average over a window measured along the track, so the
@@ -292,7 +310,59 @@ mod tests {
         ]])
         .stats()
         .unwrap();
-        assert_eq!(stats.moving, Some(PAUSE_THRESHOLD));
+        assert_eq!(stats.moving, Some(MIN_PAUSE));
+    }
+
+    #[test]
+    fn the_pause_threshold_follows_the_logging_interval() {
+        let every = |secs: i64, n: usize| -> Vec<TrackPoint> {
+            (0..n)
+                .map(|i| point(i, None, Some(i as i64 * secs)))
+                .collect()
+        };
+        let mut minutely = every(61, 10);
+        minutely.push(point(10, None, Some(9 * 61 + 600)));
+        let stats = track(vec![minutely]).stats().unwrap();
+        assert_eq!(stats.moving, Some(TimeDelta::seconds(9 * 61)));
+
+        let mut three_s = every(3, 10);
+        three_s.push(point(10, None, Some(27 + 61)));
+        let stats = track(vec![three_s]).stats().unwrap();
+        assert_eq!(stats.moving, Some(TimeDelta::seconds(27)));
+        assert_eq!(pause_threshold(&[]), MIN_PAUSE);
+    }
+
+    #[test]
+    fn times_running_backwards_give_start_before_end() {
+        let later = |i: usize, secs: i64| point(i, None, Some(86_400 + secs));
+        let t = track(vec![
+            vec![later(0, 0), later(1, 3), later(2, 6)],
+            vec![point(3, None, Some(0)), point(4, None, Some(3))],
+        ]);
+        let stats = t.stats().unwrap();
+        assert_eq!(
+            stats.start,
+            Some(Utc.timestamp_opt(1_750_000_000, 0).unwrap())
+        );
+        assert_eq!(
+            stats.end,
+            Some(Utc.timestamp_opt(1_750_000_000 + 86_406, 0).unwrap())
+        );
+        assert_eq!(stats.elapsed, Some(TimeDelta::seconds(86_406)));
+        assert_eq!(stats.moving, Some(TimeDelta::seconds(9)));
+
+        // Recorded in reverse: the steps still take their time
+        let reversed = track(vec![
+            (0..5)
+                .map(|i| point(i, None, Some(12 - 3 * i as i64)))
+                .collect(),
+        ]);
+        let stats = reversed.stats().unwrap();
+        assert_eq!(
+            stats.start,
+            Some(Utc.timestamp_opt(1_750_000_000, 0).unwrap())
+        );
+        assert_eq!(stats.moving, Some(TimeDelta::seconds(12)));
     }
 
     #[test]
