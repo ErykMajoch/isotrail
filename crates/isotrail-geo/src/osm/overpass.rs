@@ -306,7 +306,6 @@ fn points(geometry: &[Option<LatLon>]) -> Option<Vec<(f64, f64)>> {
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
-    use std::net::TcpListener;
     use std::num::NonZeroU32;
 
     use isotrail_track::{Segment, Track, TrackPoint};
@@ -553,11 +552,7 @@ mod tests {
 
     #[test]
     fn an_unreachable_server_is_given_up_on_sooner() {
-        let port = TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
+        let port = crate::fetch::CLOSED_PORT;
         let counting = Counting {
             inner: HttpFetcher::new().unwrap().with_retry(RetryPolicy::once()),
             calls: Cell::new(0),

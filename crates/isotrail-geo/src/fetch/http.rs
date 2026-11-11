@@ -396,11 +396,7 @@ mod tests {
 
     #[test]
     fn nothing_listening_is_unreachable() {
-        let port = TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
+        let port = crate::fetch::CLOSED_PORT;
         let error = fetcher()
             .with_retry(RetryPolicy::once())
             .get(&format!("http://127.0.0.1:{port}/"))

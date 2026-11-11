@@ -328,13 +328,9 @@ fn a_failing_overpass_server_names_the_ways_out() {
     let temp = tempfile::tempdir().unwrap();
     let cache_dir = temp.path().join("cache");
     warm(&cache_dir, false);
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
     let server = std::thread::spawn(move || {
-        let listener = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
         let (mut stream, _) = listener.accept().unwrap();
         let mut buf = [0; 65_536];
         let _ = std::io::Read::read(&mut stream, &mut buf);

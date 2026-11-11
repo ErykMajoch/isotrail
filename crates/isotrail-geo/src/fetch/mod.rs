@@ -11,6 +11,12 @@ pub use error::FetchError;
 pub use http::{HttpFetcher, MAX_RESPONSE_BYTES, RetryPolicy, USER_AGENT};
 pub use recorded::RecordedFetcher;
 
+// For tests that need nothing listening. Port 1 lies below every system's ephemeral range, so no test server or
+// connection is ever given it, and with no socket on it every system refuses at once. A freed port can be handed
+// to a parallel test, and macOS drops (rather than refuses) connections to a socket that is bound but not listening
+#[cfg(test)]
+pub(crate) const CLOSED_PORT: u16 = 1;
+
 /// Where remote data comes from, so tests can swap the network for fixtures
 pub trait Fetcher {
     fn get(&self, url: &str) -> Result<Vec<u8>, FetchError>;
