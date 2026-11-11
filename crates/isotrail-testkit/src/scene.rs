@@ -216,7 +216,7 @@ pub fn synthetic_weather(first: i64, hours: usize) -> Weather {
             rain_mm: rain,
             snowfall_cm: snow,
             snow_depth_m: 0.05,
-            wind_speed_m_s: 8.0 - h,
+            wind_speed_m_s: (8.0 - h).max(0.5),
             wind_direction_deg: (250.0 + h * 10.0) % 360.0,
         }
     };
@@ -231,9 +231,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn diorama_bundle_round_trips_and_has_every_feature() {
+    fn every_bundle_round_trips() {
+        let mut weathered = hike_bundle();
+        weathered.weather = Some(synthetic_weather(1_750_000_000 / 3600 * 3600, 12));
+        let hill = bundle(
+            grid(4, 3, 10.0),
+            &[5.0, 7.0, 9.0, 4.0, 6.0, 8.0, 3.0, 5.0, 7.0, 2.0, 4.0, 6.0],
+            &[
+                Landcover::Water,
+                Landcover::Water,
+                Landcover::Grassland,
+                Landcover::Rock,
+            ]
+            .repeat(3),
+        );
+        for bundle in [diorama_bundle(), hike_bundle(), weathered, hill] {
+            let bytes = bundle.to_bytes().unwrap();
+            assert_eq!(SceneBundle::from_bytes(&bytes).unwrap(), bundle);
+        }
+    }
+
+    #[test]
+    fn diorama_bundle_has_every_feature() {
         let bundle = diorama_bundle();
-        assert_eq!(SceneBundle::from_bytes(&bundle.to_bytes()).unwrap(), bundle);
         for class in [
             Landcover::Water,
             Landcover::Rock,

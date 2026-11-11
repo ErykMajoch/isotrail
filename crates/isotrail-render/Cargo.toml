@@ -25,6 +25,7 @@ wgpu = { workspace = true, features = ["webgl"] }
 
 [dev-dependencies]
 isotrail-testkit = { path = "../isotrail-testkit" }
+miniz_oxide.workspace = true
 
 [lints]
 workspace = true

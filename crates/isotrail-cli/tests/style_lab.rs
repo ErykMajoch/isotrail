@@ -13,7 +13,11 @@ fn png_size(path: &Path) -> (u32, u32) {
 #[test]
 fn style_lab_renders_every_combination_and_a_contact_sheet() {
     let temp = tempfile::tempdir().unwrap();
-    fs::write(temp.path().join("hill.itb"), diorama_bundle().to_bytes()).unwrap();
+    fs::write(
+        temp.path().join("hill.itb"),
+        diorama_bundle().to_bytes().unwrap(),
+    )
+    .unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_isotrail"))
         .args(["style-lab", "hill.itb", "-o", "lab"])
         .current_dir(temp.path())

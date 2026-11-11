@@ -1,6 +1,6 @@
 use isotrail_bundle::{Landcover, SceneBundle};
 
-use super::{Columns, Mesher, Seasonal, Surface, TerrainMesh, cover, slab_position, strata};
+use super::{Columns, Mesher, Seasonal, Surface, TerrainMesh, cover, props, slab_position, strata};
 
 /// A height at every cell corner and two flat-shaded triangles per cell,
 /// coloured by the cell's landcover, over layered slab sides
@@ -44,6 +44,29 @@ impl Mesher for SmoothMesher {
         );
         mesh.surface = Surface::Triangles { cols, corners };
         mesh
+    }
+
+    fn vertex_bound(&self, bundle: &SceneBundle, limit: u64) -> u64 {
+        let grid = &bundle.grid;
+        let vertices = props::MAX_VERTICES + 6 * grid.cells() as u64;
+        if vertices > limit {
+            return vertices;
+        }
+        let cols = grid.cols as usize;
+        let corners = corner_heights(bundle);
+        let seasonal = Seasonal::new(bundle);
+        let columns =
+            Columns::new(grid, bundle.terrain.landcover.clone()).in_season(bundle, &seasonal);
+        let block = grid.cell_size_m as f32;
+        vertices
+            + strata::vertex_bound(
+                &columns,
+                bundle.prop_seed,
+                block,
+                strata::base(block),
+                |_, (col, row)| corners[row * (cols + 1) + col],
+                limit - vertices,
+            )
     }
 }
 

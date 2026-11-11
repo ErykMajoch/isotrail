@@ -74,7 +74,7 @@ pub fn parse_exaggeration(value: &str) -> Result<f64, String> {
 pub struct DataArgs {
     /// Grid cells along the long side of the terrain slab
     #[arg(long, value_name = "N", default_value_t = DEFAULT_DETAIL.get(),
-          value_parser = clap::value_parser!(u32).range(8..=1024))]
+          value_parser = clap::value_parser!(u32).range(8..=i64::from(isotrail_bundle::MAX_GRID_SIDE)))]
     detail: u32,
 
     /// Only use elevation and map data that is already in the cache
@@ -265,7 +265,7 @@ pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
     if let Some(exaggeration) = args.exaggeration {
         bundle.grid.exaggeration = exaggeration;
     }
-    let bytes = bundle.to_bytes();
+    let bytes = bundle.to_bytes()?;
     let output = &args.output;
     output::write(output, |file| Ok(file.write_all(&bytes)?))?;
     let mut written = vec![(output.clone(), Some(bytes.len()))];

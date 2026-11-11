@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use glam::Vec2;
 use isotrail_bundle::SceneBundle;
 use isotrail_render::{
-    Diorama, Framing, Gpu, Insets, Look, Mesher, OffscreenTarget, Pace, PixelGrid, Present,
-    SunState, TerrainMesh, TerrainRenderer, View, VoxelMesher, Walk,
+    Diorama, Framing, Gpu, Insets, Look, OffscreenTarget, Pace, PixelGrid, Present, SunState,
+    TerrainMesh, TerrainRenderer, View, VoxelMesher, Walk, mesh_within,
 };
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
@@ -104,7 +104,7 @@ impl Viewer {
         }
         let renderer = TerrainRenderer::new(&gpu);
         let present = Present::new(&gpu, config.format);
-        let mesh = VoxelMesher::default().mesh(&bundle);
+        let mesh = mesh_within(&VoxelMesher::default(), &bundle, gpu.max_buffer_size())?;
         let (walk, sun) = (Walk::new(&bundle), SunState::for_hike(&bundle));
         Ok(Viewer {
             gpu,
@@ -170,7 +170,7 @@ impl Viewer {
             safe: SAFE_AREA,
         };
         let turn: Vec<f32> = (0..360).step_by(FIT_STEP_DEG).map(|d| d as f32).collect();
-        let diorama = Diorama::new(
+        let diorama = match Diorama::new(
             &self.gpu,
             &self.renderer,
             &self.bundle,
@@ -178,7 +178,14 @@ impl Viewer {
             &framing,
             &turn,
             self.sun,
-        );
+        ) {
+            Ok(diorama) => diorama,
+            Err(err) => {
+                web_sys::console::error_1(&JsValue::from_str(&err.to_string()));
+                self.stage = None;
+                return;
+            }
+        };
         let frame = OffscreenTarget::new(&self.gpu, grid.width, grid.height);
         // At the new scale the focus can fall outside the whole-slab view
         self.view = diorama.turntable().clamp(self.view);

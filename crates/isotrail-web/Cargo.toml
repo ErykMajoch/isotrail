@@ -17,7 +17,7 @@ isotrail-render = { path = "../isotrail-render" }
 js-sys.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
-web-sys = { workspace = true, features = ["HtmlCanvasElement"] }
+web-sys = { workspace = true, features = ["HtmlCanvasElement", "console"] }
 wgpu = { workspace = true, features = ["webgl"] }
 
 [package.metadata.wasm-pack.profile.release]

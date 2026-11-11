@@ -1,3 +1,6 @@
+use std::f64::consts::TAU;
+use std::ops::RangeInclusive;
+
 use miniz_oxide::deflate::compress_to_vec;
 use miniz_oxide::inflate::decompress_to_vec_with_limit;
 
@@ -6,23 +9,31 @@ use crate::{BundleError, Landcover, SceneBundle};
 pub const MAGIC: [u8; 4] = *b"ITB1";
 /// Bumped whenever the payload layout changes
 pub const FORMAT_VERSION: u16 = 5;
+pub const MAX_GRID_SIDE: u32 = 1024;
 const HEADER_LEN: usize = MAGIC.len() + 2;
 const COMPRESSION_LEVEL: u8 = 9;
 const MAX_PAYLOAD_BYTES: usize = 256 << 20;
+const MAX_CELL_SIZE_M: f64 = 1e6;
+const EXAGGERATION: RangeInclusive<f64> = 0.1..=100.0;
+/// More than the drop from the highest peak to the deepest trench
+const MAX_RELIEF_M: f32 = 20_000.0;
+const DAMAGED: &str = "its data is cut short or garbled";
 
 pub fn is_bundle(bytes: &[u8]) -> bool {
     bytes.starts_with(&MAGIC)
 }
 
 impl SceneBundle {
-    /// Magic, little-endian format version, then the deflated postcard payload
-    pub fn to_bytes(&self) -> Vec<u8> {
+    /// Magic, little-endian format version, then the deflated postcard
+    /// payload. Refuses a scene that [`SceneBundle::from_bytes`] would refuse
+    pub fn to_bytes(&self) -> Result<Vec<u8>, BundleError> {
+        self.validate().map_err(BundleError::Invalid)?;
         let payload = postcard::to_allocvec(self).expect("bundles always serialise");
         let mut bytes = Vec::with_capacity(HEADER_LEN + payload.len() / 2);
         bytes.extend_from_slice(&MAGIC);
         bytes.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
         bytes.extend(compress_to_vec(&payload, COMPRESSION_LEVEL));
-        bytes
+        Ok(bytes)
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<SceneBundle, BundleError> {
@@ -30,23 +41,22 @@ impl SceneBundle {
             return Err(BundleError::NotABundle);
         }
         let found = u16::from_le_bytes([bytes[4], bytes[5]]);
-        if found != FORMAT_VERSION {
-            return Err(BundleError::UnsupportedVersion {
-                found,
-                supported: FORMAT_VERSION,
-            });
+        let supported = FORMAT_VERSION;
+        if found < supported {
+            return Err(BundleError::OlderVersion { found, supported });
         }
+        if found > supported {
+            return Err(BundleError::NewerVersion { found, supported });
+        }
+        let damaged = || BundleError::Corrupt(DAMAGED.into());
         let payload = decompress_to_vec_with_limit(&bytes[HEADER_LEN..], MAX_PAYLOAD_BYTES)
-            .map_err(|err| BundleError::Corrupt(format!("could not decompress ({err})")))?;
-        let (bundle, rest) = postcard::take_from_bytes::<SceneBundle>(&payload)
-            .map_err(|err| BundleError::Corrupt(err.to_string()))?;
+            .map_err(|_| damaged())?;
+        let (bundle, rest) =
+            postcard::take_from_bytes::<SceneBundle>(&payload).map_err(|_| damaged())?;
         if !rest.is_empty() {
-            return Err(BundleError::Corrupt(format!(
-                "{} unexpected bytes at the end",
-                rest.len()
-            )));
+            return Err(damaged());
         }
-        bundle.validate()?;
+        bundle.validate().map_err(BundleError::Corrupt)?;
         Ok(bundle)
     }
 
@@ -56,12 +66,51 @@ impl SceneBundle {
         fnv1a(&postcard::to_allocvec(&content).expect("bundles always serialise"))
     }
 
-    fn validate(&self) -> Result<(), BundleError> {
-        let corrupt = |what: String| Err(BundleError::Corrupt(what));
-        let cells = self.grid.cells();
-        if cells == 0 {
-            return corrupt("the grid has no cells".into());
+    fn validate(&self) -> Result<(), String> {
+        self.validate_grid()?;
+        self.validate_route()?;
+        self.validate_sky_and_weather()?;
+        let season = &self.season;
+        if season.leaf_day.is_some_and(|day| !(1..=366).contains(&day))
+            || [season.snow_line_m, season.ice_line_m]
+                .iter()
+                .flatten()
+                .any(|line| !line.is_finite())
+        {
+            return Err(format!("season {season:?}"));
         }
+        Ok(())
+    }
+
+    fn validate_grid(&self) -> Result<(), String> {
+        let grid = &self.grid;
+        let sides = 1..=MAX_GRID_SIDE;
+        if !(sides.contains(&grid.cols) && sides.contains(&grid.rows)) {
+            return Err(format!(
+                "a grid of {} × {} cells (each side takes 1 to {MAX_GRID_SIDE})",
+                grid.cols, grid.rows
+            ));
+        }
+        if !(grid.cell_size_m > 0.0 && grid.cell_size_m <= MAX_CELL_SIZE_M) {
+            return Err(format!("cell size {} m", grid.cell_size_m));
+        }
+        if !EXAGGERATION.contains(&grid.exaggeration) {
+            return Err(format!("exaggeration {}", grid.exaggeration));
+        }
+        if !(grid.rotation_rad.is_finite() && grid.rotation_rad.abs() <= TAU) {
+            return Err(format!("rotation {}", grid.rotation_rad));
+        }
+        if !((-90.0..=90.0).contains(&grid.origin_lat)
+            && (-180.0..=180.0).contains(&grid.origin_lon)
+            && grid.center_m.0.is_finite()
+            && grid.center_m.1.is_finite())
+        {
+            return Err(format!(
+                "grid origin {}, {} and centre {:?}",
+                grid.origin_lat, grid.origin_lon, grid.center_m
+            ));
+        }
+        let cells = grid.cells();
         let terrain = &self.terrain;
         for (layer, len) in [
             ("heights", terrain.heights.len()),
@@ -69,47 +118,102 @@ impl SceneBundle {
             ("lines", terrain.lines.len()),
         ] {
             if len != cells {
-                return corrupt(format!("{len} {layer} for {cells} cells"));
+                return Err(format!("{len} {layer} for {cells} cells"));
             }
         }
-        if !(terrain.height_scale_m.is_finite() && terrain.height_scale_m > 0.0) {
-            return corrupt(format!("height scale {}", terrain.height_scale_m));
+        if !(terrain.height_scale_m > 0.0
+            && terrain.height_scale_m * f32::from(u16::MAX) <= MAX_RELIEF_M)
+        {
+            return Err(format!("height scale {}", terrain.height_scale_m));
+        }
+        if !terrain.height_offset_m.is_finite() {
+            return Err(format!("height offset {}", terrain.height_offset_m));
         }
         if let Some(&class) = terrain
             .landcover
             .iter()
             .find(|&&c| Landcover::try_from(c).is_err())
         {
-            return corrupt(format!("unknown landcover class {class}"));
+            return Err(format!("unknown landcover class {class}"));
         }
-        if let Some(&cell) = self
-            .water
+        for body in &self.water {
+            if !body.level_m.is_finite() {
+                return Err(format!("water level {}", body.level_m));
+            }
+            if let Some(&cell) = body.cells.iter().find(|&&c| c as usize >= cells) {
+                return Err(format!("water in cell {cell} of {cells}"));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_route(&self) -> Result<(), String> {
+        let points = &self.route.points;
+        if let Some(&at) = self
+            .route
+            .breaks
             .iter()
-            .flat_map(|body| &body.cells)
-            .find(|&&c| c as usize >= cells)
+            .find(|&&b| b == 0 || b as usize >= points.len())
         {
-            return corrupt(format!("water in cell {cell} of {cells}"));
+            return Err(format!("route break at point {at} of {}", points.len()));
         }
-        let points = self.route.points.len();
-        if let Some(&at) = self.route.breaks.iter().find(|&&b| b as usize >= points) {
-            return corrupt(format!("route break at point {at} of {points}"));
+        if self.route.breaks.windows(2).any(|w| w[0] >= w[1]) {
+            return Err("route breaks out of order".into());
         }
+        let (cols, rows) = (self.grid.cols as f32, self.grid.rows as f32);
+        if let Some(point) = points.iter().find(|p| {
+            !((0.0..=cols).contains(&p.col)
+                && (0.0..=rows).contains(&p.row)
+                && p.distance_m.is_finite()
+                && p.draped_m.is_finite()
+                && p.gps_ele_m.is_none_or(f32::is_finite))
+        }) {
+            return Err(format!("route point {point:?}"));
+        }
+        if let Some(sample) = self
+            .profile
+            .iter()
+            .find(|s| !(s.distance_m.is_finite() && s.ele_m.is_finite()))
+        {
+            return Err(format!("profile sample {sample:?}"));
+        }
+        let stats = &self.meta.stats;
+        let bounds = &stats.bounds;
+        let numbers = [
+            stats.distance_m,
+            bounds.min_lat,
+            bounds.min_lon,
+            bounds.max_lat,
+            bounds.max_lon,
+        ];
+        let optional = [stats.gain_m, stats.loss_m, stats.min_ele_m, stats.max_ele_m];
+        if !numbers
+            .iter()
+            .chain(optional.iter().flatten())
+            .all(|v| v.is_finite())
+        {
+            return Err("statistics that aren't numbers".into());
+        }
+        Ok(())
+    }
+
+    fn validate_sky_and_weather(&self) -> Result<(), String> {
         if let Some(sample) = self
             .sun
             .iter()
             .find(|s| !(s.azimuth_deg.is_finite() && (-90.0..=90.0).contains(&s.elevation_deg)))
         {
-            return corrupt(format!("sun sample {sample:?}"));
+            return Err(format!("sun sample {sample:?}"));
         }
         if self.sun.windows(2).any(|w| w[0].time >= w[1].time) {
-            return corrupt("sun samples out of order".into());
+            return Err("sun samples out of order".into());
         }
         if let Some(sample) = self.moon.iter().find(|s| {
             !(s.azimuth_deg.is_finite()
                 && (-90.0..=90.0).contains(&s.elevation_deg)
                 && (0.0..=1.0).contains(&s.illuminated))
         }) {
-            return corrupt(format!("moon sample {sample:?}"));
+            return Err(format!("moon sample {sample:?}"));
         }
         if self.moon.len() != self.sun.len()
             || self
@@ -118,11 +222,11 @@ impl SceneBundle {
                 .zip(&self.sun)
                 .any(|(m, s)| m.time != s.time)
         {
-            return corrupt("moon samples don't match the sun's".into());
+            return Err("moon samples don't match the sun's".into());
         }
         if let Some(weather) = &self.weather {
             if weather.samples.is_empty() {
-                return corrupt("weather without samples".into());
+                return Err("weather without samples".into());
             }
             let percent = 0.0..=100.0;
             if let Some(sample) = weather.samples.iter().find(|s| {
@@ -146,20 +250,11 @@ impl SceneBundle {
                     .all(|v| v.is_finite() && *v >= 0.0)
                     && (0.0..=360.0).contains(&s.wind_direction_deg))
             }) {
-                return corrupt(format!("weather sample {sample:?}"));
+                return Err(format!("weather sample {sample:?}"));
             }
             if weather.samples.windows(2).any(|w| w[0].time >= w[1].time) {
-                return corrupt("weather samples out of order".into());
+                return Err("weather samples out of order".into());
             }
-        }
-        let season = &self.season;
-        if season.leaf_day.is_some_and(|day| !(1..=366).contains(&day))
-            || [season.snow_line_m, season.ice_line_m]
-                .iter()
-                .flatten()
-                .any(|line| !line.is_finite())
-        {
-            return corrupt(format!("season {season:?}"));
         }
         Ok(())
     }
@@ -302,14 +397,29 @@ mod tests {
         }
     }
 
+    fn encode_unchecked(bundle: &SceneBundle) -> Vec<u8> {
+        let payload = postcard::to_allocvec(bundle).unwrap();
+        [
+            &MAGIC[..],
+            &FORMAT_VERSION.to_le_bytes(),
+            &compress_to_vec(&payload, COMPRESSION_LEVEL),
+        ]
+        .concat()
+    }
+
     #[test]
     fn round_trips() {
         let bundle = bundle();
-        let bytes = bundle.to_bytes();
+        let bytes = bundle.to_bytes().unwrap();
         assert!(is_bundle(&bytes));
         assert_eq!(&bytes[..6], b"ITB1\x05\x00");
         assert_eq!(SceneBundle::from_bytes(&bytes).unwrap(), bundle);
-        assert_eq!(bundle.to_bytes(), bytes, "encoding is deterministic");
+        assert_eq!(
+            bundle.to_bytes().unwrap(),
+            bytes,
+            "encoding is deterministic"
+        );
+        assert_eq!(encode_unchecked(&bundle), bytes);
     }
 
     #[test]
@@ -332,28 +442,31 @@ mod tests {
     }
 
     #[test]
-    fn other_versions_are_refused_with_both_numbers() {
-        let mut bytes = bundle().to_bytes();
-        bytes[4..6].copy_from_slice(&7u16.to_le_bytes());
-        let err = SceneBundle::from_bytes(&bytes).unwrap_err();
-        assert!(matches!(
-            err,
-            BundleError::UnsupportedVersion {
-                found: 7,
-                supported: FORMAT_VERSION
-            }
-        ));
-        let message = err.to_string();
-        assert!(message.contains("version 7"), "{message}");
-        assert!(message.contains("isotrail bundle"), "{message}");
+    fn bundles_from_newer_versions_ask_for_an_update() {
+        for new in [6u16, 9, u16::MAX] {
+            let mut bytes = bundle().to_bytes().unwrap();
+            bytes[4..6].copy_from_slice(&new.to_le_bytes());
+            let err = SceneBundle::from_bytes(&bytes).unwrap_err();
+            assert!(
+                matches!(err, BundleError::NewerVersion { found, supported: FORMAT_VERSION } if found == new)
+            );
+            let message = err.to_string();
+            assert!(message.contains("newer isotrail"), "{message}");
+            assert!(message.contains(&format!("version {new}")), "{message}");
+            assert!(message.contains("update isotrail"), "{message}");
+            assert!(!message.contains("isotrail bundle"), "{message}");
+        }
     }
 
     #[test]
     fn bundles_from_older_versions_ask_to_be_made_again() {
-        for old in [1u16, 2, 3, 4] {
-            let mut bytes = bundle().to_bytes();
+        for old in [0u16, 1, 2, 3, 4] {
+            let mut bytes = bundle().to_bytes().unwrap();
             bytes[4..6].copy_from_slice(&old.to_le_bytes());
-            let message = SceneBundle::from_bytes(&bytes).unwrap_err().to_string();
+            let err = SceneBundle::from_bytes(&bytes).unwrap_err();
+            assert!(matches!(err, BundleError::OlderVersion { .. }));
+            let message = err.to_string();
+            assert!(message.contains("older isotrail"), "{message}");
             assert!(
                 message.contains(&format!("version {old}")) && message.contains("reads version 5"),
                 "{message}"
@@ -363,83 +476,133 @@ mod tests {
     }
 
     #[test]
-    fn damaged_payloads_are_reported() {
-        let bytes = bundle().to_bytes();
+    fn damaged_payloads_say_so_in_plain_words() {
+        let bytes = bundle().to_bytes().unwrap();
+        let mut garbled_payload = postcard::to_allocvec(&bundle()).unwrap();
+        garbled_payload[3] = 0xff;
         for damaged in [
             bytes[..bytes.len() / 2].to_vec(),
             [&bytes[..6], &[0xff; 40][..]].concat(),
             [&bytes[..6], &compress_to_vec(b"short", 9)[..]].concat(),
+            [&bytes[..6], &compress_to_vec(&garbled_payload, 9)[..]].concat(),
         ] {
+            let message = match SceneBundle::from_bytes(&damaged) {
+                Err(err @ BundleError::Corrupt(_)) => err.to_string(),
+                other => panic!("{other:?}"),
+            };
+            assert!(message.starts_with("the bundle is damaged"), "{message}");
             assert!(
-                matches!(
-                    SceneBundle::from_bytes(&damaged),
-                    Err(BundleError::Corrupt(_))
-                ),
-                "{damaged:?}"
+                !message.contains("varint") && !message.contains("decompress"),
+                "{message}"
             );
         }
     }
 
     #[test]
-    fn inconsistent_contents_are_refused() {
-        let mut cases = Vec::new();
-        let mut b = bundle();
-        b.terrain.heights.pop();
-        cases.push((b, "23 heights for 24 cells"));
-        let mut b = bundle();
-        b.terrain.landcover[5] = 13;
-        cases.push((b, "unknown landcover class 13"));
-        let mut b = bundle();
-        b.water[0].cells.push(24);
-        cases.push((b, "water in cell 24"));
-        let mut b = bundle();
-        b.route.breaks.push(5);
-        cases.push((b, "route break at point 5"));
-        let mut b = bundle();
-        b.terrain.height_scale_m = 0.0;
-        cases.push((b, "height scale 0"));
-        let mut b = bundle();
-        b.sun[2].time = b.sun[1].time;
-        cases.push((b, "sun samples out of order"));
-        let mut b = bundle();
-        b.sun[0].elevation_deg = f32::NAN;
-        cases.push((b, "sun sample"));
-        let mut b = bundle();
-        b.moon[1].illuminated = 1.5;
-        cases.push((b, "moon sample"));
-        let mut b = bundle();
-        b.moon.pop();
-        cases.push((b, "moon samples don't match the sun's"));
-        let mut b = bundle();
-        b.moon[2].time += 1;
-        cases.push((b, "moon samples don't match the sun's"));
-        let mut b = bundle();
-        b.weather.as_mut().unwrap().samples[1].cloud_low_pct = 101.0;
-        cases.push((b, "weather sample"));
-        let mut b = bundle();
-        b.weather.as_mut().unwrap().samples[0].rain_mm = -0.1;
-        cases.push((b, "weather sample"));
-        let mut b = bundle();
-        b.weather.as_mut().unwrap().samples[0].wind_direction_deg = f32::NAN;
-        cases.push((b, "weather sample"));
-        let mut b = bundle();
-        b.weather.as_mut().unwrap().samples[1].time -= 3600;
-        cases.push((b, "weather samples out of order"));
-        let mut b = bundle();
-        b.weather.as_mut().unwrap().samples.clear();
-        cases.push((b, "weather without samples"));
-        let mut b = bundle();
-        b.season.leaf_day = Some(0);
-        cases.push((b, "season"));
-        let mut b = bundle();
-        b.season.ice_line_m = Some(f32::INFINITY);
-        cases.push((b, "season"));
-        for (bundle, expected) in cases {
-            let message = SceneBundle::from_bytes(&bundle.to_bytes())
-                .unwrap_err()
-                .to_string();
-            assert!(message.contains(expected), "{message}");
+    fn unsafe_contents_are_refused_on_read_and_on_write() {
+        type Damage = fn(&mut SceneBundle);
+        let cases: Vec<(&str, Damage)> = vec![
+            ("23 heights for 24 cells", |b| {
+                b.terrain.heights.pop();
+            }),
+            ("unknown landcover class 13", |b| {
+                b.terrain.landcover[5] = 13
+            }),
+            ("water in cell 24", |b| b.water[0].cells.push(24)),
+            ("water level", |b| b.water[0].level_m = f32::NAN),
+            ("height scale 0", |b| b.terrain.height_scale_m = 0.0),
+            ("height scale", |b| b.terrain.height_scale_m = 1.0),
+            ("height offset", |b| {
+                b.terrain.height_offset_m = f32::NEG_INFINITY;
+            }),
+            ("a grid of 0 × 4 cells", |b| b.grid.cols = 0),
+            ("a grid of 6 × 2048 cells", |b| b.grid.rows = 2048),
+            ("cell size", |b| b.grid.cell_size_m = f64::NAN),
+            ("cell size", |b| b.grid.cell_size_m = -30.0),
+            ("cell size", |b| b.grid.cell_size_m = 1e9),
+            ("exaggeration", |b| b.grid.exaggeration = 0.0),
+            ("exaggeration", |b| b.grid.exaggeration = 250.0),
+            ("exaggeration", |b| b.grid.exaggeration = f64::INFINITY),
+            ("rotation", |b| b.grid.rotation_rad = f64::NAN),
+            ("rotation", |b| b.grid.rotation_rad = 40.0),
+            ("grid origin", |b| b.grid.origin_lat = 91.0),
+            ("grid origin", |b| b.grid.center_m.1 = f64::NAN),
+            ("route break at point 5", |b| b.route.breaks.push(5)),
+            ("route break at point 0", |b| b.route.breaks.insert(0, 0)),
+            ("route breaks out of order", |b| b.route.breaks = vec![3, 1]),
+            ("route breaks out of order", |b| b.route.breaks = vec![2, 2]),
+            ("route point", |b| b.route.points[1].col = f32::NAN),
+            ("route point", |b| b.route.points[1].row = -0.5),
+            ("route point", |b| b.route.points[4].col = 6.01),
+            ("route point", |b| {
+                b.route.points[2].draped_m = f32::INFINITY
+            }),
+            ("route point", |b| b.route.points[2].distance_m = f32::NAN),
+            ("route point", |b| {
+                b.route.points[3].gps_ele_m = Some(f32::NAN)
+            }),
+            ("profile sample", |b| b.profile[1].ele_m = f32::NAN),
+            ("statistics", |b| b.meta.stats.distance_m = f64::INFINITY),
+            ("statistics", |b| b.meta.stats.gain_m = Some(f64::NAN)),
+            ("statistics", |b| b.meta.stats.bounds.max_lon = f64::NAN),
+            ("sun samples out of order", |b| {
+                b.sun[2].time = b.sun[1].time
+            }),
+            ("sun sample", |b| b.sun[0].elevation_deg = f32::NAN),
+            ("moon sample", |b| b.moon[1].illuminated = 1.5),
+            ("moon samples don't match the sun's", |b| {
+                b.moon.pop();
+            }),
+            ("moon samples don't match the sun's", |b| {
+                b.moon[2].time += 1
+            }),
+            ("weather sample", |b| {
+                b.weather.as_mut().unwrap().samples[1].cloud_low_pct = 101.0;
+            }),
+            ("weather sample", |b| {
+                b.weather.as_mut().unwrap().samples[0].rain_mm = -0.1;
+            }),
+            ("weather sample", |b| {
+                b.weather.as_mut().unwrap().samples[0].wind_direction_deg = f32::NAN;
+            }),
+            ("weather samples out of order", |b| {
+                b.weather.as_mut().unwrap().samples[1].time -= 3600;
+            }),
+            ("weather without samples", |b| {
+                b.weather.as_mut().unwrap().samples.clear();
+            }),
+            ("season", |b| b.season.leaf_day = Some(0)),
+            ("season", |b| b.season.ice_line_m = Some(f32::INFINITY)),
+        ];
+        for (expected, damage) in cases {
+            let mut bundle = bundle();
+            damage(&mut bundle);
+            let read = SceneBundle::from_bytes(&encode_unchecked(&bundle)).unwrap_err();
+            assert!(matches!(read, BundleError::Corrupt(_)), "{read:?}");
+            let message = read.to_string();
+            assert!(message.contains(expected), "{expected}: {message}");
+            let written = bundle.to_bytes().unwrap_err();
+            assert!(matches!(written, BundleError::Invalid(_)), "{written:?}");
+            let message = written.to_string();
+            assert!(
+                message.starts_with("the scene can't be saved as a bundle")
+                    && message.contains(expected),
+                "{expected}: {message}"
+            );
         }
+    }
+
+    #[test]
+    fn values_at_the_edges_of_their_ranges_are_kept() {
+        let mut b = bundle();
+        b.grid.exaggeration = 100.0;
+        b.grid.rotation_rad = -std::f64::consts::PI;
+        b.route.points[0].col = 0.0;
+        b.route.points[0].row = 0.0;
+        b.route.points[4].col = 6.0;
+        b.route.points[4].row = 4.0;
+        b.route.breaks = vec![1, 3, 4];
+        assert_eq!(SceneBundle::from_bytes(&b.to_bytes().unwrap()).unwrap(), b);
     }
 
     #[test]

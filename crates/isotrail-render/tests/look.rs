@@ -16,7 +16,7 @@ fn render(bundle: &SceneBundle, mesher: &dyn Mesher, look: &Look) -> Frame {
     let camera = Camera::diorama(HEADING, mesh.positions(), &framing);
     let renderer = TerrainRenderer::new(&gpu);
     let target = OffscreenTarget::new(&gpu, framing.width, framing.height);
-    let mesh = renderer.upload(&gpu, &mesh);
+    let mesh = renderer.upload(&gpu, &mesh).unwrap();
     let sun = SunState::late_morning(&bundle.grid);
     renderer.draw(&gpu, &target, &Scene::terrain(&mesh), &camera, &sun, look);
     target.read_back(&gpu).unwrap()

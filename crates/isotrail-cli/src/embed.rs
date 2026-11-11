@@ -144,7 +144,7 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
     if in_place {
         println!("Kept {} as it is", bundle_path.display());
     } else {
-        let bytes = bundle.to_bytes();
+        let bytes = bundle.to_bytes()?;
         output::write(&bundle_path, |file| Ok(file.write_all(&bytes)?))?;
         println!(
             "Wrote {} ({} KB)",

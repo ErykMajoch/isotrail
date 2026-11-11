@@ -58,7 +58,11 @@ fn png_corner(path: &Path) -> [u8; 4] {
 /// A temporary directory holding `hike.itb`
 fn with_hike() -> tempfile::TempDir {
     let temp = tempfile::tempdir().unwrap();
-    fs::write(temp.path().join("hike.itb"), hike_bundle().to_bytes()).unwrap();
+    fs::write(
+        temp.path().join("hike.itb"),
+        hike_bundle().to_bytes().unwrap(),
+    )
+    .unwrap();
     temp
 }
 
@@ -178,9 +182,39 @@ fn renders_a_gif_of_a_track_whose_times_run_backwards() {
 }
 
 #[test]
+fn terrain_too_big_for_the_gpu_names_the_flags_to_lower() {
+    let temp = tempfile::tempdir().unwrap();
+    let grid = isotrail_testkit::grid(1024, 1024, 10.0);
+    let heights: Vec<f32> = (0..grid.cells())
+        .map(|i| (i as u64 * 7_919 % 1_000) as f32)
+        .collect();
+    let classes = vec![isotrail_bundle::Landcover::Grassland; grid.cells()];
+    let jagged = isotrail_testkit::bundle(grid, &heights, &classes);
+    fs::write(temp.path().join("jagged.itb"), jagged.to_bytes().unwrap()).unwrap();
+    let output = isotrail(
+        &temp.path().join("cache"),
+        temp.path(),
+        &["render", "jagged.itb", "--exaggeration", "100"],
+    );
+    assert_eq!(output.status.code(), Some(1), "{}", text(&output.stderr));
+    let stderr = text(&output.stderr);
+    assert!(
+        stderr.contains("of GPU memory, more than this GPU allows"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("lower --exaggeration"), "{stderr}");
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(!temp.path().join("jagged.png").exists());
+}
+
+#[test]
 fn renders_a_bundle_into_the_current_directory_by_default() {
     let temp = tempfile::tempdir().unwrap();
-    fs::write(temp.path().join("hill.itb"), diorama_bundle().to_bytes()).unwrap();
+    fs::write(
+        temp.path().join("hill.itb"),
+        diorama_bundle().to_bytes().unwrap(),
+    )
+    .unwrap();
     let output = isotrail(
         &temp.path().join("cache"),
         temp.path(),
@@ -341,7 +375,11 @@ fn animation_settings_are_checked_before_any_work() {
 #[test]
 fn both_meshers_render_and_unknown_ones_are_refused() {
     let temp = tempfile::tempdir().unwrap();
-    fs::write(temp.path().join("hill.itb"), diorama_bundle().to_bytes()).unwrap();
+    fs::write(
+        temp.path().join("hill.itb"),
+        diorama_bundle().to_bytes().unwrap(),
+    )
+    .unwrap();
     let cache = temp.path().join("cache");
     for mesher in ["voxel", "smooth"] {
         let image = format!("{mesher}.png");
@@ -372,7 +410,11 @@ fn both_meshers_render_and_unknown_ones_are_refused() {
 #[test]
 fn block_height_and_exaggeration_change_the_image() {
     let temp = tempfile::tempdir().unwrap();
-    fs::write(temp.path().join("hill.itb"), diorama_bundle().to_bytes()).unwrap();
+    fs::write(
+        temp.path().join("hill.itb"),
+        diorama_bundle().to_bytes().unwrap(),
+    )
+    .unwrap();
     let cache = temp.path().join("cache");
     let render = |image: &str, extra: &[&str]| {
         let mut args = vec!["render", "hill.itb", "-o", image];
@@ -421,7 +463,11 @@ fn block_height_and_exaggeration_change_the_image() {
 #[test]
 fn palettes_come_by_name_or_from_a_hex_file() {
     let temp = tempfile::tempdir().unwrap();
-    fs::write(temp.path().join("hill.itb"), diorama_bundle().to_bytes()).unwrap();
+    fs::write(
+        temp.path().join("hill.itb"),
+        diorama_bundle().to_bytes().unwrap(),
+    )
+    .unwrap();
     fs::write(temp.path().join("mono.hex"), "000000\r\n#ffffff\r\n").unwrap();
     fs::write(temp.path().join("broken.hex"), "000000\nnot-a-colour\n").unwrap();
     let cache = temp.path().join("cache");
@@ -590,7 +636,7 @@ fn no_weather_leaves_out_the_weather_a_bundle_holds() {
         elevation_deg: -30.0,
         illuminated: 0.5,
     }];
-    fs::write(temp.path().join("wet.itb"), bundle.to_bytes()).unwrap();
+    fs::write(temp.path().join("wet.itb"), bundle.to_bytes().unwrap()).unwrap();
     let render = |extra: &[&str], output: &str| {
         let mut args = vec!["render", "wet.itb", "--no-attribution", "-o", output];
         args.extend_from_slice(extra);
@@ -633,8 +679,8 @@ fn seasons_can_be_forced_and_snow_and_ice_go_with_the_weather() {
     let mut bare = snowy.clone();
     bare.season.snow_line_m = None;
     bare.season.ice_line_m = None;
-    fs::write(temp.path().join("snowy.itb"), snowy.to_bytes()).unwrap();
-    fs::write(temp.path().join("bare.itb"), bare.to_bytes()).unwrap();
+    fs::write(temp.path().join("snowy.itb"), snowy.to_bytes().unwrap()).unwrap();
+    fs::write(temp.path().join("bare.itb"), bare.to_bytes().unwrap()).unwrap();
     fs::write(
         temp.path().join("winter.toml"),
         "[render]
@@ -684,7 +730,11 @@ season = \"winter\"
 fn lighting_can_be_turned_down_by_flag_or_config() {
     let temp = tempfile::tempdir().unwrap();
     let cache = temp.path().join("cache");
-    fs::write(temp.path().join("hill.itb"), diorama_bundle().to_bytes()).unwrap();
+    fs::write(
+        temp.path().join("hill.itb"),
+        diorama_bundle().to_bytes().unwrap(),
+    )
+    .unwrap();
     fs::write(
         temp.path().join("flat.toml"),
         "[render]
@@ -803,7 +853,11 @@ pallete = \"apollo\"
 fn the_time_of_day_relights_the_scene() {
     let temp = with_hike();
     let cache = temp.path().join("cache");
-    fs::write(temp.path().join("hill.itb"), diorama_bundle().to_bytes()).unwrap();
+    fs::write(
+        temp.path().join("hill.itb"),
+        diorama_bundle().to_bytes().unwrap(),
+    )
+    .unwrap();
     let render = |input: &str, extra: &[&str]| {
         let mut args = vec!["render", input];
         args.extend_from_slice(extra);

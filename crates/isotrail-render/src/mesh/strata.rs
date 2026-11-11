@@ -1,3 +1,5 @@
+use std::ops::ControlFlow;
+
 use glam::Vec2;
 use isotrail_bundle::Landcover;
 
@@ -38,8 +40,70 @@ pub(super) fn cut_faces(
     mesh: &mut TerrainMesh,
     surface: impl Fn(usize, (usize, usize)) -> f32,
 ) {
+    walls(
+        columns,
+        seed,
+        block,
+        base,
+        surface,
+        |wall, heights, runs| {
+            let point = |p: Vec2| wall[0].lerp(wall[1], p.x).extend(p.y);
+            for run in runs {
+                let polygon = clip_below(&run.rectangle(block, base), heights);
+                for k in 1..polygon.len().saturating_sub(1) {
+                    let triangle = [polygon[0], polygon[k], polygon[k + 1]].map(point);
+                    if (triangle[1] - triangle[0])
+                        .cross(triangle[2] - triangle[0])
+                        .length_squared()
+                        > f32::EPSILON
+                    {
+                        mesh.push_triangle(triangle, run.colour);
+                    }
+                }
+            }
+            ControlFlow::Continue(())
+        },
+    );
+}
+
+/// The most vertices [`cut_faces`] would make, counting no further than
+/// just past `limit`
+pub(super) fn vertex_bound(
+    columns: &Columns,
+    seed: u64,
+    block: f32,
+    base: f32,
+    surface: impl Fn(usize, (usize, usize)) -> f32,
+    limit: u64,
+) -> u64 {
+    let mut vertices = 0u64;
+    walls(columns, seed, block, base, surface, |_, _, runs| {
+        vertices += runs.len() as u64 * RUN_VERTICES;
+        if vertices > limit {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
+    });
+    vertices
+}
+
+/// A rectangle cut below a line has at most five corners, so three triangles
+const RUN_VERTICES: u64 = 9;
+
+/// Hands each edge cell's wall to `each` as its two corners, the surface
+/// heights above them and its runs of equal blocks
+fn walls(
+    columns: &Columns,
+    seed: u64,
+    block: f32,
+    base: f32,
+    surface: impl Fn(usize, (usize, usize)) -> f32,
+    mut each: impl FnMut([Vec2; 2], [f32; 2], &[Run]) -> ControlFlow<()>,
+) {
     let (cols, rows) = (columns.cols, columns.rows);
     let landcover = &columns.landcover;
+    let mut runs = Vec::new();
     for side in Side::ALL {
         let cells = side.edge_cells(cols, rows);
         let water = water_blocks(
@@ -67,8 +131,8 @@ pub(super) fn cut_faces(
             };
             let corners = side.wall(col, row);
             let heights = corners.map(|corner| surface(cell, corner));
-            let wall = corners.map(|corner| columns.corner(corner));
-            for (block_row, polygon) in blocks(heights, block, base) {
+            runs.clear();
+            for block_row in 0..block_rows(heights, block, base) {
                 let depth =
                     ((heights[0] + heights[1]) / 2.0 - base - (block_row + 1) as f32 * block)
                         / block;
@@ -76,17 +140,20 @@ pub(super) fn cut_faces(
                 let stratum = column.stratum(depth, block_row);
                 let noise = hash(seed, [key[0], key[1], u64::from(block_row)]);
                 let colour = column.colour(stratum, depth, noise);
-                let point = |p: Vec2| wall[0].lerp(wall[1], p.x).extend(p.y);
-                for k in 1..polygon.len() - 1 {
-                    let triangle = [polygon[0], polygon[k], polygon[k + 1]].map(point);
-                    if (triangle[1] - triangle[0])
-                        .cross(triangle[2] - triangle[0])
-                        .length_squared()
-                        > f32::EPSILON
-                    {
-                        mesh.push_triangle(triangle, colour);
-                    }
+                match runs.last_mut() {
+                    Some(Run {
+                        rows, colour: last, ..
+                    }) if *last == colour => *rows += 1,
+                    _ => runs.push(Run {
+                        first: block_row,
+                        rows: 1,
+                        colour,
+                    }),
                 }
+            }
+            let wall = corners.map(|corner| columns.corner(corner));
+            if each(wall, heights, &runs).is_break() {
+                return;
             }
         }
     }
@@ -173,22 +240,34 @@ fn water_blocks(water: &[bool]) -> Vec<u32> {
     depth
 }
 
-/// The blocks of a one-block-wide wall under a straight surface from
-/// `heights[0]` to `heights[1]`, as block rows above the base and convex
-/// polygons in (share along the wall, height), counter-clockwise
-fn blocks(heights: [f32; 2], block: f32, base: f32) -> impl Iterator<Item = (u32, Vec<Vec2>)> {
-    let top = heights[0].max(heights[1]);
-    let count = ((top - base) / block - EPSILON).ceil().max(0.0) as u32;
-    (0..count).map(move |row| {
-        let (bottom, top) = (base + row as f32 * block, base + (row + 1) as f32 * block);
-        let rectangle = [
+/// Block rows stacked one above another in the same colour
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Run {
+    /// Block rows above the base
+    first: u32,
+    rows: u32,
+    colour: [u8; 4],
+}
+
+impl Run {
+    /// The run in (share along the wall, height), counter-clockwise
+    fn rectangle(&self, block: f32, base: f32) -> [Vec2; 4] {
+        let bottom = base + self.first as f32 * block;
+        let top = base + (self.first + self.rows) as f32 * block;
+        [
             Vec2::new(0.0, bottom),
             Vec2::new(1.0, bottom),
             Vec2::new(1.0, top),
             Vec2::new(0.0, top),
-        ];
-        (row, clip_below(&rectangle, heights))
-    })
+        ]
+    }
+}
+
+/// How many block rows a one-block-wide wall under a straight surface from
+/// `heights[0]` to `heights[1]` needs, counted from the base
+fn block_rows(heights: [f32; 2], block: f32, base: f32) -> u32 {
+    let top = heights[0].max(heights[1]);
+    ((top - base) / block - EPSILON).ceil().max(0.0) as u32
 }
 
 /// Sutherland–Hodgman clip of a polygon to below the line from
@@ -319,14 +398,102 @@ mod tests {
         cut_faces(&columns, 1, 10.0, base(10.0), &mut mesh, |_, _| 200.0);
         let water_blocks_at = |col: usize| {
             let x = (col as f32 - 3.0) * 10.0;
-            mesh.triangles()
+            let area: f32 = mesh
+                .triangles()
                 .filter(|t| t[0].normal == [0.0, 1.0, 0.0] && t[0].colour == WATER)
                 .filter(|t| (t.iter().map(|v| v.position[0]).sum::<f32>() / 3.0 - x).abs() < 5.0)
-                .count()
-                / 2
+                .map(|t| area(&corners(t)))
+                .sum();
+            (area / 100.0).round() as u32
         };
         let blocks: Vec<_> = (0..7).map(water_blocks_at).collect();
         assert_eq!(blocks, [0, 1, 2, 3, 2, 1, 0]);
+    }
+
+    /// Area of each colour on the walls when every block is drawn on its own
+    fn block_by_block(
+        columns: &Columns,
+        block: f32,
+        surface: impl Fn(usize, (usize, usize)) -> f32,
+    ) -> std::collections::BTreeMap<[u8; 4], f32> {
+        let mut areas = std::collections::BTreeMap::new();
+        walls(
+            columns,
+            1,
+            block,
+            base(block),
+            surface,
+            |wall, heights, runs| {
+                let width = wall[0].distance(wall[1]);
+                for run in runs {
+                    for row in run.first..run.first + run.rows {
+                        let one = Run {
+                            first: row,
+                            rows: 1,
+                            ..*run
+                        };
+                        let polygon = clip_below(&one.rectangle(block, base(block)), heights);
+                        let shoelace: f32 = (0..polygon.len())
+                            .map(|i| polygon[i].perp_dot(polygon[(i + 1) % polygon.len()]))
+                            .sum();
+                        *areas.entry(run.colour).or_insert(0.0) += shoelace.abs() / 2.0 * width;
+                    }
+                }
+                ControlFlow::Continue(())
+            },
+        );
+        areas
+    }
+
+    #[test]
+    fn equal_blocks_merge_into_one_face_covering_the_same_wall() {
+        let classes: Vec<u8> = (0..32).map(|i| [4, 2, 0, 7][i % 4]).collect();
+        let columns = Columns::new(&grid(8, 4, 10.0), classes);
+        let surface = |(c, r): (usize, usize)| 4_000.0 + 37.3 * c as f32 - 113.1 * r as f32;
+        let block = 10.0;
+        let mut mesh = TerrainMesh::default();
+        cut_faces(&columns, 1, block, base(block), &mut mesh, |_, corner| {
+            surface(corner)
+        });
+
+        let blocks: u64 = Side::ALL
+            .into_iter()
+            .flat_map(|side| {
+                let cells = side.edge_cells(8, 4);
+                cells.into_iter().map(move |(col, row)| side.wall(col, row))
+            })
+            .map(|corners| u64::from(block_rows(corners.map(surface), block, base(block))))
+            .sum();
+        let vertices = mesh.vertices.len() as u64;
+        assert!(
+            vertices * 5 < blocks * 6,
+            "{vertices} vertices for {blocks} blocks"
+        );
+        let bound = vertex_bound(&columns, 1, block, base(block), |_, c| surface(c), u64::MAX);
+        assert!(bound >= vertices, "{bound} < {vertices}");
+        assert!(bound <= vertices * 2, "{bound} for {vertices}");
+
+        let mut merged = std::collections::BTreeMap::new();
+        for triangle in mesh.triangles() {
+            *merged.entry(triangle[0].colour).or_insert(0.0) += area(&corners(triangle));
+        }
+        let separate = block_by_block(&columns, block, |_, c| surface(c));
+        assert_eq!(
+            merged.keys().collect::<Vec<_>>(),
+            separate.keys().collect::<Vec<_>>()
+        );
+        for (colour, area) in separate {
+            let relative = (merged[&colour] - area).abs() / area;
+            assert!(relative < 1e-3, "{colour:?}: {} vs {area}", merged[&colour]);
+        }
+    }
+
+    #[test]
+    fn counting_stops_past_the_limit() {
+        let columns = Columns::new(&grid(8, 4, 10.0), vec![4; 32]);
+        let full = vertex_bound(&columns, 1, 1.0, base(1.0), |_, _| 50_000.0, u64::MAX);
+        let capped = vertex_bound(&columns, 1, 1.0, base(1.0), |_, _| 50_000.0, 1_000);
+        assert!(capped > 1_000 && capped < full, "{capped} of {full}");
     }
 
     #[test]

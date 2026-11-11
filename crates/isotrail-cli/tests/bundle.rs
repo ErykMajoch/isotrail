@@ -416,9 +416,9 @@ fn stats_of_a_damaged_bundle_explains_why() {
         (
             "old.itb",
             b"ITB1\x01\x00",
-            "create it again with `isotrail bundle`",
+            "create it again from the GPX with `isotrail bundle`",
         ),
-        ("newer.dat", b"ITB1\x09\x00", "format version 9"),
+        ("newer.dat", b"ITB1\x09\x00", "made by a newer isotrail"),
         ("hike.itb", b"<gpx/>", "not an isotrail scene bundle"),
     ] {
         let path = temp.path().join(name);
@@ -429,6 +429,29 @@ fn stats_of_a_damaged_bundle_explains_why() {
         assert!(stderr.contains("could not read"), "{stderr}");
         assert!(stderr.contains(reason), "{stderr}");
     }
+}
+
+#[test]
+fn bundling_a_bundle_says_what_it_is() {
+    let temp = tempfile::tempdir().unwrap();
+    let itb = temp.path().join("hike.itb");
+    std::fs::write(&itb, isotrail_testkit::hike_bundle().to_bytes().unwrap()).unwrap();
+    let again = temp.path().join("again.itb");
+    let output = isotrail(
+        temp.path(),
+        &[
+            "bundle",
+            itb.to_str().unwrap(),
+            "-o",
+            again.to_str().unwrap(),
+            "--offline",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = text(&output.stderr);
+    assert!(stderr.contains("is already a scene bundle"), "{stderr}");
+    assert!(!stderr.contains("UTF-8"), "{stderr}");
+    assert!(!again.exists());
 }
 
 #[test]

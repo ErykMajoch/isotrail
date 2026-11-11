@@ -74,7 +74,7 @@ impl Render {
         let line = RouteLine::drape(bundle, &mesh.surface, camera.metres_per_px / 2.0);
         let renderer = TerrainRenderer::new(&gpu);
         let target = OffscreenTarget::new(&gpu, framing.width, framing.height);
-        let gpu_mesh = renderer.upload(&gpu, &mesh);
+        let gpu_mesh = renderer.upload(&gpu, &mesh).unwrap();
         let scene = Scene {
             mesh: &gpu_mesh,
             route: progress.is_some().then_some(&line),

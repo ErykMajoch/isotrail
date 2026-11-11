@@ -29,7 +29,7 @@ fn png_size(path: &Path) -> (u32, u32) {
 /// A temporary directory holding the synthetic hike as `name`
 fn with_hike(name: &str) -> tempfile::TempDir {
     let temp = tempfile::tempdir().unwrap();
-    fs::write(temp.path().join(name), hike_bundle().to_bytes()).unwrap();
+    fs::write(temp.path().join(name), hike_bundle().to_bytes().unwrap()).unwrap();
     temp
 }
 

@@ -140,6 +140,11 @@ impl Gpu {
         })
     }
 
+    /// The largest buffer the device takes, which caps the terrain mesh
+    pub fn max_buffer_size(&self) -> u64 {
+        self.device.limits().max_buffer_size
+    }
+
     pub fn adapter_info(&self) -> &wgpu::AdapterInfo {
         &self.adapter_info
     }

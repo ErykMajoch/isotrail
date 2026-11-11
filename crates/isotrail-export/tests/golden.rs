@@ -332,7 +332,8 @@ fn rain_moves_with_the_clock_and_repeats() {
         &framing,
         &[0.0],
         sun,
-    );
+    )
+    .unwrap();
     let target = OffscreenTarget::new(&gpu, framing.width, framing.height);
     let mut at = |time_s| {
         diorama.set_time(time_s);

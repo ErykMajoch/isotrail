@@ -47,7 +47,7 @@ impl Render {
         let sun = SunState::late_morning(&bundle.grid);
         let renderer = TerrainRenderer::new(&gpu);
         let target = OffscreenTarget::new(&gpu, framing.width, framing.height);
-        let mesh = renderer.upload(&gpu, &mesh);
+        let mesh = renderer.upload(&gpu, &mesh).unwrap();
         renderer.draw(
             &gpu,
             &target,

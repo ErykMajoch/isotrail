@@ -62,6 +62,8 @@ The scene is lit by the sun as it stood when the hike started: high and white at
 
 The light gives the terrain depth: hollows, valley floors and the feet of steps and cliffs see less of the sky, so they stay darker in the shade, and shadow edges soften into a few steps. When the sun breaks through a partly cloudy sky, it falls in beams: shafts slant across the sky, and the ground they reach is lit brightly while the ground between them lies in the cloud's shade. `--occlusion 0 --soft-shadows 0 --god-rays off` gives the plainer look of earlier versions.
 
+Very tall or very detailed terrain, such as a large `--exaggeration` with a small `--block-height` or `--detail 1024`, can need more graphics memory than the GPU gives one model (256 MB). isotrail then stops before drawing anything and says how much the terrain would need and which options to lower.
+
 The slab is turned to follow the route, and the camera looks the way the hike goes, so the start is in front. For loops and out-and-backs, the camera looks towards the halfway point. See [How it works](how-it-works.md) for what each part of the look does.
 
 ### Text and overlays
@@ -163,7 +165,7 @@ isotrail bundle <hike.gpx> -o <hike.itb> [--debug-dir DIR] [--exaggeration X] [-
 
 Downloads the elevation and OpenStreetMap data around the route and works out what covers every grid cell: from the map data where there is some, and from the slope and height of the ground elsewhere. Lakes and reservoirs get a level surface. The result is saved with the route, its elevation profile, the hike's statistics, the sun's and moon's paths across the sky and the hour-by-hour weather during the hike as a **scene bundle**: one compact file (usually under 100 KB) that holds everything a render needs, with no further downloads.
 
-Bundles are useful when you want to try many looks for one hike, to render offline, or to keep a hike's scene as it was even after the map data changes. A bundle made by an older version of isotrail may need to be made again; isotrail says so when it can't read one.
+Bundles are useful when you want to try many looks for one hike, to render offline, or to keep a hike's scene as it was even after the map data changes. A bundle made by an older version of isotrail has to be made again from the GPX file, and one made by a newer version needs isotrail updated; isotrail says which. A damaged bundle, or one holding values no render could draw, is refused with a message instead of being drawn. `bundle` reads GPX files only: give a bundle straight to `render`, `embed` or `stats`.
 
 The command reports what it found:
 

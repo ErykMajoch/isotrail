@@ -38,6 +38,10 @@ All notable changes to `isotrail` are documented here.
 - `cache clear` only deletes files that isotrail wrote, and says how many other files it left alone. It used to delete any `.bin`, `.json` or `.tmp` file in the cache folder.
 - Scene bundles record only the scheme and host of `--overpass-url`, so a user name, password or path in it is never published with a bundle.
 - With `--offline`, the weather of a hike bundled within a few days of the walk is found in the cache again.
+- A track whose first or last time has a fraction of a second could give a bundle that `render` and the web embed then refused as damaged. isotrail now checks every bundle as it writes it, so what it writes can always be read back.
+- A damaged or hand-edited bundle is refused as damaged, instead of crashing or freezing the renderer, and a bundle made by a newer isotrail asks for an update instead of being made again.
+- Very tall terrain, such as `--exaggeration 30 --block-height 0.25` on a mountain hike, renders instead of crashing: the slab's sides use far less graphics memory. Terrain that is still too big for the GPU, such as `--detail 1024 --exaggeration 100`, stops at once with a message naming the options to lower, instead of using gigabytes of memory and crashing.
+- `isotrail bundle` given a scene bundle says that it already is one, instead of reporting a text-encoding error.
 
 ## [1.3.0] - 2026-11-10
 

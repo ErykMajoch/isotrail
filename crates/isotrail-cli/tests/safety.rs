@@ -89,7 +89,7 @@ fn bundle_never_overwrites_its_recording() {
 #[test]
 fn render_never_overwrites_its_input_and_makes_missing_folders() {
     let temp = tempfile::tempdir().unwrap();
-    let bytes = hike_bundle().to_bytes();
+    let bytes = hike_bundle().to_bytes().unwrap();
     // A bundle is known by its first bytes, whatever its name
     fs::write(temp.path().join("hike.png"), &bytes).unwrap();
     let run = isotrail(temp.path(), &["render", "hike.png", "-o", "hike.png"]);
@@ -108,7 +108,7 @@ fn render_never_overwrites_its_input_and_makes_missing_folders() {
 #[test]
 fn embed_keeps_a_bundle_already_in_place_unless_flags_would_change_it() {
     let temp = tempfile::tempdir().unwrap();
-    let bytes = hike_bundle().to_bytes();
+    let bytes = hike_bundle().to_bytes().unwrap();
     fs::write(temp.path().join("hike.itb"), &bytes).unwrap();
 
     let run = isotrail(
@@ -133,7 +133,11 @@ fn embed_keeps_a_bundle_already_in_place_unless_flags_would_change_it() {
 #[test]
 fn embed_refuses_to_copy_the_runtime_onto_itself() {
     let temp = tempfile::tempdir().unwrap();
-    fs::write(temp.path().join("hike.itb"), hike_bundle().to_bytes()).unwrap();
+    fs::write(
+        temp.path().join("hike.itb"),
+        hike_bundle().to_bytes().unwrap(),
+    )
+    .unwrap();
     let site = temp.path().join("site");
     fs::create_dir_all(site.join("pkg")).unwrap();
     for file in [
@@ -210,7 +214,11 @@ fn mistakes_are_reported_before_any_download() {
 #[test]
 fn data_flags_typed_for_a_bundle_are_warned_about() {
     let temp = tempfile::tempdir().unwrap();
-    fs::write(temp.path().join("hike.itb"), hike_bundle().to_bytes()).unwrap();
+    fs::write(
+        temp.path().join("hike.itb"),
+        hike_bundle().to_bytes().unwrap(),
+    )
+    .unwrap();
     let render = |extra: &[&str]| {
         let mut args = vec!["render", "hike.itb", "--scale", "10"];
         args.extend_from_slice(extra);
@@ -238,7 +246,11 @@ fn data_flags_typed_for_a_bundle_are_warned_about() {
 #[test]
 fn typed_flags_beat_config_settings_they_conflict_with() {
     let temp = tempfile::tempdir().unwrap();
-    fs::write(temp.path().join("hike.itb"), hike_bundle().to_bytes()).unwrap();
+    fs::write(
+        temp.path().join("hike.itb"),
+        hike_bundle().to_bytes().unwrap(),
+    )
+    .unwrap();
     fs::write(
         temp.path().join("user-config.toml"),
         "[render]\ndate-format = \"short\"\ntime = 07:30:00\nscale = 10\n",

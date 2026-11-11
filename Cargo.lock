@@ -1225,6 +1225,7 @@ dependencies = [
  "glam",
  "isotrail-bundle",
  "isotrail-testkit",
+ "miniz_oxide 0.9.1",
  "png",
  "pollster",
  "thiserror",

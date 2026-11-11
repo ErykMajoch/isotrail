@@ -4,7 +4,12 @@ fn main() -> std::io::Result<()> {
     let path = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "web/demo/hike.itb".into());
-    std::fs::write(&path, isotrail_testkit::hike_bundle().to_bytes())?;
+    std::fs::write(
+        &path,
+        isotrail_testkit::hike_bundle()
+            .to_bytes()
+            .map_err(std::io::Error::other)?,
+    )?;
     eprintln!("wrote {path}");
     Ok(())
 }

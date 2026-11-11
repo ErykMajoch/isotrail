@@ -1,6 +1,6 @@
 use isotrail_bundle::SceneBundle;
 
-use super::{Columns, Mesher, Seasonal, Side, Surface, TerrainMesh, cover, strata};
+use super::{Columns, Mesher, Seasonal, Side, Surface, TerrainMesh, cover, props, strata};
 
 /// One column per cell, its height rounded to whole blocks, with a top in the
 /// cell's landcover colour and darker sides
@@ -64,6 +64,40 @@ impl Mesher for VoxelMesher {
         );
         mesh.surface = Surface::Steps { cols, tops };
         mesh
+    }
+
+    fn vertex_bound(&self, bundle: &SceneBundle, limit: u64) -> u64 {
+        let step = bundle.grid.cell_size_m as f32 * self.block_height;
+        let tops = column_tops(bundle, step);
+        let (cols, rows) = (bundle.grid.cols as usize, bundle.grid.rows as usize);
+        let mut vertices = props::MAX_VERTICES;
+        for row in 0..rows {
+            for col in 0..cols {
+                let top = tops[row * cols + col];
+                let walls = Side::ALL
+                    .into_iter()
+                    .filter_map(|side| side.neighbour(col, row, cols, rows))
+                    .filter(|&(c, r)| tops[r * cols + c] < top)
+                    .count();
+                vertices += 6 * (1 + walls as u64);
+            }
+        }
+        if vertices > limit {
+            return vertices;
+        }
+        let seasonal = Seasonal::new(bundle);
+        let columns = Columns::new(&bundle.grid, bundle.terrain.landcover.clone())
+            .in_season(bundle, &seasonal);
+        let lowest = tops.iter().copied().fold(f32::INFINITY, f32::min);
+        vertices
+            + strata::vertex_bound(
+                &columns,
+                bundle.prop_seed,
+                step,
+                lowest + strata::base(step),
+                |cell, _| tops[cell],
+                limit - vertices,
+            )
     }
 }
 

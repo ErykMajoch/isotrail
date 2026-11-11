@@ -18,6 +18,10 @@ const CLEARING_PX: f32 = 2.0;
 /// How much props vary in height either way
 const HEIGHT_JITTER: f32 = 0.2;
 const PROP_KEY: u64 = 2 << 32;
+const MAX_BLOCKS: u64 = 4;
+/// The most vertices the props of one slab can have: a prop of the most
+/// blocks on every spot, each block a box of five quads
+pub(super) const MAX_VERTICES: u64 = MAX_SPOTS as u64 * MAX_BLOCKS * 30;
 
 const NEEDLES: [u8; 4] = [40, 94, 58, 255];
 const LEAVES: [u8; 4] = [84, 148, 62, 255];
@@ -325,6 +329,19 @@ mod tests {
         let mut centres: Vec<Vec2> = boxes(mesh).into_iter().map(|b| b.1).collect();
         centres.dedup_by(|a, b| a.distance(*b) < 1e-3);
         centres
+    }
+
+    #[test]
+    fn props_stay_within_their_vertex_bound() {
+        for prop in [Prop::Conifer, Prop::Broadleaf, Prop::Bush, Prop::Boulder] {
+            assert!(prop.blocks().len() as u64 <= MAX_BLOCKS, "{prop:?}");
+        }
+        let bundle = forest(400, 200, Landcover::Coniferous);
+        let mut mesh = TerrainMesh::default();
+        mesh.surface = VoxelMesher::default().mesh(&bundle).surface;
+        let placed = mesh.add_props(&bundle, 0.5);
+        assert!(placed > 1_000, "{placed}");
+        assert!(mesh.vertices.len() as u64 <= MAX_VERTICES);
     }
 
     #[test]

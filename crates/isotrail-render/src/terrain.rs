@@ -8,7 +8,8 @@ use crate::route::{RoutePass, to_pixel};
 use crate::sprite::Sprite;
 use crate::weather::cloud_threshold;
 use crate::{
-    Camera, Gpu, Look, OffscreenTarget, RouteLine, SunState, TARGET_FORMAT, TerrainMesh, Vertex,
+    Camera, Gpu, Look, OffscreenTarget, RenderError, RouteLine, SunState, TARGET_FORMAT,
+    TerrainMesh, Vertex,
 };
 
 /// Texels along each side of the square shadow map, the most WebGL2 allows
@@ -310,7 +311,8 @@ impl TerrainRenderer {
         }
     }
 
-    pub fn upload(&self, gpu: &Gpu, mesh: &TerrainMesh) -> GpuMesh {
+    pub fn upload(&self, gpu: &Gpu, mesh: &TerrainMesh) -> Result<GpuMesh, RenderError> {
+        crate::mesh::check_size(mesh, gpu.max_buffer_size())?;
         let vertices = gpu
             .device()
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -367,7 +369,7 @@ impl TerrainRenderer {
                 },
             ],
         });
-        GpuMesh {
+        Ok(GpuMesh {
             vertices,
             count: mesh.vertices.len() as u32,
             cell_m,
@@ -380,7 +382,7 @@ impl TerrainRenderer {
                     min,
                 )
             }),
-        }
+        })
     }
 
     /// Draws the scene into `target` over the sky, lit and shadowed by `sun`

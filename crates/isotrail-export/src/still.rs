@@ -1,7 +1,7 @@
 use isotrail_bundle::SceneBundle;
 use isotrail_render::{
     Camera, Frame, Framing, Gpu, Look, Mesher, OffscreenTarget, RouteLine, Scene, SunState,
-    TerrainRenderer, view_heading,
+    TerrainRenderer, mesh_within, view_heading,
 };
 
 use crate::ExportError;
@@ -21,7 +21,7 @@ pub fn render_still(
     sun: &SunState,
     look: &Look,
 ) -> Result<Frame, ExportError> {
-    let mut mesh = mesher.mesh(bundle);
+    let mut mesh = mesh_within(mesher, bundle, gpu.max_buffer_size())?;
     let heading = view_heading(bundle, yaw_offset_deg);
     let camera = Camera::diorama(heading, mesh.positions(), framing);
     mesh.add_props(bundle, camera.metres_per_px);
@@ -29,7 +29,7 @@ pub fn render_still(
     let route = RouteLine::drape(bundle, &mesh.surface, camera.metres_per_px / 2.0);
     let renderer = TerrainRenderer::new(gpu);
     let target = OffscreenTarget::new(gpu, framing.width, framing.height);
-    let gpu_mesh = renderer.upload(gpu, &mesh);
+    let gpu_mesh = renderer.upload(gpu, &mesh)?;
     renderer.draw(
         gpu,
         &target,

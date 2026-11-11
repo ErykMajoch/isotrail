@@ -4,8 +4,8 @@ use glam::Vec3;
 use isotrail_bundle::SceneBundle;
 
 use crate::{
-    DEFAULT_YAW_OFFSET_DEG, Framing, Gpu, GpuMesh, Look, OffscreenTarget, RouteLine, Scene,
-    SunState, TerrainMesh, TerrainRenderer, Turntable, View, view_heading,
+    DEFAULT_YAW_OFFSET_DEG, Framing, Gpu, GpuMesh, Look, OffscreenTarget, RenderError, RouteLine,
+    Scene, SunState, TerrainMesh, TerrainRenderer, Turntable, View, view_heading,
 };
 
 /// A bundle's terrain and route on the GPU, at one scale that fits the slab
@@ -31,7 +31,7 @@ impl Diorama {
         framing: &Framing,
         yaw_offsets_deg: &[f32],
         sun: SunState,
-    ) -> Diorama {
+    ) -> Result<Diorama, RenderError> {
         let outline = outline(&mesh, bundle.grid.cell_size_m as f32);
         let heading = view_heading(bundle, DEFAULT_YAW_OFFSET_DEG);
         let turntable = Turntable::new(heading, outline, framing, yaw_offsets_deg);
@@ -39,14 +39,14 @@ impl Diorama {
         mesh.add_props(bundle, metres_per_px);
         // About one point per internal pixel
         let route = RouteLine::drape(bundle, &mesh.surface, metres_per_px / 2.0);
-        Diorama {
-            mesh: renderer.upload(gpu, &mesh),
+        Ok(Diorama {
+            mesh: renderer.upload(gpu, &mesh)?,
             route,
             turntable,
             sun,
             star_seed: bundle.prop_seed as u32,
             time_s: 0.0,
-        }
+        })
     }
 
     pub fn turntable(&self) -> &Turntable {

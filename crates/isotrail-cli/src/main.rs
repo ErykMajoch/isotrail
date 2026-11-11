@@ -132,7 +132,14 @@ impl From<UnitsArg> for Units {
 }
 
 fn read_track(path: &Path) -> anyhow::Result<Track> {
-    parse_track(&read_file(path)?, path)
+    let bytes = read_file(path)?;
+    if isotrail_bundle::is_bundle(&bytes) {
+        return Err(usage(format!(
+            "{} is already a scene bundle, not a GPX file; render, embed and stats take it as it is",
+            path.display()
+        )));
+    }
+    parse_track(&bytes, path)
 }
 
 fn read_file(path: &Path) -> anyhow::Result<Vec<u8>> {

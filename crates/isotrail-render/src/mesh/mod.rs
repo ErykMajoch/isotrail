@@ -10,6 +10,8 @@ use glam::{Vec2, Vec3};
 use isotrail_bundle::{GridInfo, Landcover, SceneBundle};
 use season::Seasonal;
 
+use crate::RenderError;
+
 pub use season::foliage;
 pub use smooth::SmoothMesher;
 pub use surface::Surface;
@@ -25,6 +27,11 @@ const SIDE_SHADE: f32 = 0.75;
 /// centre and the lowest terrain, with heights exaggerated
 pub trait Mesher {
     fn mesh(&self, bundle: &SceneBundle) -> TerrainMesh;
+
+    /// The most vertices [`Mesher::mesh`] and [`TerrainMesh::add_props`]
+    /// would make together, without making them. Counting may stop at any
+    /// number past `limit`
+    fn vertex_bound(&self, bundle: &SceneBundle, limit: u64) -> u64;
 }
 
 #[repr(C)]
@@ -34,6 +41,44 @@ pub struct Vertex {
     pub normal: [f32; 3],
     pub colour: [u8; 4],
 }
+
+/// Meshes the bundle, unless the mesh and its props could take more than
+/// `max_bytes` in one buffer
+pub fn mesh_within(
+    mesher: &dyn Mesher,
+    bundle: &SceneBundle,
+    max_bytes: u64,
+) -> Result<TerrainMesh, RenderError> {
+    let max_vertices = max_bytes / VERTEX_BYTES;
+    // Counting further keeps the size in the message close to the truth
+    let limit = max_vertices.saturating_mul(4);
+    let vertices = mesher.vertex_bound(bundle, limit);
+    if vertices > max_vertices {
+        let needed_mb = vertices.saturating_mul(VERTEX_BYTES).div_ceil(1 << 20);
+        return Err(RenderError::MeshTooLarge {
+            needed: if vertices > limit {
+                format!("over {needed_mb} MB")
+            } else {
+                format!("up to {needed_mb} MB")
+            },
+            allowed_mb: max_bytes >> 20,
+        });
+    }
+    Ok(mesher.mesh(bundle))
+}
+
+pub(crate) fn check_size(mesh: &TerrainMesh, max_bytes: u64) -> Result<(), RenderError> {
+    let bytes = (mesh.vertices.len() as u64).saturating_mul(VERTEX_BYTES);
+    if bytes > max_bytes {
+        return Err(RenderError::MeshTooLarge {
+            needed: format!("{} MB", bytes.div_ceil(1 << 20)),
+            allowed_mb: max_bytes >> 20,
+        });
+    }
+    Ok(())
+}
+
+const VERTEX_BYTES: u64 = size_of::<Vertex>() as u64;
 
 /// Unindexed triangles, three vertices each, and the top they form
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -214,4 +259,58 @@ fn splitmix64(x: u64) -> u64 {
     z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
     z ^ (z >> 31)
+}
+
+#[cfg(test)]
+mod tests {
+    use isotrail_testkit::{diorama_bundle, grid};
+
+    use super::*;
+
+    #[test]
+    fn bounds_cover_the_mesh_and_its_props() {
+        let bundle = diorama_bundle();
+        let meshers: [&dyn Mesher; 3] = [
+            &VoxelMesher::default(),
+            &VoxelMesher { block_height: 0.25 },
+            &SmoothMesher,
+        ];
+        for mesher in meshers {
+            let mut mesh = mesher.mesh(&bundle);
+            mesh.add_props(&bundle, 2.0);
+            let bound = mesher.vertex_bound(&bundle, u64::MAX);
+            let made = mesh.vertices.len() as u64;
+            assert!(made <= bound, "{made} > {bound}");
+            assert!(
+                bound <= made + props::MAX_VERTICES * 2,
+                "{bound} for {made}"
+            );
+        }
+    }
+
+    #[test]
+    fn meshes_over_the_limit_are_refused() {
+        let bundle = isotrail_testkit::bundle(
+            grid(8, 4, 10.0),
+            &[100.0; 32],
+            &[isotrail_bundle::Landcover::Rock; 32],
+        );
+        let mesh = VoxelMesher::default().mesh(&bundle);
+        let bytes = mesh.vertices.len() as u64 * VERTEX_BYTES;
+        assert!(check_size(&mesh, bytes).is_ok());
+        let message = check_size(&mesh, bytes - 1).unwrap_err().to_string();
+        assert!(
+            message.contains("needs 1 MB") && message.contains("(0 MB)"),
+            "{message}"
+        );
+
+        let max = props::MAX_VERTICES * VERTEX_BYTES;
+        let refused = mesh_within(&VoxelMesher::default(), &bundle, max).unwrap_err();
+        assert!(matches!(refused, RenderError::MeshTooLarge { .. }));
+        let room = max + bytes * 2;
+        assert_eq!(
+            mesh_within(&VoxelMesher::default(), &bundle, room).unwrap(),
+            mesh
+        );
+    }
 }

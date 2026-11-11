@@ -120,6 +120,12 @@ fn sky_track(stats: &TrackStats, lat: f64, lon: f64) -> (Vec<SunSample>, Vec<Moo
         );
         return Default::default();
     }
+    // Samples are stored in whole seconds, so sampling from fractional
+    // times could give the last two the same second
+    let whole = |t: chrono::DateTime<chrono::Utc>| {
+        chrono::DateTime::from_timestamp(t.timestamp(), 0).unwrap_or(t)
+    };
+    let (start, end) = (whole(start), whole(end));
     let step = chrono::TimeDelta::seconds(SUN_STEP_S);
     std::iter::successors(Some(start), |&t| Some(t + step))
         .take_while(|&t| t < end)
@@ -419,9 +425,15 @@ mod tests {
     fn bundles_are_deterministic_and_carry_the_metadata() {
         let track = track(&[(0.0, 2000.0), (2600.0, 8000.0)], true);
         let bundle = bundle(&track);
-        assert_eq!(bundle.to_bytes(), self::bundle(&track).to_bytes());
+        assert_eq!(
+            bundle.to_bytes().unwrap(),
+            self::bundle(&track).to_bytes().unwrap()
+        );
         assert_eq!(bundle.prop_seed, bundle.content_seed());
-        assert_eq!(SceneBundle::from_bytes(&bundle.to_bytes()).unwrap(), bundle);
+        assert_eq!(
+            SceneBundle::from_bytes(&bundle.to_bytes().unwrap()).unwrap(),
+            bundle
+        );
 
         let meta = &bundle.meta;
         assert_eq!(meta.title, "Traverse");
@@ -470,6 +482,35 @@ mod tests {
         let sky = bundle(&glitched.clean().unwrap());
         assert_eq!(sky.sun.len(), 9);
         assert_eq!(sky.meta.stats.start, Some(1_750_000_060));
+    }
+
+    #[test]
+    fn fractional_start_and_end_times_give_distinct_whole_seconds() {
+        let mut track = track(&[(0.0, 2000.0), (2600.0, 8000.0)], true);
+        let points: Vec<_> = track
+            .segments
+            .iter_mut()
+            .flat_map(|s| &mut s.points)
+            .collect();
+        let last = points.len() - 1;
+        for (i, point) in points.into_iter().enumerate() {
+            let millis = if i == last {
+                3_600_700
+            } else {
+                200 + i as i64 * 1000
+            };
+            point.time = Utc
+                .timestamp_millis_opt(1_750_000_000_000 + millis)
+                .single();
+        }
+        let bundle = bundle(&track);
+        let times: Vec<i64> = bundle.sun.iter().map(|s| s.time - 1_750_000_000).collect();
+        assert!(times.windows(2).all(|w| w[0] < w[1]), "{times:?}");
+        assert_eq!(times.first(), Some(&0));
+        assert_eq!(times.last(), Some(&3600));
+        assert_eq!(times.len(), 13);
+        let bytes = bundle.to_bytes().unwrap();
+        assert_eq!(SceneBundle::from_bytes(&bytes).unwrap(), bundle);
     }
 
     #[test]
