@@ -117,6 +117,7 @@ pub fn overpass_query(boxes: &[BoundingBox], cell_size_m: f64) -> String {
     let ways = [
         format!("way[\"natural\"~\"^({NATURAL_AREAS})$\"]"),
         "way[\"natural\"=\"cliff\"]".to_owned(),
+        "way[\"natural\"=\"coastline\"]".to_owned(),
         "way[\"landuse\"]".to_owned(),
         format!("way[\"waterway\"~\"^({waterways})$\"]"),
         format!("way[\"highway\"~\"^({highways})(_link)?$\"]"),
@@ -204,8 +205,8 @@ mod tests {
             );
         }
         let query = overpass_query(&boxes, 30.0);
-        assert_eq!(query.matches(",180.00000);").count(), 7, "{query}");
-        assert_eq!(query.matches(",-180.00000,").count(), 7, "{query}");
+        assert_eq!(query.matches(",180.00000);").count(), 8, "{query}");
+        assert_eq!(query.matches(",-180.00000,").count(), 8, "{query}");
     }
 
     fn decode(body: &[u8]) -> String {
@@ -265,12 +266,13 @@ mod tests {
             query
                 .matches("(50.10000,-4.25000,50.20000,-4.12500);")
                 .count(),
-            7
+            8
         );
         for needle in [
             "way[\"natural\"~\"^(water|wood|",
             "relation[\"type\"=\"multipolygon\"][\"natural\"~",
             "way[\"natural\"=\"cliff\"]",
+            "way[\"natural\"=\"coastline\"]",
             "relation[\"type\"=\"multipolygon\"][\"landuse\"]",
             "way[\"waterway\"~\"^(river|canal|stream)$\"]",
             "way[\"highway\"~\"^(motorway|trunk|primary|secondary|tertiary|path|footway|",
@@ -299,7 +301,7 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(areas(&fine), areas(&coarse));
-        assert_eq!(areas(&coarse).len(), 5);
+        assert_eq!(areas(&coarse).len(), 6);
     }
 
     #[test]

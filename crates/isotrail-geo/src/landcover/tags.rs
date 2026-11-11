@@ -59,6 +59,10 @@ pub(super) fn is_lake(tags: &Tags) -> bool {
     )
 }
 
+pub(super) fn is_coastline(tags: &Tags) -> bool {
+    tags.is("natural", "coastline")
+}
+
 pub(super) fn line_effect(tags: &Tags) -> Option<LineEffect> {
     if tags.is("natural", "cliff") {
         return Some(LineEffect::Cover(Landcover::Rock));
@@ -215,6 +219,7 @@ mod tests {
                 Some(LineEffect::Mask(line_mask::ROAD)),
             ),
             (&[("waterway", "dam")], None),
+            (&[("natural", "coastline")], None),
             (&[("barrier", "wall")], None),
         ] {
             assert_eq!(line_effect(&tags(pairs)), effect, "{pairs:?}");

@@ -139,7 +139,8 @@ pub fn ice_line(before: &[DaysBefore]) -> Option<f32> {
 }
 
 /// A season shown in place of the hike's own: a typical day for the
-/// plants, and in winter snow over the whole slab and every lake frozen
+/// plants, and in winter snow over the whole slab and every lake frozen,
+/// though never the sea
 pub fn forced_season(kind: SeasonKind, bundle: &SceneBundle) -> Season {
     let day = match kind {
         SeasonKind::Spring => 125,

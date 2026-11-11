@@ -83,7 +83,8 @@ fn recorded_response_gives_typed_mountain_features() {
             .iter()
             .all(|l| l.tags.get("highway").is_some()
                 || l.tags.get("waterway").is_some()
-                || l.tags.is("natural", "cliff"))
+                || l.tags.is("natural", "cliff")
+                || l.tags.is("natural", "coastline"))
     );
 
     let rings = features

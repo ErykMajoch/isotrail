@@ -290,7 +290,10 @@ pub(super) fn parse(bytes: &[u8]) -> Result<OsmFeatures, OsmError> {
 }
 
 fn is_line(tags: &Tags) -> bool {
-    tags.get("highway").is_some() || tags.get("waterway").is_some() || tags.is("natural", "cliff")
+    tags.get("highway").is_some()
+        || tags.get("waterway").is_some()
+        || tags.is("natural", "cliff")
+        || tags.is("natural", "coastline")
 }
 
 /// None when any point is missing, so a partial way is never mistaken for a
@@ -364,11 +367,16 @@ mod tests {
              "geometry":[{"lat":50.0,"lon":10.0},{"lat":50.0,"lon":10.1},{"lat":50.1,"lon":10.1}]},
             {"type":"way","id":6,"tags":{"waterway":"stream"},
              "geometry":[{"lat":50.0,"lon":10.0},null,{"lat":50.1,"lon":10.1}]},
-            {"type":"way","id":7,"tags":{"highway":"track"},"geometry":[{"lat":50.0,"lon":10.0}]}
+            {"type":"way","id":7,"tags":{"highway":"track"},"geometry":[{"lat":50.0,"lon":10.0}]},
+            {"type":"way","id":8,"tags":{"natural":"coastline"},
+             "geometry":[{"lat":50.0,"lon":10.0},{"lat":50.1,"lon":10.0},{"lat":50.1,"lon":10.1},{"lat":50.0,"lon":10.0}]}
         ]}"#;
         let features = parse(json.as_bytes()).unwrap();
         let ids = |ids: Vec<OsmId>| ids.into_iter().map(|id| id.id).collect::<Vec<_>>();
-        assert_eq!(ids(features.lines.iter().map(|l| l.id).collect()), [2, 4]);
+        assert_eq!(
+            ids(features.lines.iter().map(|l| l.id).collect()),
+            [2, 4, 8]
+        );
         assert_eq!(ids(features.areas.iter().map(|a| a.id).collect()), [3]);
         let path = &features.lines[0];
         assert!(path.tags.is("highway", "path"));

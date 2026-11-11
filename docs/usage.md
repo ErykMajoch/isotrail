@@ -143,7 +143,7 @@ Each cell takes a little more or less of its season's colour than the next, so t
 
 When there was snow on the ground, the slopes above the snowline are white, with snow lying in patches that thin out for 150 m below it, and lakes that froze over in a cold spell are drawn as ice (see [How it works](how-it-works.md#preparing-the-scene)). Snow and ice come with the weather, so `--no-weather` leaves them out too.
 
-`--season spring`, `summer`, `autumn` or `winter` shows the hike in another season. A forced winter covers the whole slab in snow, except for cliffs, and freezes every lake. Animations and the web embed keep one season throughout.
+`--season spring`, `summer`, `autumn` or `winter` shows the hike in another season. A forced winter covers the whole slab in snow, except for cliffs, and freezes every lake; the sea stays open. Animations and the web embed keep one season throughout.
 
 ### Animation
 
@@ -188,7 +188,7 @@ The public Overpass server is sometimes busy. isotrail then tries again six time
 isotrail bundle <hike.gpx> -o <hike.itb> [--debug-dir DIR] [--title TEXT] [--exaggeration X] [--config FILE] [--detail N] [--offline] [--overpass-url URL] [--no-map-data] [--no-weather] [--season SEASON]
 ```
 
-Downloads the elevation and OpenStreetMap data around the route and works out what covers every grid cell: from the map data where there is some, and from the slope and height of the ground elsewhere. Lakes and reservoirs get a level surface. The result is saved with the route, its elevation profile, the hike's statistics, the sun's and moon's paths across the sky and the hour-by-hour weather during the hike as a **scene bundle**: one compact file (usually under 100 KB) that holds everything a render needs, with no further downloads.
+Downloads the elevation and OpenStreetMap data around the route and works out what covers every grid cell: from the map data where there is some, and from the slope and height of the ground elsewhere. Lakes and reservoirs get a level surface, and the sea lies flat at sea level. The result is saved with the route, its elevation profile, the hike's statistics, the sun's and moon's paths across the sky and the hour-by-hour weather during the hike as a **scene bundle**: one compact file (usually under 100 KB) that holds everything a render needs, with no further downloads.
 
 Bundles are useful when you want to try many looks for one hike, to render offline, or to keep a hike's scene as it was even after the map data changes. A bundle made by an older version of isotrail has to be made again from the GPX file, and one made by a newer version needs isotrail updated; isotrail says which. A damaged bundle, or one holding values no render could draw, is refused with a message instead of being drawn. `bundle` reads GPX files only: give a bundle straight to `render`, `embed` or `stats`.
 
@@ -206,7 +206,7 @@ Route: 1650 points in 1 piece
 Wrote hike.itb (92 KB)
 ```
 
-`-v` also lists the map features by type. `--title TEXT` saves another title in the bundle instead of the GPX file's name; renders and the web embed then show it.
+On a coast, the water line names the sea too (`Water: the sea and 2 lakes levelled`). `-v` also lists the map features by type. `--title TEXT` saves another title in the bundle instead of the GPX file's name; renders and the web embed then show it.
 
 On long routes, where a grid cell is wider than 100 m, footpaths, streams and minor roads are left out, because they would be too small to show and would make the download much larger.
 
@@ -224,7 +224,7 @@ With `--debug-dir DIR`, `bundle` also writes images of the prepared terrain, to 
 | `hillshade.png` | Shaded relief, with the route in red |
 | `landcover.png` | One colour per kind of ground, with the route in red |
 | `landcover-legend.txt` | The landcover colours and how much of the slab each covers |
-| `water.png` | Levelled lakes (white) and rivers (grey) |
+| `water.png` | Levelled lakes and the sea (white) and rivers (grey) |
 | `paths.png` | Footpaths and tracks (white), roads (orange) and streams (blue) |
 
 <p align="center">

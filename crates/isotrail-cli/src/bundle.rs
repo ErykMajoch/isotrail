@@ -318,11 +318,13 @@ pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
         .map(|(class, share)| format!("{} {:.0}%", class.name(), share * 100.0))
         .collect();
     println!("Landcover: {}", shares.join(", "));
-    let bodies = landcover.water.len();
-    println!(
-        "Water: {bodies} {} levelled",
-        if bodies == 1 { "lake" } else { "lakes" }
-    );
+    let lakes = landcover.water.iter().filter(|body| !body.sea).count();
+    let lakes = format!("{lakes} {}", if lakes == 1 { "lake" } else { "lakes" });
+    match landcover.water.iter().any(|body| body.sea) {
+        false => println!("Water: {lakes} levelled"),
+        true if lakes.starts_with("0 ") => println!("Water: the sea, at sea level"),
+        true => println!("Water: the sea and {lakes} levelled"),
+    }
     let stats = &bundle.meta.stats;
     let weather = bundle.weather.as_ref().and_then(|weather| {
         let summary = weather::Summary::new(weather, stats.start?, stats.end?)?;

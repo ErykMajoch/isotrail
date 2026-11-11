@@ -12,6 +12,7 @@ const MAX_WATER_BLOCKS: u32 = 4;
 const EPSILON: f32 = 1e-3;
 
 const WATER: [u8; 4] = [44, 96, 176, 255];
+const SEA_WATER: [u8; 4] = [30, 62, 122, 255];
 const DIRT: [u8; 4] = [122, 86, 58, 255];
 const PEBBLE: [u8; 4] = [166, 142, 112, 255];
 const STONE: [u8; 4] = [124, 122, 128, 255];
@@ -127,6 +128,7 @@ fn walls(
                 },
                 water,
                 frozen: columns.frozen[cell],
+                sea: columns.sea[cell],
                 topsoil: columns.side(cell),
             };
             let corners = side.wall(col, row);
@@ -168,6 +170,7 @@ struct Column {
     dirt: u32,
     water: u32,
     frozen: bool,
+    sea: bool,
     topsoil: [u8; 4],
 }
 
@@ -197,6 +200,7 @@ impl Column {
     fn colour(&self, stratum: Stratum, depth: u32, noise: u64) -> [u8; 4] {
         match stratum {
             Stratum::Water if self.frozen && depth == 0 => ICE,
+            Stratum::Water if self.sea => SEA_WATER,
             Stratum::Water => WATER,
             Stratum::Topsoil => self.topsoil,
             Stratum::Dirt => speckle(noise, 60, DIRT, &[PEBBLE]),
@@ -300,6 +304,7 @@ mod tests {
             dirt,
             water,
             frozen: false,
+            sea: false,
             topsoil: [0; 4],
         }
     }
@@ -505,6 +510,18 @@ mod tests {
         let colours = (0..3).map(|depth| frozen.colour(frozen.stratum(depth, 5), depth, 0));
         assert_eq!(colours.collect::<Vec<_>>(), [ICE, WATER, WATER]);
         assert_eq!(column(2, 3).colour(Stratum::Water, 0, 0), WATER);
+    }
+
+    #[test]
+    fn the_sea_shows_darker_water() {
+        use Stratum::{Dirt, Water};
+        let sea = Column {
+            sea: true,
+            ..column(2, 3)
+        };
+        let layers = (0..4).map(|depth| sea.stratum(depth, 5));
+        assert_eq!(layers.collect::<Vec<_>>(), [Water, Water, Water, Dirt]);
+        assert_eq!(sea.colour(Water, 0, 0), SEA_WATER);
     }
 
     #[test]

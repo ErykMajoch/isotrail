@@ -30,7 +30,7 @@
 
 ## Features
 
-- **Real terrain**: elevation from open terrain tiles, with forests, moorland, rock, lakes, rivers and paths from OpenStreetMap
+- **Real terrain**: elevation from open terrain tiles, with forests, moorland, rock, lakes, rivers, the sea and paths from OpenStreetMap
 - **Diorama look**: stepped voxel or smooth low-poly terrain, layered cut faces, cel shading with shadows, and outlines
 - **Pixel-art finish**: every pixel snapped to a hand-made palette (three built in, or any Lospec `.hex` file)
 - **Animated**: looping GIFs and MP4 videos where the route draws itself, the camera turns and the stats count up

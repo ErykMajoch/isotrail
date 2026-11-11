@@ -194,6 +194,7 @@ struct Columns {
     /// Each cell's ground colour, which tops its cut-face column
     ground: Vec<[u8; 4]>,
     frozen: Vec<bool>,
+    sea: Vec<bool>,
 }
 
 impl Columns {
@@ -212,6 +213,7 @@ impl Columns {
                 .map(|&class| landcover_rgba(class))
                 .collect(),
             frozen: vec![false; landcover.len()],
+            sea: vec![false; landcover.len()],
             landcover,
         }
     }
@@ -221,6 +223,9 @@ impl Columns {
         self.ground = seasonal.ground(bundle);
         self.frozen = (0..self.landcover.len())
             .map(|cell| seasonal.frozen(cell))
+            .collect();
+        self.sea = (0..self.landcover.len())
+            .map(|cell| seasonal.sea(cell))
             .collect();
         self
     }

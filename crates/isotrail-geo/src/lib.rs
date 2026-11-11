@@ -45,8 +45,8 @@ pub use footprint::{Footprint, MAX_ASPECT, MIN_PADDING_M, PADDING_FRACTION};
 pub use grid::{DEFAULT_DETAIL, Grid, MAX_DEM_ZOOM, dem_zoom, ground_resolution_m};
 pub use isotrail_bundle::{Landcover, Provenance, SceneBundle, line_mask};
 pub use landcover::{
-    ALPINE_ROCK_SLOPE_DEG, LandcoverMap, ROCK_ABOVE_TREELINE_M, ROCK_SLOPE_DEG, Treeline,
-    WATER_LEVEL_PERCENTILE, WaterBody, latitude_treeline_m, slope_deg,
+    ALPINE_ROCK_SLOPE_DEG, LandcoverMap, ROCK_ABOVE_TREELINE_M, ROCK_SLOPE_DEG, SEA_LEVEL_M,
+    Treeline, WATER_LEVEL_PERCENTILE, WaterBody, latitude_treeline_m, slope_deg,
 };
 pub use osm::{
     Area, BoundingBox, FEATURE_KEYS, FeatureSource, Line, MINOR_WAY_MAX_CELL_M, OVERPASS_URL,

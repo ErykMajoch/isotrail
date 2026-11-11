@@ -458,7 +458,7 @@ fn stats_of_a_damaged_bundle_explains_why() {
     for (name, bytes, reason) in [
         (
             "damaged.itb",
-            &b"ITB1\x05\x00not deflate"[..],
+            &b"ITB1\x06\x00not deflate"[..],
             "the bundle is damaged",
         ),
         (

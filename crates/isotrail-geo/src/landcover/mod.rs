@@ -1,4 +1,5 @@
 mod raster;
+mod sea;
 mod tags;
 mod terrain;
 mod water;
@@ -12,10 +13,10 @@ pub use terrain::{
     ALPINE_ROCK_SLOPE_DEG, ROCK_ABOVE_TREELINE_M, ROCK_SLOPE_DEG, Treeline, latitude_treeline_m,
     slope_deg,
 };
-pub use water::{WATER_LEVEL_PERCENTILE, WaterBody};
+pub use water::{SEA_LEVEL_M, WATER_LEVEL_PERCENTILE, WaterBody};
 
-use self::tags::{LineEffect, area_class, is_lake, line_effect, priority};
-use self::water::{NO_LAKE, level_lakes};
+use self::tags::{LineEffect, area_class, is_coastline, is_lake, line_effect, priority};
+use self::water::{NO_LAKE, SEA, level_lakes};
 use crate::{FEATURE_KEYS, Grid, Heightmap, OsmFeatures};
 
 /// What every grid cell is, row-major like [`Heightmap`]
@@ -31,9 +32,9 @@ pub struct LandcoverMap {
 }
 
 impl LandcoverMap {
-    /// Rasterises the map features onto the grid, fills the cells they leave
-    /// open from the terrain, and flattens lakes in `heightmap` to their
-    /// water level
+    /// Rasterises the map features onto the grid, finds the sea from the
+    /// coastlines, fills the cells they leave open from the terrain, and
+    /// flattens lakes and the sea in `heightmap` to their water level
     pub fn classify(
         grid: &Grid,
         features: &OsmFeatures,
@@ -103,6 +104,26 @@ impl LandcoverMap {
             debug!(?unknown, "map features with no landcover class");
         }
 
+        let coasts: Vec<Vec<(f64, f64)>> = features
+            .lines
+            .iter()
+            .filter(|line| is_coastline(&line.tags))
+            .map(|line| line.points.iter().map(to_cell).collect())
+            .collect();
+        let land_features = features
+            .areas
+            .iter()
+            .any(|area| area_class(&area.tags) != Some(Landcover::Water))
+            || features
+                .lines
+                .iter()
+                .any(|line| line.tags.get("highway").is_some() || line.tags.is("natural", "cliff"));
+        let sea = sea::sea_cells(&coasts, cols, rows, land_features, &heightmap.heights_m);
+        for i in (0..cells).filter(|&i| sea[i]) {
+            claimed[i] = Some(Landcover::Water);
+            lakes[i] = SEA;
+        }
+
         let mut forest_heights: Vec<f32> = claimed
             .iter()
             .zip(&heightmap.heights_m)
@@ -126,6 +147,7 @@ impl LandcoverMap {
             .collect();
 
         let water = level_lakes(&lakes, heightmap);
+        sea::raise_shore(&sea, heightmap);
         for body in &water {
             debug!(
                 level_m = body.level_m,
@@ -529,6 +551,137 @@ mod tests {
         assert_eq!(map.line_image().len(), 52 * 26 * 3);
         assert_eq!(map.water_mask(), vec![0; 52 * 26]);
         assert!(matches!(map.treeline, Treeline::Latitude(_)));
+    }
+
+    fn coastline(grid: &Grid, cells: &[(f64, f64)]) -> Line {
+        line(grid, &[("natural", "coastline")], cells)
+    }
+
+    fn sea_body(map: &LandcoverMap) -> &WaterBody {
+        let [body] = &map.water[..] else {
+            panic!("{:?}", map.water);
+        };
+        assert!(body.sea && body.level_m == 0.0, "{body:?}");
+        body
+    }
+
+    #[test]
+    fn the_sea_lies_right_of_the_coastline() {
+        let grid = grid();
+        let (_, mid_lon) = at(&grid, 26.0, 13.0);
+        let (lat, _) = at(&grid, 26.0, 13.0);
+        let west = grid.footprint.projection.unproject(-20_000.0, 0.0).1;
+        let east = grid.footprint.projection.unproject(20_000.0, 0.0).1;
+        assert!(west < mid_lon && mid_lon < east);
+        for (from, to, sea_to_the_south) in [(west, east, true), (east, west, false)] {
+            let features = OsmFeatures {
+                areas: vec![area(
+                    &[("natural", "wood")],
+                    rect(&grid, 0.0, 0.0, 52.0, 26.0),
+                    vec![],
+                )],
+                lines: vec![Line {
+                    id: id(3),
+                    tags: tags(&[("natural", "coastline")]),
+                    points: vec![(lat, from), (lat, to)],
+                }],
+            };
+            let mut heightmap = flat(&grid, 30.0);
+            heightmap.heights_m[0] = -12.0;
+            heightmap.heights_m[52 * 26 - 1] = -12.0;
+            let before = heightmap.clone();
+            let map = LandcoverMap::classify(&grid, &features, &mut heightmap);
+            let water = cells_of(&map, Landcover::Water);
+            assert_eq!(water.len(), 52 * 13, "{sea_to_the_south}");
+            for &(col, row) in &water {
+                let (cell_lat, _) = grid.cell_center_lat_lon(col, row);
+                assert_eq!(cell_lat < lat, sea_to_the_south, "{col},{row}");
+            }
+            assert_eq!(sea_body(&map).cells.len(), water.len());
+            for (i, &h) in heightmap.heights_m.iter().enumerate() {
+                let cell = (i as u32 % grid.cols, i as u32 / grid.cols);
+                let expected = if water.contains(&cell) {
+                    0.0
+                } else {
+                    before.heights_m[i]
+                };
+                assert_eq!(h, expected, "{cell:?}");
+            }
+            assert_eq!(map.treeline, Treeline::Forest(30.0));
+        }
+    }
+
+    #[test]
+    fn an_island_coast_runs_anticlockwise_round_the_land() {
+        let grid = grid();
+        let island = coastline(
+            &grid,
+            &[
+                (10.0, 20.0),
+                (30.0, 20.0),
+                (30.0, 6.0),
+                (10.0, 6.0),
+                (10.0, 20.0),
+            ],
+        );
+        let (south, north) = (at(&grid, 10.0, 20.0).0, at(&grid, 10.0, 6.0).0);
+        let (west, east) = (at(&grid, 10.0, 20.0).1, at(&grid, 30.0, 20.0).1);
+        assert!(
+            south < north && west < east,
+            "the ring runs east along the south first"
+        );
+        let features = OsmFeatures {
+            areas: vec![],
+            lines: vec![island],
+        };
+        let mut heightmap = flat(&grid, -20.0);
+        for (col, row) in block(10..30, 6..20) {
+            heightmap.heights_m[(row * grid.cols + col) as usize] = 40.0;
+        }
+        let map = LandcoverMap::classify(&grid, &features, &mut heightmap);
+        let land: BTreeSet<_> = block(0..52, 0..26)
+            .difference(&cells_of(&map, Landcover::Water))
+            .copied()
+            .collect();
+        assert_eq!(land, block(10..30, 6..20));
+        assert_eq!(sea_body(&map).cells.len(), 52 * 26 - 20 * 14);
+    }
+
+    #[test]
+    fn a_slab_out_at_sea_is_all_sea_at_sea_level() {
+        let grid = grid();
+        let features = OsmFeatures::default();
+        let mut heightmap = flat(&grid, -3400.0);
+        heightmap.heights_m[7] = -4300.0;
+        let map = LandcoverMap::classify(&grid, &features, &mut heightmap);
+        assert_eq!(map.shares(), [(Landcover::Water, 1.0)]);
+        assert_eq!(sea_body(&map).cells.len(), 52 * 26);
+        assert!(heightmap.heights_m.iter().all(|&h| h == 0.0));
+    }
+
+    #[test]
+    fn inland_ground_below_sea_level_stays_land() {
+        let grid = grid();
+        let fields = OsmFeatures {
+            areas: vec![area(
+                &[("landuse", "farmland")],
+                rect(&grid, 0.0, 0.0, 10.0, 10.0),
+                vec![],
+            )],
+            lines: vec![],
+        };
+        // Far to the north, heading west: the land is south of it
+        let far_coast = OsmFeatures {
+            areas: vec![],
+            lines: vec![coastline(&grid, &[(80.0, -60.0), (-30.0, -60.0)])],
+        };
+        for features in [fields, far_coast] {
+            let mut heightmap = flat(&grid, -20.0);
+            let map = LandcoverMap::classify(&grid, &features, &mut heightmap);
+            assert!(map.water.is_empty(), "{:?}", map.water);
+            assert!(cells_of(&map, Landcover::Water).is_empty());
+            assert!(heightmap.heights_m.iter().all(|&h| h == -20.0));
+        }
     }
 
     #[test]

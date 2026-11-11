@@ -6,9 +6,13 @@ use crate::Heightmap;
 /// Low, because resampling blends the higher shore into the cells along it
 pub const WATER_LEVEL_PERCENTILE: f64 = 0.1;
 pub(super) const NO_LAKE: u32 = u32::MAX;
+/// The id of the sea's cells in place of a lake's
+pub(super) const SEA: u32 = u32::MAX - 1;
+pub const SEA_LEVEL_M: f32 = 0.0;
 
 /// Splits each lake's cells into 4-connected bodies and flattens every body
-/// to its level; `lakes` holds, per cell, the lake that claimed it first
+/// to its level; `lakes` holds, per cell, the lake that claimed it first,
+/// or [`SEA`], which lies at [`SEA_LEVEL_M`] whatever the sea bed's depth
 ///
 /// Bodies never join across lakes, so two reservoirs either side of a
 /// narrow dam keep their own levels
@@ -41,15 +45,24 @@ pub(super) fn level_lakes(lakes: &[u32], heightmap: &mut Heightmap) -> Vec<Water
             }
         }
         cells.sort_unstable();
-        let mut heights: Vec<f32> = cells
-            .iter()
-            .map(|&c| heightmap.heights_m[c as usize])
-            .collect();
-        let level_m = percentile(&mut heights, WATER_LEVEL_PERCENTILE);
+        let sea = lake == SEA;
+        let level_m = if sea {
+            SEA_LEVEL_M
+        } else {
+            let mut heights: Vec<f32> = cells
+                .iter()
+                .map(|&c| heightmap.heights_m[c as usize])
+                .collect();
+            percentile(&mut heights, WATER_LEVEL_PERCENTILE)
+        };
         for &c in &cells {
             heightmap.heights_m[c as usize] = level_m;
         }
-        bodies.push(WaterBody { level_m, cells });
+        bodies.push(WaterBody {
+            level_m,
+            cells,
+            sea,
+        });
     }
     bodies
 }
@@ -119,6 +132,25 @@ mod tests {
                 (vec![5, 11], 9.0),
             ]
         );
+    }
+
+    #[test]
+    fn the_sea_lies_at_sea_level_over_any_sea_bed() {
+        let mut map = heightmap(4, vec![-40.0, 3.0, 12.0, 30.0, -900.0, -2.0, 8.0, 30.0]);
+        let lakes = [
+            SEA, SEA, 0, N, //
+            SEA, SEA, 0, N,
+        ];
+        let bodies = level_lakes(&lakes, &mut map);
+        let summary: Vec<_> = bodies
+            .iter()
+            .map(|b| (b.cells.clone(), b.level_m, b.sea))
+            .collect();
+        assert_eq!(
+            summary,
+            [(vec![0, 1, 4, 5], 0.0, true), (vec![2, 6], 8.0, false)]
+        );
+        assert_eq!(map.heights_m, [0.0, 0.0, 8.0, 30.0, 0.0, 0.0, 8.0, 30.0]);
     }
 
     #[test]

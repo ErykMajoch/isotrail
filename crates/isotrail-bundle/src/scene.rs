@@ -125,7 +125,8 @@ pub struct Terrain {
 
 impl Terrain {
     /// Spreads the height range over every u16 step, leaving the class
-    /// layers empty
+    /// layers empty; flat ground, such as a slab out at sea, gets a span of
+    /// a metre
     pub fn quantise(heights_m: &[f32]) -> Terrain {
         let (min, max) = heights_m
             .iter()
@@ -137,11 +138,7 @@ impl Terrain {
         } else {
             (0.0, 0.0)
         };
-        let scale = if span > 0.0 {
-            span / f32::from(u16::MAX)
-        } else {
-            1.0
-        };
+        let scale = if span > 0.0 { span } else { 1.0 } / f32::from(u16::MAX);
         Terrain {
             heights: heights_m
                 .iter()
@@ -159,12 +156,14 @@ impl Terrain {
     }
 }
 
-/// A lake or reservoir with a level surface
+/// A lake, reservoir or the sea, with a level surface
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WaterBody {
     pub level_m: f32,
     /// Row-major cell indices, ascending
     pub cells: Vec<u32>,
+    /// The sea never freezes
+    pub sea: bool,
 }
 
 /// The recorded route as one polyline, simplified for drawing
@@ -268,6 +267,7 @@ mod tests {
         let flat = Terrain::quantise(&[312.5; 4]);
         assert_eq!(flat.heights, [0; 4]);
         assert_eq!(flat.height_m(3), 312.5);
+        assert!(flat.height_scale_m > 0.0 && flat.height_scale_m * 65_535.0 <= 1.0);
         assert!(Terrain::quantise(&[]).heights.is_empty());
     }
 }

@@ -8,7 +8,7 @@ use crate::{BundleError, Landcover, SceneBundle};
 
 pub const MAGIC: [u8; 4] = *b"ITB1";
 /// Bumped whenever the payload layout changes
-pub const FORMAT_VERSION: u16 = 5;
+pub const FORMAT_VERSION: u16 = 6;
 pub const MAX_GRID_SIDE: u32 = 1024;
 const HEADER_LEN: usize = MAGIC.len() + 2;
 const COMPRESSION_LEVEL: u8 = 9;
@@ -60,9 +60,16 @@ impl SceneBundle {
         Ok(bundle)
     }
 
-    /// Stable hash of the terrain and route, for seeding anything random
+    /// Stable hash of the terrain and route, for seeding anything random;
+    /// water is hashed without its sea flag, so seeds stay as they were
+    /// before bundles had one
     pub fn content_seed(&self) -> u64 {
-        let content = (&self.grid, &self.terrain, &self.water, &self.route);
+        let water: Vec<(f32, &[u32])> = self
+            .water
+            .iter()
+            .map(|body| (body.level_m, &body.cells[..]))
+            .collect();
+        let content = (&self.grid, &self.terrain, water, &self.route);
         fnv1a(&postcard::to_allocvec(&content).expect("bundles always serialise"))
     }
 
@@ -335,10 +342,18 @@ mod tests {
                 exaggeration: 2.5,
             },
             terrain,
-            water: vec![WaterBody {
-                level_m: 402.0,
-                cells: vec![0, 1, 6],
-            }],
+            water: vec![
+                WaterBody {
+                    level_m: 402.0,
+                    cells: vec![0, 1, 6],
+                    sea: false,
+                },
+                WaterBody {
+                    level_m: 0.0,
+                    cells: vec![23],
+                    sea: true,
+                },
+            ],
             prop_seed: 42,
             route: Route {
                 points: (0..5).map(point).collect(),
@@ -412,7 +427,7 @@ mod tests {
         let bundle = bundle();
         let bytes = bundle.to_bytes().unwrap();
         assert!(is_bundle(&bytes));
-        assert_eq!(&bytes[..6], b"ITB1\x05\x00");
+        assert_eq!(&bytes[..6], b"ITB1\x06\x00");
         assert_eq!(SceneBundle::from_bytes(&bytes).unwrap(), bundle);
         assert_eq!(
             bundle.to_bytes().unwrap(),
@@ -443,7 +458,7 @@ mod tests {
 
     #[test]
     fn bundles_from_newer_versions_ask_for_an_update() {
-        for new in [6u16, 9, u16::MAX] {
+        for new in [7u16, 9, u16::MAX] {
             let mut bytes = bundle().to_bytes().unwrap();
             bytes[4..6].copy_from_slice(&new.to_le_bytes());
             let err = SceneBundle::from_bytes(&bytes).unwrap_err();
@@ -460,7 +475,7 @@ mod tests {
 
     #[test]
     fn bundles_from_older_versions_ask_to_be_made_again() {
-        for old in [0u16, 1, 2, 3, 4] {
+        for old in [0u16, 1, 2, 3, 4, 5] {
             let mut bytes = bundle().to_bytes().unwrap();
             bytes[4..6].copy_from_slice(&old.to_le_bytes());
             let err = SceneBundle::from_bytes(&bytes).unwrap_err();
@@ -468,7 +483,7 @@ mod tests {
             let message = err.to_string();
             assert!(message.contains("older isotrail"), "{message}");
             assert!(
-                message.contains(&format!("version {old}")) && message.contains("reads version 5"),
+                message.contains(&format!("version {old}")) && message.contains("reads version 6"),
                 "{message}"
             );
             assert!(message.contains("`isotrail bundle`"), "{message}");
@@ -617,6 +632,32 @@ mod tests {
         let mut c = bundle();
         c.route.points[1].col += 0.001;
         assert_ne!(a.content_seed(), c.content_seed());
+    }
+
+    #[test]
+    fn seed_ignores_the_sea_flag_and_matches_bundles_without_one() {
+        #[derive(serde::Serialize)]
+        struct Before<'a> {
+            level_m: f32,
+            cells: &'a Vec<u32>,
+        }
+        let a = bundle();
+        let before: Vec<Before> = a
+            .water
+            .iter()
+            .map(|b| Before {
+                level_m: b.level_m,
+                cells: &b.cells,
+            })
+            .collect();
+        let content = (&a.grid, &a.terrain, before, &a.route);
+        assert_eq!(
+            a.content_seed(),
+            fnv1a(&postcard::to_allocvec(&content).unwrap())
+        );
+        let mut b = bundle();
+        b.water[1].sea = false;
+        assert_eq!(a.content_seed(), b.content_seed());
     }
 
     #[test]

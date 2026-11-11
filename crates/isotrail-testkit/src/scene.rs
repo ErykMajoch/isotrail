@@ -41,6 +41,7 @@ pub fn bundle(grid: GridInfo, heights_m: &[f32], landcover: &[Landcover]) -> Sce
         vec![WaterBody {
             level_m,
             cells: lake,
+            sea: false,
         }]
     };
     let mut bundle = SceneBundle {

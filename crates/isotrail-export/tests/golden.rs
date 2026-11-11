@@ -246,6 +246,39 @@ fn seasons_match_goldens() {
     assert!(winter > summer, "{means:?}");
 }
 
+#[test]
+fn the_sea_stays_open_and_dark_in_winter() {
+    let gpu = isotrail_testkit::gpu();
+    let framing = Aspect::Story.framing(6).unwrap();
+    let mut bundle = diorama_bundle();
+    let terrain = &bundle.terrain;
+    let low = (0..terrain.heights.len())
+        .map(|cell| terrain.height_m(cell))
+        .fold(f32::MAX, f32::min);
+    bundle.season = Season {
+        leaf_day: Some(15),
+        snow_line_m: Some(low - 1.0),
+        ice_line_m: Some(low - 1.0),
+    };
+    let render = |bundle: &SceneBundle| {
+        render_still(
+            &gpu,
+            bundle,
+            &VoxelMesher::default(),
+            &framing,
+            DEFAULT_YAW_OFFSET_DEG,
+            &SunState::for_hike(bundle),
+            &Look::default(),
+        )
+        .unwrap()
+    };
+    let frozen_lake = mean(&render(&bundle));
+    bundle.water[0].sea = true;
+    let sea = render(&bundle);
+    assert!(mean(&sea) < frozen_lake, "{} {frozen_lake}", mean(&sea));
+    assert_golden("sea-winter", sea.width(), sea.height(), sea.rgba());
+}
+
 /// Sunlight breaking through a partly cloudy sky falls in beams on the
 /// ground, and the weather decides whether they show
 #[test]

@@ -48,6 +48,7 @@ pub fn estimate(bundle: &mut SceneBundle, track: &Track, fetcher: impl Fetcher) 
     let highest_lake = bundle
         .water
         .iter()
+        .filter(|body| !body.sea)
         .map(|body| body.level_m)
         .fold(f32::MIN, f32::max);
     bundle.season.snow_line_m = snow_line(&readings, &before).filter(|&line| line < top);

@@ -61,6 +61,7 @@ pub(crate) struct Seasonal {
     heights: Vec<f32>,
     snowy: Vec<bool>,
     frozen: Vec<bool>,
+    sea: Vec<bool>,
 }
 
 /// How far through the year one plant is
@@ -89,13 +90,15 @@ impl Seasonal {
         let lowest = metres.iter().copied().fold(f32::INFINITY, f32::min);
         let seed = bundle.prop_seed;
         let mut frozen = vec![false; cells];
+        let mut sea = vec![false; cells];
         let mut levels = vec![None; cells];
         for body in &bundle.water {
-            let iced = season.ice_line_m.is_some_and(|line| body.level_m >= line);
+            let iced = !body.sea && season.ice_line_m.is_some_and(|line| body.level_m >= line);
             for &cell in &body.cells {
                 if let Some(at) = levels.get_mut(cell as usize) {
                     *at = Some(body.level_m);
                     frozen[cell as usize] = iced;
+                    sea[cell as usize] = body.sea;
                 }
             }
         }
@@ -132,6 +135,7 @@ impl Seasonal {
             heights: metres.iter().map(|m| m - lowest).collect(),
             snowy,
             frozen,
+            sea,
         }
     }
 
@@ -141,6 +145,10 @@ impl Seasonal {
 
     pub(super) fn frozen(&self, cell: usize) -> bool {
         self.frozen.get(cell).copied().unwrap_or(false)
+    }
+
+    pub(super) fn sea(&self, cell: usize) -> bool {
+        self.sea.get(cell).copied().unwrap_or(false)
     }
 
     /// The year's day for plants at this cell's height
@@ -490,10 +498,12 @@ mod tests {
             WaterBody {
                 level_m: 100.0,
                 cells: vec![1],
+                sea: false,
             },
             WaterBody {
                 level_m: 300.0,
                 cells: vec![4],
+                sea: false,
             },
         ];
         bundle.season.ice_line_m = Some(200.0);
@@ -507,5 +517,33 @@ mod tests {
             })
             .count();
         assert!((60..200).contains(&cracked), "{cracked}");
+    }
+
+    #[test]
+    fn the_sea_never_freezes_and_takes_no_snow() {
+        let mut classes = vec![Landcover::Grassland; 6];
+        classes[0] = Landcover::Water;
+        classes[1] = Landcover::Water;
+        classes[4] = Landcover::Water;
+        let heights = [0.0, 0.0, 20.0, 20.0, 15.0, 20.0];
+        let mut bundle = bundle(grid(6, 1, 100.0), &heights, &classes);
+        bundle.water = vec![
+            WaterBody {
+                level_m: 0.0,
+                cells: vec![0, 1],
+                sea: true,
+            },
+            WaterBody {
+                level_m: 15.0,
+                cells: vec![4],
+                sea: false,
+            },
+        ];
+        bundle.season.ice_line_m = Some(-1.0);
+        bundle.season.snow_line_m = Some(-1.0);
+        let seasonal = Seasonal::new(&bundle);
+        assert_eq!(seasonal.frozen, [false, false, false, false, true, false]);
+        assert_eq!(seasonal.snowy, [false, false, true, true, true, true]);
+        assert_eq!(seasonal.sea, [true, true, false, false, false, false]);
     }
 }

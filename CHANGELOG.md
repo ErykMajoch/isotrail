@@ -22,6 +22,7 @@ All notable changes to `isotrail` are documented here.
 - **Patient map downloads.** When OpenStreetMap's Overpass server is busy (an error status, a time-out, a cut-off or unreadable answer, or a "timed out" or rate-limit note), isotrail now tries six times over about two minutes, saying each time how long it will wait, instead of giving up within seconds. If it still fails, the message suggests waiting, another server with `--overpass-url`, or `--no-map-data`. A server that can't be reached at all is given up on after a few seconds.
 - A download that takes longer than 10 seconds prints a line saying it is still waiting, and answers larger than 512 MB are refused.
 - Weather warnings name the server and Open-Meteo's own reason instead of printing the whole request address, and hikes from before 1940 or more than 16 days ahead skip the weather with a plain message.
+- **Scene bundles mark the sea**, so bundles made by earlier versions can't be read any more; make them again with `isotrail bundle` (or `isotrail embed`). Map data cached by earlier versions is downloaded again once, because the query now asks for coastlines too.
 
 - **Outputs are written safely.** Every file is written under a temporary name and only replaces the previous one once complete, so a render that fails or is stopped with Ctrl+C leaves the old file as it was, with no half-written file behind.
 - Missing output folders are created, and outputs are checked before anything is downloaded or rendered: an output that is one of the command's own inputs (such as `isotrail bundle walk.gpx -o walk.gpx`) or an existing folder is refused, and so is an `embed --runtime-dir` that is the output folder.
@@ -36,6 +37,8 @@ All notable changes to `isotrail` are documented here.
 
 ### Fixed
 
+- **The sea on coastal hikes.** It was drawn as a flat green field, and a slab out at sea as cliffs of sea bed. The sea is now found from OpenStreetMap's coastlines and drawn as water at sea level, a darker blue than lakes with surf breaking along the shore, and with its water showing in the slab's sides. It never freezes, even in `--season winter`, and the shore never dips below it. A slab with no coastline near it is sea only when it lies wholly at or below sea level with nothing on land mapped there, so ground below sea level inland stays land.
+- A perfectly flat scene, such as a slab wholly at sea, can be saved as a bundle.
 - `--overlay none` combined with other parts, a stat listed twice in `--stats`, a GIF palette with more than 255 colours and `--time` on a track without times are reported at once, instead of after the download.
 - Options typed on the command line win over config file settings they conflict with: `--date` no longer fails when a config file sets `date-format`.
 - A missing file named by `ISOTRAIL_CONFIG` is reported instead of ignored.
