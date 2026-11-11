@@ -4,7 +4,16 @@ All notable changes to `isotrail` are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **`--no-map-data`** on `render`, `bundle`, `embed` and `style-lab` builds the diorama from the elevation alone, without OpenStreetMap's lakes, woods and paths, for when the map server is busy or out of reach. The OpenStreetMap credit is left out of such a scene.
+- **`isotrail cache clear --older-than DAYS`** deletes only downloads made more than that many days ago. Map data stays cached until it is cleared, so this is the way to pick up newer maps for an area.
+
 ### Changed
+
+- **Patient map downloads.** When OpenStreetMap's Overpass server is busy (an error status, a time-out, a cut-off or unreadable answer, or a "timed out" or rate-limit note), isotrail now tries six times over about two minutes, saying each time how long it will wait, instead of giving up within seconds. If it still fails, the message suggests waiting, another server with `--overpass-url`, or `--no-map-data`. A server that can't be reached at all is given up on after a few seconds.
+- A download that takes longer than 10 seconds prints a line saying it is still waiting, and answers larger than 512 MB are refused.
+- Weather warnings name the server and Open-Meteo's own reason instead of printing the whole request address, and hikes from before 1940 or more than 16 days ahead skip the weather with a plain message.
 
 - **Outputs are written safely.** Every file is written under a temporary name and only replaces the previous one once complete, so a render that fails or is stopped with Ctrl+C leaves the old file as it was, with no half-written file behind.
 - Missing output folders are created, and outputs are checked before anything is downloaded or rendered: an output that is one of the command's own inputs (such as `isotrail bundle walk.gpx -o walk.gpx`) or an existing folder is refused, and so is an `embed --runtime-dir` that is the output folder.
@@ -24,6 +33,11 @@ All notable changes to `isotrail` are documented here.
 - A wrong timestamp, such as a first point stamped 1970, is ignored with a warning, instead of making a bundle of many megabytes with the wrong date, season and weather.
 - A stray point far from the rest of the recording, such as one at 0°, 0°, is dropped with a warning, instead of stretching the diorama over hundreds of kilometres.
 - Moving time is no longer blank for devices that log a point once a minute or less often.
+- Routes that cross the 180° meridian ask for the map data on each side of it, instead of a band round the whole Earth.
+- A cached elevation tile or weather answer that has been damaged is downloaded again, instead of failing every run until the cache is cleared.
+- `cache clear` only deletes files that isotrail wrote, and says how many other files it left alone. It used to delete any `.bin`, `.json` or `.tmp` file in the cache folder.
+- Scene bundles record only the scheme and host of `--overpass-url`, so a user name, password or path in it is never published with a bundle.
+- With `--offline`, the weather of a hike bundled within a few days of the walk is found in the cache again.
 
 ## [1.3.0] - 2026-11-10
 

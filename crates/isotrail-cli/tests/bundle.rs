@@ -148,6 +148,11 @@ fn offline_bundle_writes_the_bundle_and_debug_images_from_the_cache() {
     let bundle = SceneBundle::from_bytes(&std::fs::read(&itb).unwrap()).unwrap();
     assert_eq!((bundle.grid.cols, bundle.grid.rows), (32, 16));
     assert_eq!(bundle.meta.title, "Synthetic Snowdon Descent");
+    assert_eq!(
+        bundle.meta.provenance.map_data,
+        "OpenStreetMap via https://overpass-api.de"
+    );
+    assert_eq!(bundle.meta.attribution[0], "© OpenStreetMap contributors");
     assert!(!bundle.route.points.is_empty());
     assert_eq!(bundle.season.leaf_day, Some(165));
     assert_eq!(
@@ -230,6 +235,89 @@ fn offline_bundle_without_cached_map_data_explains_why() {
     assert!(!itb.exists());
     // The folder is made before any download, but nothing is written into it
     assert_eq!(std::fs::read_dir(&debug).unwrap().count(), 0);
+}
+
+#[test]
+fn no_map_data_builds_from_the_elevation_alone() {
+    let temp = tempfile::tempdir().unwrap();
+    let cache_dir = temp.path().join("cache");
+    warm(&cache_dir, false);
+    let itb = temp.path().join("hike.itb");
+    let output = isotrail(
+        &cache_dir,
+        &[
+            "bundle",
+            &gpx(),
+            "-o",
+            itb.to_str().unwrap(),
+            "--detail",
+            "32",
+            "--offline",
+            "--no-weather",
+            "--no-map-data",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let stdout = text(&output.stdout);
+    assert!(
+        stdout.contains("\nMap data: none (--no-map-data)\n"),
+        "{stdout}"
+    );
+    let stderr = text(&output.stderr);
+    assert!(
+        stderr.contains("building the diorama from the elevation alone"),
+        "{stderr}"
+    );
+    let bundle = SceneBundle::from_bytes(&std::fs::read(&itb).unwrap()).unwrap();
+    assert_eq!(bundle.meta.provenance.map_data, "none");
+    assert_eq!(bundle.meta.attribution, ["Terrain Tiles (AWS)"]);
+    assert!(bundle.water.is_empty());
+    assert!(bundle.terrain.lines.iter().all(|&mask| mask == 0));
+}
+
+#[test]
+fn a_failing_overpass_server_names_the_ways_out() {
+    let temp = tempfile::tempdir().unwrap();
+    let cache_dir = temp.path().join("cache");
+    warm(&cache_dir, false);
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let server = std::thread::spawn(move || {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut buf = [0; 65_536];
+        let _ = std::io::Read::read(&mut stream, &mut buf);
+        let reply = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        std::io::Write::write_all(&mut stream, reply.as_bytes()).unwrap();
+    });
+    let itb = temp.path().join("hike.itb");
+    let url = format!("http://127.0.0.1:{port}/api/interpreter");
+    let output = isotrail(
+        &cache_dir,
+        &[
+            "bundle",
+            &gpx(),
+            "-o",
+            itb.to_str().unwrap(),
+            "--detail",
+            "32",
+            "--no-weather",
+            "--overpass-url",
+            &url,
+        ],
+    );
+    server.join().unwrap();
+    assert!(!output.status.success());
+    let stderr = text(&output.stderr);
+    assert!(
+        stderr.contains("Overpass server is busy or failing. Try again later, use another server with --overpass-url, or pass --no-map-data"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("returned HTTP 400"), "{stderr}");
+    assert!(!itb.exists());
 }
 
 #[test]

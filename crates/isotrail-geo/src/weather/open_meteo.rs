@@ -6,7 +6,7 @@ use serde::de::DeserializeOwned;
 use tracing::{debug, info, warn};
 
 use super::{WeatherError, WeatherRequest, WeatherSource};
-use crate::Fetcher;
+use crate::{FetchError, Fetcher};
 
 pub const OPEN_METEO_ARCHIVE_URL: &str = "https://archive-api.open-meteo.com/v1/archive";
 pub const OPEN_METEO_FORECAST_URL: &str = "https://api.open-meteo.com/v1/forecast";
@@ -15,6 +15,9 @@ pub const OPEN_METEO_FORECAST_URL: &str = "https://api.open-meteo.com/v1/forecas
 pub const ARCHIVE_LAG_S: i64 = 5 * 86_400;
 /// Days before the hike whose weather tells whether lakes froze
 pub const DAYS_BEFORE: usize = 14;
+/// 1940-01-01, where the archive begins
+pub const ARCHIVE_START: i64 = -946_771_200;
+pub const FORECAST_DAYS: i64 = 16;
 const HOURLY: &str = "temperature_2m,weather_code,cloud_cover,cloud_cover_low,cloud_cover_mid,\
                       cloud_cover_high,precipitation,rain,snowfall,snow_depth,wind_speed_10m,\
                       wind_direction_10m";
@@ -65,36 +68,55 @@ impl<F: Fetcher> OpenMeteoSource<F> {
         query(endpoint, request, days_before(request), ("daily", DAILY))
     }
 
+    /// An answer that can't be read, most likely a damaged copy in the cache,
+    /// is dropped and fetched once more
     fn lookup<T>(
         &self,
         url: &str,
-        read: impl FnOnce(&[u8]) -> Result<T, WeatherError>,
+        read: impl Fn(&[u8]) -> Result<T, WeatherError>,
     ) -> Result<T, WeatherError> {
-        let bytes = self
-            .fetcher
-            .get(url)
-            .map_err(|source| WeatherError::Fetch { source })?;
-        debug!(bytes = bytes.len(), "Open-Meteo response");
-        read(&bytes).inspect_err(|_| {
-            if let Err(err) = self.fetcher.forget(url, None) {
-                warn!("could not drop the Open-Meteo response from the cache: {err}");
+        let attempt = || {
+            let bytes = self.fetcher.get(url).map_err(|err| fetch_error(url, err))?;
+            debug!(bytes = bytes.len(), "Open-Meteo response");
+            read(&bytes).inspect_err(|_| {
+                if let Err(err) = self.fetcher.forget(url, None) {
+                    warn!("could not drop the Open-Meteo response from the cache: {err}");
+                }
+            })
+        };
+        match attempt() {
+            Err(WeatherError::Json { source }) => {
+                info!("could not read the Open-Meteo response ({source}), so fetching it again");
+                attempt()
             }
-        })
+            result => result,
+        }
     }
 
     /// The archive for hikes it has caught up with, falling back to the
-    /// forecast API where it has gaps
+    /// forecast API where it has gaps or, offline, where only the forecast
+    /// was cached. `first` is the earliest time asked for
     fn either<T>(
         &self,
         request: &WeatherRequest,
+        first: i64,
         lookup: impl Fn(&str, WeatherDataset) -> Result<T, WeatherError>,
     ) -> Result<T, WeatherError> {
+        if first < ARCHIVE_START {
+            return Err(WeatherError::BeforeArchive);
+        }
+        if request.last_hour() - request.now > FORECAST_DAYS * DAY_S {
+            return Err(WeatherError::BeyondForecast);
+        }
         if request.now - request.last_hour() >= ARCHIVE_LAG_S {
             match lookup(&self.archive_url, WeatherDataset::Archive) {
                 Err(
                     err @ (WeatherError::Incomplete { .. } | WeatherError::IncompleteDays { .. }),
                 ) => {
                     info!("{err} in the archive, so trying the forecast API");
+                }
+                Err(err @ WeatherError::Offline { .. }) => {
+                    return lookup(&self.forecast_url, WeatherDataset::Forecast).or(Err(err));
                 }
                 result => return result,
             }
@@ -105,7 +127,8 @@ impl<F: Fetcher> OpenMeteoSource<F> {
 
 impl<F: Fetcher> WeatherSource for OpenMeteoSource<F> {
     fn weather(&self, request: &WeatherRequest) -> Result<Weather, WeatherError> {
-        self.either(request, |endpoint, dataset| {
+        let first = request.hours.first().copied().unwrap_or_default();
+        self.either(request, first, |endpoint, dataset| {
             info!(
                 endpoint,
                 locations = request.locations.len(),
@@ -119,7 +142,7 @@ impl<F: Fetcher> WeatherSource for OpenMeteoSource<F> {
     }
 
     fn days_before(&self, request: &WeatherRequest) -> Result<Vec<DaysBefore>, WeatherError> {
-        self.either(request, |endpoint, _| {
+        self.either(request, days_before(request).0, |endpoint, _| {
             info!(
                 endpoint,
                 days = DAYS_BEFORE,
@@ -130,6 +153,37 @@ impl<F: Fetcher> WeatherSource for OpenMeteoSource<F> {
             })
         })
     }
+}
+
+/// A short account of a failed request: the host and Open-Meteo's reason,
+/// without the long URL
+fn fetch_error(url: &str, error: FetchError) -> WeatherError {
+    debug!("Open-Meteo request failed: {error:?}");
+    let host = Url::parse(url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned))
+        .unwrap_or_else(|| "Open-Meteo".to_owned());
+    let message = match &error {
+        FetchError::Offline { .. } => return WeatherError::Offline { host },
+        FetchError::Status { status, body, .. } => {
+            #[derive(Deserialize)]
+            struct Refusal {
+                reason: String,
+            }
+            match serde_json::from_slice::<Refusal>(body) {
+                Ok(refusal) => format!("{host} answered HTTP {status}: {}", refusal.reason),
+                Err(_) => format!("{host} answered HTTP {status}"),
+            }
+        }
+        FetchError::Network { source, .. } if source.is_timeout() => {
+            format!("{host} did not answer in time")
+        }
+        FetchError::Network { .. } => format!("could not reach {host}"),
+        FetchError::Body { .. } => format!("the answer from {host} was cut off"),
+        FetchError::TooLarge { .. } => format!("the answer from {host} was too large"),
+        other => other.to_string(),
+    };
+    WeatherError::Fetch { message }
 }
 
 fn query(

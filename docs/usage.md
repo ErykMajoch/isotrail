@@ -146,16 +146,19 @@ The animation options only apply to `.gif` and `.mp4` output. PNG renders ignore
 | `--detail N` | `256` | Grid cells along the slab's long side, from `8` to `1024` |
 | `--offline` | off | Only use data that is already in the cache |
 | `--overpass-url URL` | public Overpass API | Another [Overpass](https://overpass-api.de/) endpoint for map data (also `ISOTRAIL_OVERPASS_URL`) |
+| `--no-map-data` | off | Build the diorama from the elevation alone, without OpenStreetMap's lakes, woods and paths |
 | `--no-weather` | off | Leave the weather out: don't look it up, or draw the weather a bundle holds, along with its snow and ice |
 | `--season SEASON` | `auto` | The [season](#season) to show: the hike's own, or `spring`, `summer`, `autumn` or `winter` |
 | `--config FILE` | none | Read settings from a TOML file (see [Configuration](configuration.md)) |
 
-A scene bundle already holds its terrain and map data, so `--detail`, `--offline` and `--overpass-url` do nothing with one; isotrail warns when you type them for a bundle.
+A scene bundle already holds its terrain and map data, so `--detail`, `--offline`, `--overpass-url` and `--no-map-data` do nothing with one; isotrail warns when you type them for a bundle.
+
+The public Overpass server is sometimes busy. isotrail then tries again six times over about two minutes, printing a line before each wait. If it still can't get the map data, it stops and suggests trying later, another server with `--overpass-url`, or `--no-map-data`, which makes the diorama from the slope and height of the ground alone: no lakes, woods, fields or paths, and no OpenStreetMap credit. A server that can't be reached at all, such as a mistyped `--overpass-url`, is given up on after a few seconds. Any download that takes longer than 10 seconds prints a line saying it is still waiting.
 
 ## bundle
 
 ```text
-isotrail bundle <hike.gpx> -o <hike.itb> [--debug-dir DIR] [--exaggeration X] [--detail N] [--offline] [--overpass-url URL] [--no-weather] [--season SEASON]
+isotrail bundle <hike.gpx> -o <hike.itb> [--debug-dir DIR] [--exaggeration X] [--detail N] [--offline] [--overpass-url URL] [--no-map-data] [--no-weather] [--season SEASON]
 ```
 
 Downloads the elevation and OpenStreetMap data around the route and works out what covers every grid cell: from the map data where there is some, and from the slope and height of the ground elsewhere. Lakes and reservoirs get a level surface. The result is saved with the route, its elevation profile, the hike's statistics, the sun's and moon's paths across the sky and the hour-by-hour weather during the hike as a **scene bundle**: one compact file (usually under 100 KB) that holds everything a render needs, with no further downloads.
@@ -287,7 +290,7 @@ With `--json`, the bundle's hourly samples are under `weather.samples`, with key
 ## style-lab
 
 ```text
-isotrail style-lab <hike.gpx | hike.itb> -o DIR [--detail N] [--offline] [--overpass-url URL]
+isotrail style-lab <hike.gpx | hike.itb> -o DIR [--detail N] [--offline] [--overpass-url URL] [--no-map-data]
 ```
 
 Renders the hike once for every combination of mesher (`voxel`, `smooth`), pixel scale (3, 5, 6) and built-in palette, as `DIR/<mesher>-<scale>-<palette>.png`. It also writes `DIR/contact-sheet.png`, which lays them all out side by side with a label above each, so you can compare looks before choosing your `render` options.
@@ -296,10 +299,12 @@ Renders the hike once for every combination of mesher (`voxel`, `smooth`), pixel
 
 ```text
 isotrail cache path
-isotrail cache clear [--yes]
+isotrail cache clear [--yes] [--older-than DAYS]
 ```
 
-Downloaded elevation tiles, map data and weather are cached on disk, so later renders of the same area are fast and can work offline. `cache path` prints where the cache is, and `cache clear` deletes it after asking (`--yes` skips the question).
+Downloaded elevation tiles, map data and weather are cached on disk, so later renders of the same area are fast and can work offline. Nothing expires on its own: map data stays as it was downloaded until you clear it. `cache path` prints where the cache is, and `cache clear` deletes it after asking (`--yes` skips the question). `--older-than DAYS` only deletes downloads made more than that many days ago, for example `--older-than 90` to pick up newer maps for areas you rendered long ago. Only files that isotrail wrote are deleted; anything else in the folder is left alone and counted in the message.
+
+A cached download that turns out to be damaged is dropped and fetched once more.
 
 | System | Cache directory |
 | --- | --- |

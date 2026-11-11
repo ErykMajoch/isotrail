@@ -12,7 +12,7 @@
 
 **Elevation.** Heights come from the open [Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) dataset. isotrail picks the zoom level whose resolution matches the grid and samples each cell from it. Heights are then exaggerated so the relief reads at diorama scale: gentle moors get up to 5× and steep mountains less (`--exaggeration` overrides this).
 
-**Landcover.** One [Overpass](https://overpass-api.de/) query fetches OpenStreetMap's forests, moorland, rock, scree, grass, farmland, wetlands, water, paths, roads and streams for the slab. These are drawn onto the grid. Cells that the map leaves empty are classified from the terrain: steep slopes become bare rock, and high ground becomes grass or rock. Lakes and reservoirs are flattened to a single water level.
+**Landcover.** One [Overpass](https://overpass-api.de/) query fetches OpenStreetMap's forests, moorland, rock, scree, grass, farmland, wetlands, water, paths, roads and streams for the slab. These are drawn onto the grid. Cells that the map leaves empty are classified from the terrain: steep slopes become bare rock, and high ground becomes grass or rock. Lakes and reservoirs are flattened to a single water level. With `--no-map-data` there is no query, and every cell is classified from the terrain. A slab that crosses the 180° meridian is queried as two boxes, one on each side.
 
 <p align="center">
   <img src="images/debug-hillshade.png" alt="Shaded relief of the slab with the route" width="45%">

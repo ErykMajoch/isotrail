@@ -1,7 +1,7 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use directories::ProjectDirs;
 use serde::Serialize;
@@ -23,6 +23,8 @@ pub struct Cache {
 pub struct CacheStats {
     pub files: u64,
     pub bytes: u64,
+    /// Files in the directory that aren't cache entries, which are left alone
+    pub others: u64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -68,21 +70,31 @@ impl Cache {
         &self.dir
     }
 
-    pub fn stats(&self) -> Result<CacheStats, FetchError> {
-        Ok(self
-            .entries()?
-            .iter()
-            .fold(CacheStats::default(), |stats, (_, bytes)| CacheStats {
+    /// Cached files, or only those written more than `older_than` ago
+    pub fn stats(&self, older_than: Option<Duration>) -> Result<CacheStats, FetchError> {
+        let (entries, others) = self.entries(older_than)?;
+        Ok(entries.iter().fold(
+            CacheStats {
+                others,
+                ..CacheStats::default()
+            },
+            |stats, (_, bytes)| CacheStats {
                 files: stats.files + 1,
                 bytes: stats.bytes + bytes,
-            }))
+                ..stats
+            },
+        ))
     }
 
-    /// Deletes the cached responses but leaves the directory and any
-    /// foreign files in it alone
-    pub fn clear(&self) -> Result<CacheStats, FetchError> {
-        let mut stats = CacheStats::default();
-        for (path, bytes) in self.entries()? {
+    /// Deletes the cached responses, or only those written more than
+    /// `older_than` ago, and leaves the directory and other files alone
+    pub fn clear(&self, older_than: Option<Duration>) -> Result<CacheStats, FetchError> {
+        let (entries, others) = self.entries(older_than)?;
+        let mut stats = CacheStats {
+            others,
+            ..CacheStats::default()
+        };
+        for (path, bytes) in entries {
             fs::remove_file(&path).map_err(|source| FetchError::Cache { path, source })?;
             stats.files += 1;
             stats.bytes += bytes;
@@ -90,31 +102,39 @@ impl Cache {
         Ok(stats)
     }
 
-    fn entries(&self) -> Result<Vec<(PathBuf, u64)>, FetchError> {
+    fn entries(
+        &self,
+        older_than: Option<Duration>,
+    ) -> Result<(Vec<(PathBuf, u64)>, u64), FetchError> {
         let error = |source| FetchError::Cache {
             path: self.dir.clone(),
             source,
         };
         let entries = match fs::read_dir(&self.dir) {
             Ok(entries) => entries,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok((Vec::new(), 0)),
             Err(err) => return Err(error(err)),
         };
-        let mut files = Vec::new();
+        let now = SystemTime::now();
+        let (mut files, mut others) = (Vec::new(), 0);
         for entry in entries {
             let entry = entry.map_err(error)?;
-            let path = entry.path();
-            let ours = path.extension().is_some_and(|ext| {
-                [DATA_EXT, META_EXT, TEMP_EXT]
-                    .iter()
-                    .any(|ours| ext == *ours)
-            });
             let meta = entry.metadata().map_err(error)?;
-            if ours && meta.is_file() {
-                files.push((path, meta.len()));
+            if !meta.is_file() || !is_entry_name(&entry.file_name().to_string_lossy()) {
+                others += 1;
+                continue;
+            }
+            let old_enough = older_than.is_none_or(|age| {
+                meta.modified()
+                    .ok()
+                    .and_then(|written| now.duration_since(written).ok())
+                    .is_some_and(|since| since > age)
+            });
+            if old_enough {
+                files.push((entry.path(), meta.len()));
             }
         }
-        Ok(files)
+        Ok((files, others))
     }
 
     fn get(&self, request: &Request) -> Result<Option<Vec<u8>>, FetchError> {
@@ -166,6 +186,17 @@ impl Cache {
             }
         }
         Ok(())
+    }
+}
+
+/// `<key>.bin`, `<key>.json` or `<key>.<pid>.tmp`, where the key is 64 hex digits
+fn is_entry_name(name: &str) -> bool {
+    let key =
+        |key: &str| key.len() == 64 && key.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+    match name.split('.').collect::<Vec<_>>()[..] {
+        [k, DATA_EXT | META_EXT] => key(k),
+        [k, pid, TEMP_EXT] => key(k) && !pid.is_empty() && pid.bytes().all(|b| b.is_ascii_digit()),
+        _ => false,
     }
 }
 
@@ -275,10 +306,7 @@ mod tests {
         fn answer(&self, method: &str, url: &str, body: &[u8]) -> Result<Vec<u8>, FetchError> {
             self.calls.set(self.calls.get() + 1);
             if self.fail {
-                return Err(FetchError::Status {
-                    url: url.to_owned(),
-                    status: 503,
-                });
+                return Err(FetchError::status(url, 503));
             }
             Ok(format!("{method} {url} {}", String::from_utf8_lossy(body)).into_bytes())
         }
@@ -308,7 +336,7 @@ mod tests {
         let second = fetcher.get(URL).unwrap();
         assert_eq!(first, second);
         assert_eq!(fetcher.inner.calls.get(), 1);
-        assert_eq!(cache.stats().unwrap().files, 2);
+        assert_eq!(cache.stats(None).unwrap().files, 2);
     }
 
     #[test]
@@ -363,7 +391,7 @@ mod tests {
         assert!(fetcher.get(URL).is_err());
         assert!(fetcher.get(URL).is_err());
         assert_eq!(fetcher.inner.calls.get(), 2);
-        assert_eq!(cache.stats().unwrap(), CacheStats::default());
+        assert_eq!(cache.stats(None).unwrap(), CacheStats::default());
     }
 
     #[test]
@@ -409,17 +437,78 @@ mod tests {
         let fetcher = CachedFetcher::new(Fake::default(), cache.clone());
         fetcher.get(URL).unwrap();
         fetcher.post(URL, b"q").unwrap();
-        fs::write(cache.dir().join("notes.txt"), "keep me").unwrap();
+        let partial = format!("{}.123.tmp", "ab".repeat(32));
+        fs::write(cache.dir().join(&partial), "partial").unwrap();
+        let foreign = ["notes.txt", "package.json", "data.bin", "x.tmp", "ABCD.bin"];
+        for name in foreign {
+            fs::write(cache.dir().join(name), "keep me").unwrap();
+        }
+        fs::create_dir(cache.dir().join(format!("{}.bin", "cd".repeat(32)))).unwrap();
 
-        let before = cache.stats().unwrap();
-        assert_eq!(before.files, 4);
+        let before = cache.stats(None).unwrap();
+        assert_eq!((before.files, before.others), (5, 6));
         assert!(before.bytes > 0);
-        assert_eq!(cache.clear().unwrap(), before);
-        assert_eq!(cache.stats().unwrap(), CacheStats::default());
-        assert!(cache.dir().join("notes.txt").exists());
+        assert_eq!(cache.clear(None).unwrap(), before);
+        let after = cache.stats(None).unwrap();
+        assert_eq!((after.files, after.bytes, after.others), (0, 0, 6));
+        for name in foreign {
+            assert!(cache.dir().join(name).exists(), "{name}");
+        }
 
         fetcher.get(URL).unwrap();
         assert_eq!(fetcher.inner.calls.get(), 3);
+    }
+
+    #[test]
+    fn clearing_by_age_keeps_recent_entries() {
+        let (_temp, cache) = setup();
+        let fetcher = CachedFetcher::new(Fake::default(), cache.clone());
+        fetcher.get(URL).unwrap();
+        fetcher.post(URL, b"q").unwrap();
+        let month_ago = SystemTime::now() - Duration::from_secs(40 * 86_400);
+        let key = Request {
+            method: "GET",
+            url: URL,
+            body: &[],
+        }
+        .key();
+        for ext in [DATA_EXT, META_EXT] {
+            fs::File::options()
+                .write(true)
+                .open(cache.dir().join(format!("{key}.{ext}")))
+                .unwrap()
+                .set_modified(month_ago)
+                .unwrap();
+        }
+        let thirty_days = Some(Duration::from_secs(30 * 86_400));
+        assert_eq!(cache.stats(thirty_days).unwrap().files, 2);
+        assert_eq!(cache.clear(thirty_days).unwrap().files, 2);
+        assert_eq!(cache.stats(None).unwrap().files, 2);
+        fetcher.post(URL, b"q").unwrap();
+        fetcher.get(URL).unwrap();
+        assert_eq!(fetcher.inner.calls.get(), 3);
+    }
+
+    #[test]
+    fn entry_names() {
+        let key = "0123456789abcdef".repeat(4);
+        for name in [
+            format!("{key}.bin"),
+            format!("{key}.json"),
+            format!("{key}.42.tmp"),
+        ] {
+            assert!(is_entry_name(&name), "{name}");
+        }
+        for name in [
+            format!("{key}.tmp"),
+            format!("{key}.x.tmp"),
+            format!("{}.bin", key.to_uppercase()),
+            format!("{}.bin", &key[1..]),
+            format!("{key}.bin.bak"),
+            "data.bin".to_owned(),
+        ] {
+            assert!(!is_entry_name(&name), "{name}");
+        }
     }
 
     #[test]
@@ -429,7 +518,7 @@ mod tests {
         fetcher.get(URL).unwrap();
         fetcher.post(URL, b"q").unwrap();
         fetcher.forget(URL, Some(b"q")).unwrap();
-        assert_eq!(cache.stats().unwrap().files, 2);
+        assert_eq!(cache.stats(None).unwrap().files, 2);
         fetcher.get(URL).unwrap();
         fetcher.post(URL, b"q").unwrap();
         assert_eq!(fetcher.inner.calls.get(), 3);
@@ -444,8 +533,8 @@ mod tests {
     #[test]
     fn a_missing_directory_is_an_empty_cache() {
         let (_temp, cache) = setup();
-        assert_eq!(cache.stats().unwrap(), CacheStats::default());
-        assert_eq!(cache.clear().unwrap(), CacheStats::default());
+        assert_eq!(cache.stats(None).unwrap(), CacheStats::default());
+        assert_eq!(cache.clear(None).unwrap(), CacheStats::default());
     }
 
     #[test]

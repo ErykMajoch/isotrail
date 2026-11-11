@@ -26,41 +26,85 @@ pub struct BoundingBox {
 
 impl BoundingBox {
     /// Encloses the grid's slab, rounded outward to 5 decimals (about 1 m)
-    /// so the query text, and with it the cache key, is stable
-    pub fn around(grid: &Grid) -> BoundingBox {
+    /// so the query text, and with it the cache key, is stable. A slab
+    /// across the antimeridian gets one box on each side of it
+    pub fn around(grid: &Grid) -> Vec<BoundingBox> {
         let corners = grid
             .footprint
             .corners()
             .map(|(x, y)| grid.footprint.projection.unproject(x, y));
-        let (mut south, mut west) = (f64::INFINITY, f64::INFINITY);
-        let (mut north, mut east) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
-        for (lat, lon) in corners {
-            (south, north) = (south.min(lat), north.max(lat));
-            (west, east) = (west.min(lon), east.max(lon));
+        let enclose = |corners: &mut dyn Iterator<Item = (f64, f64)>| {
+            let (mut south, mut west) = (f64::INFINITY, f64::INFINITY);
+            let (mut north, mut east) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+            for (lat, lon) in corners {
+                (south, north) = (south.min(lat), north.max(lat));
+                (west, east) = (west.min(lon), east.max(lon));
+            }
+            let down = |v: f64| (v * 1e5).floor() / 1e5;
+            let up = |v: f64| (v * 1e5).ceil() / 1e5;
+            BoundingBox {
+                south: down(south),
+                west: down(west),
+                north: up(north),
+                east: up(east),
+            }
+        };
+        let whole = enclose(&mut corners.into_iter());
+        // A slab is far narrower than half the globe, so a wider box wraps
+        if whole.east - whole.west <= 180.0 {
+            return vec![whole];
         }
-        let down = |v: f64| (v * 1e5).floor() / 1e5;
-        let up = |v: f64| (v * 1e5).ceil() / 1e5;
-        BoundingBox {
-            south: down(south),
-            west: down(west),
-            north: up(north),
-            east: up(east),
-        }
+        let side = |east: bool| {
+            let mut corners = corners
+                .into_iter()
+                .filter(move |&(_, lon)| (lon >= 0.0) == east);
+            let bbox = enclose(&mut corners);
+            match east {
+                true => BoundingBox {
+                    east: 180.0,
+                    ..bbox
+                },
+                false => BoundingBox {
+                    west: -180.0,
+                    ..bbox
+                },
+            }
+        };
+        let (east, west) = (side(true), side(false));
+        let (south, north) = (east.south.min(west.south), east.north.max(west.north));
+        vec![
+            BoundingBox {
+                south,
+                north,
+                ..east
+            },
+            BoundingBox {
+                south,
+                north,
+                ..west
+            },
+        ]
     }
 }
 
 /// Every statement carries its own bbox filter instead of the global
 /// `[bbox]` setting, which would also clip the geometry of `out geom`. Ways
 /// print with `tags` verbosity to leave out their node lists, while
-/// relations need full verbosity to keep their members
-pub fn overpass_query(bbox: BoundingBox, cell_size_m: f64) -> String {
-    let BoundingBox {
-        south,
-        west,
-        north,
-        east,
-    } = bbox;
-    let b = format!("({south:.5},{west:.5},{north:.5},{east:.5})");
+/// relations need full verbosity to keep their members. Each statement is
+/// repeated for each box
+pub fn overpass_query(boxes: &[BoundingBox], cell_size_m: f64) -> String {
+    let filters: Vec<String> = boxes
+        .iter()
+        .map(|bbox| {
+            let BoundingBox {
+                south,
+                west,
+                north,
+                east,
+            } = bbox;
+            format!("({south:.5},{west:.5},{north:.5},{east:.5})")
+        })
+        .collect();
     let multipolygon = "relation[\"type\"=\"multipolygon\"]";
     let (waterways, highways) = if cell_size_m <= MINOR_WAY_MAX_CELL_M {
         (
@@ -71,21 +115,23 @@ pub fn overpass_query(bbox: BoundingBox, cell_size_m: f64) -> String {
         (WATERWAYS.to_owned(), HIGHWAYS.to_owned())
     };
     let ways = [
-        format!("way[\"natural\"~\"^({NATURAL_AREAS})$\"]{b}"),
-        format!("way[\"natural\"=\"cliff\"]{b}"),
-        format!("way[\"landuse\"]{b}"),
-        format!("way[\"waterway\"~\"^({waterways})$\"]{b}"),
-        format!("way[\"highway\"~\"^({highways})(_link)?$\"]{b}"),
+        format!("way[\"natural\"~\"^({NATURAL_AREAS})$\"]"),
+        "way[\"natural\"=\"cliff\"]".to_owned(),
+        "way[\"landuse\"]".to_owned(),
+        format!("way[\"waterway\"~\"^({waterways})$\"]"),
+        format!("way[\"highway\"~\"^({highways})(_link)?$\"]"),
     ];
     let relations = [
-        format!("{multipolygon}[\"natural\"~\"^({NATURAL_AREAS})$\"]{b}"),
-        format!("{multipolygon}[\"landuse\"]{b}"),
+        format!("{multipolygon}[\"natural\"~\"^({NATURAL_AREAS})$\"]"),
+        format!("{multipolygon}[\"landuse\"]"),
     ];
     let mut query = format!("[out:json][timeout:{TIMEOUT_S}];\n");
     for (statements, out) in [(&ways[..], "out tags geom;"), (&relations[..], "out geom;")] {
         query.push_str("(\n");
         for statement in statements {
-            let _ = writeln!(query, "  {statement};");
+            for filter in &filters {
+                let _ = writeln!(query, "  {statement}{filter};");
+            }
         }
         let _ = writeln!(query, ");\n{out}");
     }
@@ -115,7 +161,11 @@ mod tests {
     use crate::Footprint;
 
     fn grid() -> Grid {
-        let at = |lat, lon| TrackPoint {
+        grid_between((50.0, 10.0), (50.03, 10.05))
+    }
+
+    fn grid_between(from: (f64, f64), to: (f64, f64)) -> Grid {
+        let at = |(lat, lon)| TrackPoint {
             lat,
             lon,
             ele: None,
@@ -123,7 +173,7 @@ mod tests {
         };
         let track = Track {
             segments: vec![Segment {
-                points: vec![at(50.0, 10.0), at(50.03, 10.05)],
+                points: vec![at(from), at(to)],
             }],
             ..Track::default()
         };
@@ -131,6 +181,31 @@ mod tests {
             &Footprint::from_track(&track).unwrap(),
             NonZeroU32::new(64).unwrap(),
         )
+    }
+
+    #[test]
+    fn a_slab_across_the_antimeridian_gets_a_box_on_each_side() {
+        let grid = grid_between((-16.8, 179.97), (-16.76, -179.96));
+        let boxes = BoundingBox::around(&grid);
+        assert_eq!(boxes.len(), 2, "{boxes:?}");
+        let (east, west) = (boxes[0], boxes[1]);
+        assert_eq!((east.east, west.west), (180.0, -180.0));
+        assert!(east.west > 179.8 && west.east < -179.8, "{boxes:?}");
+        for bbox in boxes.iter() {
+            assert!(bbox.east - bbox.west < 0.2, "{bbox:?}");
+            assert!(bbox.south < -16.8 && bbox.north > -16.76, "{bbox:?}");
+        }
+        for (x, y) in grid.footprint.corners() {
+            let (lat, lon) = grid.footprint.projection.unproject(x, y);
+            assert!(
+                boxes.iter().any(|b| (b.south..=b.north).contains(&lat)
+                    && (b.west..=b.east).contains(&lon)),
+                "{lat} {lon}"
+            );
+        }
+        let query = overpass_query(&boxes, 30.0);
+        assert_eq!(query.matches(",180.00000);").count(), 7, "{query}");
+        assert_eq!(query.matches(",-180.00000,").count(), 7, "{query}");
     }
 
     fn decode(body: &[u8]) -> String {
@@ -157,7 +232,9 @@ mod tests {
     #[test]
     fn bbox_encloses_the_slab_and_rounds_outward() {
         let grid = grid();
-        let bbox = BoundingBox::around(&grid);
+        let [bbox] = BoundingBox::around(&grid)[..] else {
+            panic!("one box expected")
+        };
         assert!(bbox.south < bbox.north && bbox.west < bbox.east);
         for (x, y) in grid.footprint.corners() {
             let (lat, lon) = grid.footprint.projection.unproject(x, y);
@@ -179,7 +256,7 @@ mod tests {
 
     #[test]
     fn query_asks_for_geometry_in_south_west_north_east_order() {
-        let query = overpass_query(BBOX, 30.0);
+        let query = overpass_query(&[BBOX], 30.0);
         assert!(query.starts_with("[out:json][timeout:180];\n"), "{query}");
         assert!(query.ends_with(");\nout geom;\n"), "{query}");
         let (ways, relations) = query.split_once("out tags geom;").unwrap();
@@ -206,8 +283,8 @@ mod tests {
 
     #[test]
     fn coarse_cells_leave_out_minor_ways_but_keep_every_area() {
-        let fine = overpass_query(BBOX, MINOR_WAY_MAX_CELL_M);
-        let coarse = overpass_query(BBOX, MINOR_WAY_MAX_CELL_M + 1.0);
+        let fine = overpass_query(&[BBOX], MINOR_WAY_MAX_CELL_M);
+        let coarse = overpass_query(&[BBOX], MINOR_WAY_MAX_CELL_M + 1.0);
         for minor in ["stream", "path", "footway", "track", "residential"] {
             assert!(fine.contains(minor) && !coarse.contains(minor), "{minor}");
         }
@@ -227,7 +304,7 @@ mod tests {
 
     #[test]
     fn form_body_escapes_everything_but_unreserved_characters() {
-        let query = overpass_query(BoundingBox::around(&grid()), 30.0);
+        let query = overpass_query(&BoundingBox::around(&grid()), 30.0);
         let body = form_body(&query);
         assert!(body.iter().all(|b| b.is_ascii_graphic()));
         assert_eq!(decode(&body), query);

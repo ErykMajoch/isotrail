@@ -22,4 +22,24 @@ pub enum OsmError {
     /// data may be incomplete
     #[error("Overpass reported an error: {remark}")]
     Overpass { remark: String },
+
+    /// The server stayed busy or out of reach through every retry
+    #[error("Overpass still failed after {attempts} attempts")]
+    GaveUp {
+        attempts: u32,
+        #[source]
+        last: Box<OsmError>,
+    },
+}
+
+impl OsmError {
+    /// Offline mode is on and the map data was never cached
+    pub fn is_offline(&self) -> bool {
+        matches!(
+            self,
+            OsmError::Fetch {
+                source: FetchError::Offline { .. }
+            }
+        )
+    }
 }

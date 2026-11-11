@@ -1,12 +1,13 @@
+use std::io::Read;
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
 
-use reqwest::StatusCode;
-use reqwest::blocking::{Client, RequestBuilder};
+use reqwest::blocking::{Client, RequestBuilder, Response};
 use reqwest::header::{CONTENT_TYPE, RETRY_AFTER};
 use tracing::warn;
 
-use super::{FetchError, Fetcher};
+use super::{FetchError, Fetcher, origin};
 
 pub const USER_AGENT: &str = concat!(
     "isotrail/",
@@ -18,6 +19,9 @@ pub const USER_AGENT: &str = concat!(
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 // Longer than the Overpass query timeout, so the server gives up first and says why
 const TIMEOUT: Duration = Duration::from_secs(300);
+pub const MAX_RESPONSE_BYTES: u64 = 512_000_000;
+const SLOW_AFTER: Duration = Duration::from_secs(10);
+const ERROR_BODY_BYTES: u64 = 4096;
 
 /// How often and how patiently to retry rate-limited or failing requests
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,6 +42,24 @@ impl Default for RetryPolicy {
 }
 
 impl RetryPolicy {
+    /// A single attempt, for callers that retry by themselves
+    pub const fn once() -> RetryPolicy {
+        RetryPolicy {
+            max_attempts: 1,
+            base_delay: Duration::ZERO,
+            max_delay: Duration::ZERO,
+        }
+    }
+
+    /// Busy Overpass servers recover in minutes rather than seconds
+    pub const fn overpass() -> RetryPolicy {
+        RetryPolicy {
+            max_attempts: 6,
+            base_delay: Duration::from_secs(5),
+            max_delay: Duration::from_secs(60),
+        }
+    }
+
     /// Wait before retry number `retry` (0-based): exponential backoff,
     /// stretched to the server's `Retry-After` and capped at `max_delay`
     pub fn delay(&self, retry: u32, retry_after: Option<Duration>) -> Duration {
@@ -55,6 +77,8 @@ impl RetryPolicy {
 pub struct HttpFetcher {
     client: Client,
     retry: RetryPolicy,
+    limit: u64,
+    slow_after: Duration,
 }
 
 impl HttpFetcher {
@@ -68,6 +92,8 @@ impl HttpFetcher {
         Ok(HttpFetcher {
             client,
             retry: RetryPolicy::default(),
+            limit: MAX_RESPONSE_BYTES,
+            slow_after: SLOW_AFTER,
         })
     }
 
@@ -75,25 +101,103 @@ impl HttpFetcher {
         HttpFetcher { retry, ..self }
     }
 
+    /// The largest answer accepted, in bytes
+    pub fn with_limit(self, limit: u64) -> HttpFetcher {
+        HttpFetcher { limit, ..self }
+    }
+
+    /// How long a request may take before a line says it is still waiting
+    pub fn with_slow_after(self, slow_after: Duration) -> HttpFetcher {
+        HttpFetcher { slow_after, ..self }
+    }
+
     fn send(&self, url: &str, request: impl Fn() -> RequestBuilder) -> Result<Vec<u8>, FetchError> {
         let mut attempt = 1;
         loop {
-            match attempt_once(url, request()) {
+            match self.watched(url, request()) {
                 Ok(bytes) => return Ok(bytes),
-                Err(failure) if failure.retryable && attempt < self.retry.max_attempts => {
-                    let delay = self.retry.delay(attempt - 1, failure.retry_after);
+                Err(error) if error.is_transient() && attempt < self.retry.max_attempts => {
+                    let delay = self.retry.delay(attempt - 1, error.retry_after());
                     warn!(
-                        "{} (attempt {attempt} of {}), retrying in {:.1} s",
-                        failure.error,
+                        "{error} (attempt {attempt} of {}), retrying in {:.1} s",
                         self.retry.max_attempts,
                         delay.as_secs_f64()
                     );
                     thread::sleep(delay);
                     attempt += 1;
                 }
-                Err(failure) => return Err(failure.error),
+                Err(error) => return Err(error),
             }
         }
+    }
+
+    /// One attempt, with a line once it has taken longer than `slow_after`
+    fn watched(&self, url: &str, request: RequestBuilder) -> Result<Vec<u8>, FetchError> {
+        let (done, finished) = mpsc::channel::<()>();
+        let slow_after = self.slow_after;
+        thread::scope(|scope| {
+            scope.spawn(move || {
+                if let Err(RecvTimeoutError::Timeout) = finished.recv_timeout(slow_after) {
+                    warn!(
+                        "still waiting for {} after {:.0} s",
+                        origin(url),
+                        slow_after.as_secs_f64()
+                    );
+                }
+            });
+            let result = self.attempt(url, request);
+            drop(done);
+            result
+        })
+    }
+
+    fn attempt(&self, url: &str, request: RequestBuilder) -> Result<Vec<u8>, FetchError> {
+        let response = request.send().map_err(|source| FetchError::Network {
+            url: url.to_owned(),
+            source,
+        })?;
+        let status = response.status();
+        if !status.is_success() {
+            let retry_after = response
+                .headers()
+                .get(RETRY_AFTER)
+                .and_then(|value| value.to_str().ok()?.trim().parse().ok())
+                .map(Duration::from_secs);
+            let mut body = Vec::new();
+            let _ = response.take(ERROR_BODY_BYTES).read_to_end(&mut body);
+            return Err(FetchError::Status {
+                url: url.to_owned(),
+                status: status.as_u16(),
+                retry_after,
+                body,
+            });
+        }
+        self.read_body(url, response)
+    }
+
+    fn read_body(&self, url: &str, response: Response) -> Result<Vec<u8>, FetchError> {
+        let too_large = || FetchError::TooLarge {
+            url: url.to_owned(),
+            limit: self.limit,
+        };
+        if response
+            .content_length()
+            .is_some_and(|len| len > self.limit)
+        {
+            return Err(too_large());
+        }
+        let mut bytes = Vec::new();
+        response
+            .take(self.limit + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|source| FetchError::Body {
+                url: url.to_owned(),
+                source,
+            })?;
+        if bytes.len() as u64 > self.limit {
+            return Err(too_large());
+        }
+        Ok(bytes)
     }
 }
 
@@ -111,41 +215,6 @@ impl Fetcher for HttpFetcher {
                 .body(body.to_vec())
         })
     }
-}
-
-struct Failure {
-    error: FetchError,
-    retryable: bool,
-    retry_after: Option<Duration>,
-}
-
-fn attempt_once(url: &str, request: RequestBuilder) -> Result<Vec<u8>, Failure> {
-    let network = |source: reqwest::Error| Failure {
-        retryable: source.is_timeout() || source.is_connect(),
-        retry_after: None,
-        error: FetchError::Network {
-            url: url.to_owned(),
-            source,
-        },
-    };
-    let response = request.send().map_err(network)?;
-    let status = response.status();
-    if !status.is_success() {
-        let retry_after = response
-            .headers()
-            .get(RETRY_AFTER)
-            .and_then(|value| value.to_str().ok()?.trim().parse().ok())
-            .map(Duration::from_secs);
-        return Err(Failure {
-            error: FetchError::Status {
-                url: url.to_owned(),
-                status: status.as_u16(),
-            },
-            retryable: status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error(),
-            retry_after,
-        });
-    }
-    Ok(response.bytes().map_err(network)?.to_vec())
 }
 
 #[cfg(test)]
@@ -276,6 +345,76 @@ mod tests {
             "{error:?}"
         );
         assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_cut_off_answer_is_retried() {
+        let cut = "HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\npart";
+        let (url, server) = serve(vec![cut.to_owned(), reply("200 OK", "tile")]);
+        assert_eq!(fetcher().get(&url).unwrap(), b"tile");
+        assert_eq!(server.join().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn error_answers_keep_retry_after_and_the_start_of_the_body() {
+        let busy = "HTTP/1.1 429 Too Many Requests\r\nContent-Length: 4\r\nRetry-After: 7\r\n\
+                    Connection: close\r\n\r\nbusy";
+        let (url, server) = serve(vec![busy.to_owned()]);
+        let error = fetcher()
+            .with_retry(RetryPolicy::once())
+            .get(&url)
+            .unwrap_err();
+        assert!(error.is_transient());
+        assert_eq!(error.retry_after(), Some(Duration::from_secs(7)));
+        assert!(
+            matches!(&error, FetchError::Status { body, .. } if body == b"busy"),
+            "{error:?}"
+        );
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn answers_over_the_limit_are_refused() {
+        let no_length = "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n0123456789abcdef";
+        let (url, server) = serve(vec![
+            reply("200 OK", "0123456789abcdef"),
+            no_length.to_owned(),
+        ]);
+        for _ in 0..2 {
+            let error = fetcher().with_limit(10).get(&url).unwrap_err();
+            assert!(
+                matches!(error, FetchError::TooLarge { limit: 10, .. }),
+                "{error:?}"
+            );
+            assert!(!error.is_transient());
+        }
+        server.join().unwrap();
+        let (url, server) = serve(vec![reply("200 OK", "0123456789")]);
+        assert_eq!(fetcher().with_limit(10).get(&url).unwrap(), b"0123456789");
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn nothing_listening_is_unreachable() {
+        let port = TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let error = fetcher()
+            .with_retry(RetryPolicy::once())
+            .get(&format!("http://127.0.0.1:{port}/"))
+            .unwrap_err();
+        assert!(error.is_unreachable() && error.is_transient(), "{error:?}");
+    }
+
+    #[test]
+    fn overpass_waits_up_to_a_minute() {
+        let policy = RetryPolicy::overpass();
+        let secs: Vec<u64> = (0..5).map(|r| policy.delay(r, None).as_secs()).collect();
+        assert_eq!(secs, [5, 10, 20, 40, 60]);
+        assert_eq!(policy.max_attempts, 6);
+        assert_eq!(RetryPolicy::once().max_attempts, 1);
     }
 
     #[test]

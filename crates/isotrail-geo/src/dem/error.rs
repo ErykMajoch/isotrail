@@ -25,4 +25,12 @@ pub enum DemError {
     /// The tile decoded but isn't a 256 × 256 RGB(A) terrarium tile
     #[error("elevation tile {tile} has an unexpected format: {reason}")]
     Format { tile: TileId, reason: String },
+
+    /// The tile could not be read, and fetching it again did not help
+    #[error("elevation tile {tile} could not be read, and fetching it again did not help")]
+    Damaged {
+        tile: TileId,
+        #[source]
+        source: Box<DemError>,
+    },
 }

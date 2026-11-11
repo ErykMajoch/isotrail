@@ -8,8 +8,9 @@ use clap::Args;
 use isotrail_bundle::Route;
 use isotrail_geo::{
     Cache, CachedFetcher, DEFAULT_DETAIL, DemSource, FeatureSource, Footprint, Grid, Heightmap,
-    HttpFetcher, Landcover, LandcoverMap, OVERPASS_URL, OsmFeatures, OverpassSource, Provenance,
-    SceneBundle, TERRARIUM_URL, TerrariumSource, line_mask, scene_bundle,
+    HttpFetcher, Landcover, LandcoverMap, OSM_ATTRIBUTION, OVERPASS_URL, OsmFeatures,
+    OverpassSource, Provenance, RetryPolicy, SceneBundle, TERRARIUM_URL, TerrariumSource,
+    line_mask, origin, scene_bundle,
 };
 use isotrail_track::Track;
 use png::ColorType;
@@ -31,6 +32,10 @@ const DEBUG_IMAGES: [&str; 5] = [
     "paths.png",
 ];
 const DEBUG_LEGEND: &str = "landcover-legend.txt";
+const MAP_DATA_WAYS_OUT: &str = concat!(
+    "OpenStreetMap's Overpass server is busy or failing. Try again later, use another server ",
+    "with --overpass-url, or pass --no-map-data to build the diorama without lakes, woods and paths"
+);
 
 #[derive(Debug, Args)]
 pub struct BundleArgs {
@@ -80,6 +85,11 @@ pub struct DataArgs {
     #[arg(long, value_name = "URL", env = "ISOTRAIL_OVERPASS_URL", default_value = OVERPASS_URL)]
     overpass_url: String,
 
+    /// Build the diorama from the elevation alone, without OpenStreetMap's
+    /// lakes, woods and paths, when its server is busy or out of reach
+    #[arg(long)]
+    no_map_data: bool,
+
     /// Leave the weather out: don't look it up, or draw what a bundle holds,
     /// along with the snow and ice it brings
     #[arg(long)]
@@ -98,6 +108,7 @@ impl DataArgs {
             ("detail", "--detail"),
             ("offline", "--offline"),
             ("overpass_url", "--overpass-url"),
+            ("no_map_data", "--no-map-data"),
         ] {
             if typed.has(id) {
                 warn!(
@@ -114,7 +125,8 @@ pub struct Prepared {
     grid: Grid,
     heightmap: Heightmap,
     landcover: LandcoverMap,
-    features: OsmFeatures,
+    /// None with --no-map-data
+    features: Option<OsmFeatures>,
     tiles: usize,
     elevation_range: (f32, f32),
 }
@@ -122,6 +134,33 @@ pub struct Prepared {
 /// Fetches through the shared cache
 pub fn fetcher(offline: bool) -> anyhow::Result<CachedFetcher<HttpFetcher>> {
     Ok(CachedFetcher::new(HttpFetcher::new()?, Cache::new(crate::cache::dir()?)).offline(offline))
+}
+
+/// Map features from Overpass, which retries by itself, or none with
+/// --no-map-data
+fn map_data(grid: &Grid, data: &DataArgs) -> anyhow::Result<Option<OsmFeatures>> {
+    if data.no_map_data {
+        warn!(
+            "--no-map-data: building the diorama from the elevation alone, without lakes, woods or paths"
+        );
+        return Ok(None);
+    }
+    let http = HttpFetcher::new()?.with_retry(RetryPolicy::once());
+    let fetcher = CachedFetcher::new(http, Cache::new(crate::cache::dir()?)).offline(data.offline);
+    let features = OverpassSource::new(&fetcher)
+        .endpoint(&data.overpass_url)
+        .features(grid)
+        .map_err(|err| {
+            if err.is_offline() {
+                anyhow::Error::new(err)
+            } else {
+                anyhow::Error::new(err).context(MAP_DATA_WAYS_OUT)
+            }
+        })?;
+    for (tag, count) in features.counts() {
+        info!("{count:>6}  {tag}");
+    }
+    Ok(Some(features))
 }
 
 /// Fetches terrain, map data and weather around the track read from `file`
@@ -134,14 +173,13 @@ pub fn prepare(track: &Track, file: &Path, data: &DataArgs) -> anyhow::Result<Pr
     let fetcher = fetcher(data.offline)?;
     let tiles = TerrariumSource::<HttpFetcher>::tiles(&grid).len();
     let mut heightmap = TerrariumSource::new(&fetcher).heightmap(&grid)?;
-    let features = OverpassSource::new(&fetcher)
-        .endpoint(&data.overpass_url)
-        .features(&grid)?;
-    for (tag, count) in features.counts() {
-        info!("{count:>6}  {tag}");
-    }
+    let features = map_data(&grid, data)?;
     let elevation_range = heightmap.range();
-    let landcover = LandcoverMap::classify(&grid, &features, &mut heightmap);
+    let landcover = LandcoverMap::classify(
+        &grid,
+        features.as_ref().unwrap_or(&OsmFeatures::default()),
+        &mut heightmap,
+    );
     for (bit, cells) in landcover.line_counts() {
         let name = match bit {
             line_mask::PATH => "path",
@@ -160,7 +198,10 @@ pub fn prepare(track: &Track, file: &Path, data: &DataArgs) -> anyhow::Result<Pr
     let provenance = Provenance {
         generator: format!("isotrail {}", env!("CARGO_PKG_VERSION")),
         elevation: format!("{TERRARIUM_URL} at zoom {}", grid.dem_zoom()),
-        map_data: format!("OpenStreetMap via {}", data.overpass_url),
+        map_data: match features {
+            Some(_) => format!("OpenStreetMap via {}", origin(&data.overpass_url)),
+            None => "none".to_owned(),
+        },
         weather: weather.as_ref().map(|(_, provenance)| provenance.clone()),
     };
     let mut bundle = scene_bundle(
@@ -171,6 +212,12 @@ pub fn prepare(track: &Track, file: &Path, data: &DataArgs) -> anyhow::Result<Pr
         &landcover,
         provenance,
     )?;
+    if features.is_none() {
+        bundle
+            .meta
+            .attribution
+            .retain(|credit| credit != OSM_ATTRIBUTION);
+    }
     bundle.weather = weather.map(|(weather, _)| weather);
     season::estimate(&mut bundle, track, &fetcher);
     season::apply(&mut bundle, data.season);
@@ -239,11 +286,14 @@ pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
         "Elevation {min:.0} – {max:.0} m, drawn {:.1}× taller",
         bundle.grid.exaggeration
     );
-    println!(
-        "Map data: {} areas and {} lines from OpenStreetMap",
-        features.areas.len(),
-        features.lines.len()
-    );
+    match features {
+        Some(features) => println!(
+            "Map data: {} areas and {} lines from OpenStreetMap",
+            features.areas.len(),
+            features.lines.len()
+        ),
+        None => println!("Map data: none (--no-map-data)"),
+    }
     let shares: Vec<String> = landcover
         .shares()
         .into_iter()

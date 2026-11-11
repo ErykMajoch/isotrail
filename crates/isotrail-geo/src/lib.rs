@@ -38,8 +38,8 @@ pub use dem::{
 };
 pub use error::GeoError;
 pub use fetch::{
-    Cache, CacheStats, CachedFetcher, FetchError, Fetcher, HttpFetcher, RecordedFetcher,
-    RetryPolicy, USER_AGENT,
+    Cache, CacheStats, CachedFetcher, FetchError, Fetcher, HttpFetcher, MAX_RESPONSE_BYTES,
+    RecordedFetcher, RetryPolicy, USER_AGENT, origin,
 };
 pub use footprint::{Footprint, MAX_ASPECT, MIN_PADDING_M, PADDING_FRACTION};
 pub use grid::{DEFAULT_DETAIL, Grid, MAX_DEM_ZOOM, dem_zoom, ground_resolution_m};
@@ -63,7 +63,7 @@ pub use season::{
     forced_season, ice_line, leaf_day, snow_line, snow_readings,
 };
 pub use weather::{
-    ARCHIVE_LAG_S, DAYS_BEFORE, DaysBefore, LOCATION_SPACING_M, MAX_LOCATIONS,
-    OPEN_METEO_ARCHIVE_URL, OPEN_METEO_FORECAST_URL, OpenMeteoSource, WeatherError,
+    ARCHIVE_LAG_S, ARCHIVE_START, DAYS_BEFORE, DaysBefore, FORECAST_DAYS, LOCATION_SPACING_M,
+    MAX_LOCATIONS, OPEN_METEO_ARCHIVE_URL, OPEN_METEO_FORECAST_URL, OpenMeteoSource, WeatherError,
     WeatherLocation, WeatherRequest, WeatherSource,
 };

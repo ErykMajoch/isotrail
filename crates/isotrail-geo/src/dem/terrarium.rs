@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::io::Cursor;
 
 use png::{ColorType, Transformations};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use super::{DemError, DemSource, Heightmap, TILE_SIZE, TileId, lat_lon_to_pixel};
 use crate::{Fetcher, Grid};
@@ -40,13 +40,30 @@ impl<F: Fetcher> TerrariumSource<F> {
         tiles.into_iter().collect()
     }
 
+    /// A tile that can't be read, most likely a damaged copy in the cache, is
+    /// dropped and fetched once more
     fn fetch(&self, tile: TileId) -> Result<Vec<f32>, DemError> {
-        let bytes = self
-            .fetcher
-            .get(&Self::url(tile))
-            .map_err(|source| DemError::Fetch { tile, source })?;
-        debug!(%tile, bytes = bytes.len(), "elevation tile");
-        decode(tile, &bytes)
+        let url = Self::url(tile);
+        let get = || {
+            let bytes = self
+                .fetcher
+                .get(&url)
+                .map_err(|source| DemError::Fetch { tile, source })?;
+            debug!(%tile, bytes = bytes.len(), "elevation tile");
+            decode(tile, &bytes)
+        };
+        let first = match get() {
+            Err(err @ (DemError::Decode { .. } | DemError::Format { .. })) => err,
+            result => return result,
+        };
+        warn!("{first}, so fetching it again");
+        if let Err(source) = self.fetcher.forget(&url, None) {
+            return Err(DemError::Fetch { tile, source });
+        }
+        get().map_err(|again| DemError::Damaged {
+            tile,
+            source: Box::new(again),
+        })
     }
 }
 
@@ -207,6 +224,96 @@ pub(super) mod tests {
             }),
             "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/12/2200/1400.png"
         );
+    }
+
+    /// Answers junk for the first `junk` requests, then a flat tile
+    struct Flaky {
+        junk: u32,
+        gets: std::cell::Cell<u32>,
+        forgets: std::cell::Cell<u32>,
+    }
+
+    impl Flaky {
+        fn new(junk: u32) -> Flaky {
+            Flaky {
+                junk,
+                gets: Default::default(),
+                forgets: Default::default(),
+            }
+        }
+    }
+
+    impl Fetcher for Flaky {
+        fn get(&self, _url: &str) -> Result<Vec<u8>, crate::FetchError> {
+            self.gets.set(self.gets.get() + 1);
+            if self.gets.get() <= self.junk {
+                return Ok(b"<html>junk</html>".to_vec());
+            }
+            let rgb = terrarium_rgb(250.0).repeat((TILE_SIZE * TILE_SIZE) as usize);
+            Ok(encode(TILE_SIZE, TILE_SIZE, ColorType::Rgb, &rgb))
+        }
+
+        fn post(&self, url: &str, _body: &[u8]) -> Result<Vec<u8>, crate::FetchError> {
+            Err(crate::FetchError::status(url, 405))
+        }
+
+        fn forget(&self, _url: &str, _body: Option<&[u8]>) -> Result<(), crate::FetchError> {
+            self.forgets.set(self.forgets.get() + 1);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_damaged_tile_is_dropped_and_fetched_once_more() {
+        let flaky = Flaky::new(1);
+        let heights = TerrariumSource::new(&flaky).fetch(TILE).unwrap();
+        assert_eq!(heights[0], 250.0);
+        assert_eq!((flaky.gets.get(), flaky.forgets.get()), (2, 1));
+
+        let broken = Flaky::new(2);
+        let error = TerrariumSource::new(&broken).fetch(TILE).unwrap_err();
+        assert!(
+            matches!(&error, DemError::Damaged { source, .. } if matches!(**source, DemError::Decode { .. })),
+            "{error:?}"
+        );
+        assert_eq!((broken.gets.get(), broken.forgets.get()), (2, 1));
+
+        let good = Flaky::new(0);
+        TerrariumSource::new(&good).fetch(TILE).unwrap();
+        assert_eq!((good.gets.get(), good.forgets.get()), (1, 0));
+    }
+
+    #[test]
+    fn tiles_across_the_antimeridian_wrap() {
+        let at = |lat, lon| isotrail_track::TrackPoint {
+            lat,
+            lon,
+            ele: None,
+            time: None,
+        };
+        let track = isotrail_track::Track {
+            segments: vec![isotrail_track::Segment {
+                points: vec![at(-16.8, 179.97), at(-16.76, -179.96)],
+            }],
+            ..Default::default()
+        };
+        let grid = Grid::new(
+            &crate::Footprint::from_track(&track).unwrap(),
+            std::num::NonZeroU32::new(64).unwrap(),
+        );
+        let tiles = TerrariumSource::<Flaky>::tiles(&grid);
+        let last = (1u32 << grid.dem_zoom()) - 1;
+        assert!(tiles.iter().any(|t| t.x == 0), "{tiles:?}");
+        assert!(tiles.iter().any(|t| t.x == last), "{tiles:?}");
+        assert!(
+            tiles.iter().all(|t| t.x <= 1 || t.x >= last - 1),
+            "{tiles:?}"
+        );
+        assert!(tiles.len() <= 8, "{tiles:?}");
+        let heightmap = TerrariumSource::new(Flaky::new(0))
+            .heightmap(&grid)
+            .unwrap();
+        assert!(heightmap.heights_m.iter().all(|&h| h == 250.0));
     }
 
     #[test]

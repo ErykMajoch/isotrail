@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use isotrail_bundle::{Precipitation, WeatherDataset};
 use isotrail_geo::{
-    ARCHIVE_LAG_S, DAYS_BEFORE, FetchError, Fetcher, OPEN_METEO_ARCHIVE_URL,
+    ARCHIVE_LAG_S, Cache, CachedFetcher, DAYS_BEFORE, FetchError, Fetcher, OPEN_METEO_ARCHIVE_URL,
     OPEN_METEO_FORECAST_URL, OpenMeteoSource, RecordedFetcher, WeatherError, WeatherLocation,
     WeatherRequest, WeatherSource,
 };
@@ -21,6 +21,11 @@ fn snowdon(now: i64) -> WeatherRequest {
     let mut file = File::open(fixtures().join("gpx/snowdon.gpx")).unwrap();
     let track = GpxReader.read(&mut file).unwrap().clean().unwrap();
     WeatherRequest::from_track(&track, now).unwrap()
+}
+
+/// Looked up just after the hike, so from the forecast API
+fn recent() -> WeatherRequest {
+    snowdon(snowdon(0).last_hour() + 3600)
 }
 
 /// Serves `RecordedFetcher` files and remembers what was asked and dropped
@@ -170,7 +175,7 @@ fn gaps_in_the_archive_fall_back_to_the_forecast_and_are_not_kept() {
 fn gaps_everywhere_say_how_many_hours_are_missing() {
     let dir = tempfile::tempdir().unwrap();
     let fetcher = Logged::new(dir.path());
-    let request = snowdon(0);
+    let request = recent();
     let forecast = OpenMeteoSource::<Logged>::url(OPEN_METEO_FORECAST_URL, &request);
     fetcher.record(&forecast, &response(&request.hours, 8.0, |i| i < 2));
 
@@ -187,7 +192,7 @@ fn gaps_everywhere_say_how_many_hours_are_missing() {
 fn several_locations_come_back_as_an_array() {
     let dir = tempfile::tempdir().unwrap();
     let fetcher = Logged::new(dir.path());
-    let mut request = snowdon(0);
+    let mut request = recent();
     request.locations.push(WeatherLocation {
         lat: 53.1,
         lon: -4.0,
@@ -215,7 +220,7 @@ fn several_locations_come_back_as_an_array() {
 fn unreadable_responses_are_dropped_from_the_cache() {
     let dir = tempfile::tempdir().unwrap();
     let fetcher = Logged::new(dir.path());
-    let request = snowdon(0);
+    let request = recent();
     let forecast = OpenMeteoSource::<Logged>::url(OPEN_METEO_FORECAST_URL, &request);
     fetcher.record(&forecast, "<html>busy</html>");
 
@@ -223,14 +228,141 @@ fn unreadable_responses_are_dropped_from_the_cache() {
         .weather(&request)
         .unwrap_err();
     assert!(matches!(err, WeatherError::Json { .. }), "{err}");
-    assert_eq!(*fetcher.forgotten.borrow(), vec![forecast]);
+    assert_eq!(
+        *fetcher.asked.borrow(),
+        vec![forecast.clone(), forecast.clone()]
+    );
+    assert_eq!(
+        *fetcher.forgotten.borrow(),
+        vec![forecast.clone(), forecast]
+    );
+}
+
+#[test]
+fn a_damaged_cached_answer_is_fetched_once_more() {
+    let temp = tempfile::tempdir().unwrap();
+    let request = recent();
+    let forecast = OpenMeteoSource::<Logged>::url(OPEN_METEO_FORECAST_URL, &request);
+    let fetcher = Logged::new(&temp.path().join("server"));
+    fetcher.record(&forecast, &response(&request.hours, 6.0, |_| false));
+    let cached = CachedFetcher::new(&fetcher, Cache::new(temp.path().join("cache")));
+    cached.get(&forecast).unwrap();
+    let entry = fs::read_dir(temp.path().join("cache"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.extension().is_some_and(|ext| ext == "bin"))
+        .unwrap();
+    fs::write(entry, "{\"hourly\":").unwrap();
+
+    let weather = OpenMeteoSource::new(&cached).weather(&request).unwrap();
+    assert_eq!(weather.samples[0].temperature_c, 6.0);
+    assert_eq!(fetcher.asked.borrow().len(), 2);
+}
+
+/// Refuses every request with a status and body
+struct Refusing(u16, &'static str);
+
+impl Fetcher for Refusing {
+    fn get(&self, url: &str) -> Result<Vec<u8>, FetchError> {
+        Err(FetchError::Status {
+            url: url.to_owned(),
+            status: self.0,
+            retry_after: None,
+            body: self.1.as_bytes().to_vec(),
+        })
+    }
+
+    fn post(&self, url: &str, _body: &[u8]) -> Result<Vec<u8>, FetchError> {
+        self.get(url)
+    }
+}
+
+#[test]
+fn refusals_give_the_host_and_open_meteo_s_reason() {
+    let reason = r#"{"error":true,"reason":"Parameter 'start_date' is out of allowed range from 1940-01-01 to 2026-11-20"}"#;
+    let err = OpenMeteoSource::new(Refusing(400, reason))
+        .weather(&snowdon(LATER))
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "archive-api.open-meteo.com answered HTTP 400: Parameter 'start_date' is out of \
+         allowed range from 1940-01-01 to 2026-11-20"
+    );
+    let err = OpenMeteoSource::new(Refusing(503, "<html>down</html>"))
+        .weather(&recent())
+        .unwrap_err();
+    assert_eq!(err.to_string(), "api.open-meteo.com answered HTTP 503");
+}
+
+#[test]
+fn dates_outside_open_meteo_are_not_asked_for() {
+    let dir = tempfile::tempdir().unwrap();
+    let fetcher = Logged::new(dir.path());
+    let century = 100 * 365 * 86_400;
+    let mut old = snowdon(LATER);
+    for hour in &mut old.hours {
+        *hour -= century;
+    }
+    let source = OpenMeteoSource::new(&fetcher);
+    assert!(matches!(
+        source.weather(&old),
+        Err(WeatherError::BeforeArchive)
+    ));
+    let ahead = snowdon(snowdon(0).last_hour() - 17 * 86_400);
+    assert!(matches!(
+        source.weather(&ahead),
+        Err(WeatherError::BeyondForecast)
+    ));
+    assert!(matches!(
+        source.days_before(&ahead),
+        Err(WeatherError::BeyondForecast)
+    ));
+    assert!(fetcher.asked.borrow().is_empty());
+    let soon = snowdon(snowdon(0).last_hour() - 15 * 86_400);
+    assert!(matches!(
+        source.weather(&soon),
+        Err(WeatherError::Fetch { .. })
+    ));
+}
+
+#[test]
+fn offline_falls_back_to_a_cached_forecast() {
+    let temp = tempfile::tempdir().unwrap();
+    let hike = recent();
+    let forecast = OpenMeteoSource::<Logged>::url(OPEN_METEO_FORECAST_URL, &hike);
+    let server = Logged::new(&temp.path().join("server"));
+    server.record(&forecast, &response(&hike.hours, 3.0, |_| false));
+    CachedFetcher::new(&server, Cache::new(temp.path().join("cache")))
+        .get(&forecast)
+        .unwrap();
+
+    let later = snowdon(LATER);
+    let offline = CachedFetcher::new(
+        RecordedFetcher::new(temp.path().join("nothing")),
+        Cache::new(temp.path().join("cache")),
+    )
+    .offline(true);
+    let weather = OpenMeteoSource::new(&offline).weather(&later).unwrap();
+    assert_eq!(weather.dataset, WeatherDataset::Forecast);
+    assert_eq!(weather.samples[0].temperature_c, 3.0);
+
+    let empty = CachedFetcher::new(
+        RecordedFetcher::new(temp.path().join("nothing")),
+        Cache::new(temp.path().join("empty")),
+    )
+    .offline(true);
+    let err = OpenMeteoSource::new(&empty).weather(&later).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "the weather from archive-api.open-meteo.com is not in the cache and offline mode is on"
+    );
 }
 
 #[test]
 fn missing_recordings_name_the_request() {
     let dir = tempfile::tempdir().unwrap();
     let source = OpenMeteoSource::new(RecordedFetcher::new(dir.path()));
-    let err = source.weather(&snowdon(0)).unwrap_err();
+    let err = source.weather(&recent()).unwrap_err();
     assert!(matches!(err, WeatherError::Fetch { .. }), "{err}");
 }
 
@@ -316,7 +448,7 @@ fn the_days_before_use_the_model_height_and_fall_back_like_the_hours() {
 fn gaps_in_the_days_before_say_how_many_are_missing() {
     let dir = tempfile::tempdir().unwrap();
     let fetcher = Logged::new(dir.path());
-    let request = snowdon(0);
+    let request = recent();
     let forecast = OpenMeteoSource::<Logged>::days_url(OPEN_METEO_FORECAST_URL, &request);
     fetcher.record(&forecast, &days_response(830.0, 1.0, |i| i < 3));
 
