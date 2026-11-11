@@ -12,7 +12,7 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { extname, join, normalize } from 'node:path';
+import { basename, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { crc32, deflateSync } from 'node:zlib';
 
@@ -454,8 +454,7 @@ try {
 } catch (error) {
   check('the check ran to the end', false, error.stack ?? String(error));
 } finally {
-  cdp.close();
-  browser.process.kill();
+  await quit(browser, cdp);
   server.close();
   await sleep(500);
   await rm(browser.profile, { recursive: true, force: true, maxRetries: 5 }).catch(() => {});
@@ -493,7 +492,8 @@ function browserPath() {
   return found;
 }
 
-async function launch() {
+// A cold browser on a busy CI runner sometimes fails to start, so it gets three tries, and each failure prints its output
+async function launch(attempt = 1) {
   const profile = await mkdtemp(join(tmpdir(), 'isotrail-browser-'));
   const flags = [
     '--headless=new',
@@ -506,11 +506,43 @@ async function launch() {
     ...(process.platform === 'linux' ? ['--no-sandbox'] : []),
     'about:blank',
   ];
-  const child = spawn(browserPath(), flags, { stdio: 'ignore' });
+  const child = spawn(browserPath(), flags, { stdio: ['ignore', 'ignore', 'pipe'] });
+  let output = '';
+  child.stderr.on('data', (chunk) => (output = (output + chunk).slice(-4000)));
+  // Edge's launcher on Windows hands over to another process and exits with 0, so only a failing exit ends the wait
+  let failed = null;
+  child.on('exit', (code, signal) => (failed = signal ?? (code === 0 ? null : code)));
   const portFile = join(profile, 'DevToolsActivePort');
-  for (let i = 0; i < 150 && !existsSync(portFile); i++) await sleepFor(100);
-  const port = Number((await readFile(portFile, 'utf8')).split('\n')[0]);
-  return { process: child, profile, port };
+  for (let i = 0; i < 600 && failed === null; i++) {
+    const port = existsSync(portFile) ? Number((await readFile(portFile, 'utf8')).split('\n')[0]) : 0;
+    if (port > 0) return { process: child, profile, port };
+    await sleepFor(100);
+  }
+  stopBrowser(child, profile);
+  await rm(profile, { recursive: true, force: true, maxRetries: 5 }).catch(() => {});
+  const why = failed === null ? 'opened no DevTools port within 60 s' : `exited with ${failed} before opening its DevTools port`;
+  console.error(`${BROWSER} (${browserPath()}) ${why}${output.trim() ? `. Its last output:\n${output.trim()}` : ', with no output'}`);
+  if (attempt < 3) return launch(attempt + 1);
+  console.error(`could not start ${BROWSER} after 3 tries`);
+  await rm(data, { recursive: true, force: true }).catch(() => {});
+  process.exit(1);
+}
+
+async function quit(browser, cdp) {
+  await Promise.race([cdp.send('Browser.close').catch(() => {}), sleepFor(5000)]);
+  cdp.close();
+  await sleepFor(1000);
+  stopBrowser(browser.process, browser.profile);
+}
+
+// On Windows the browser runs as processes other than the one started, so whatever is left is found by its profile
+function stopBrowser(child, profile) {
+  if (process.platform === 'win32') {
+    const script = `Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like '*${basename(profile)}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
+    spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { stdio: 'ignore' });
+  } else if (child.exitCode === null && child.signalCode === null) {
+    child.kill();
+  }
 }
 
 function sleepFor(ms) {
