@@ -1,12 +1,17 @@
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
 use std::path::{MAIN_SEPARATOR_STR, Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use isotrail_render::Frame;
 
 use crate::{ExportError, upscale};
+
+/// Longer than ffmpeg ever needs to take one frame or to finish the file
+const PATIENCE: Duration = Duration::from_secs(60);
 
 /// The ffmpeg program that encodes MP4 video
 #[derive(Debug, Clone)]
@@ -43,12 +48,18 @@ impl Ffmpeg {
 /// H.264 in an MP4 file
 pub struct Mp4Writer {
     child: Child,
-    /// Taken when the stream ends
-    stdin: Option<ChildStdin>,
+    /// To the thread that writes into ffmpeg; dropped when the stream ends
+    frames: Option<SyncSender<Vec<u8>>>,
+    written: Receiver<io::Result<()>>,
+    feeder: Option<JoinHandle<()>>,
+    /// Frames handed to the feeder that it hasn't finished writing
+    unwritten: usize,
     stderr: Option<JoinHandle<String>>,
     width: u32,
     height: u32,
     scale: u32,
+    /// How long ffmpeg may go without taking a frame or finishing
+    patience: Duration,
 }
 
 impl Mp4Writer {
@@ -78,7 +89,8 @@ impl Mp4Writer {
             output.push(MAIN_SEPARATOR_STR);
         }
         output.push(path);
-        let mut child = Command::new(&ffmpeg.program)
+        let mut command = Command::new(&ffmpeg.program);
+        command
             .args(["-hide_banner", "-loglevel", "error", "-y"])
             .args(["-f", "rawvideo", "-pix_fmt", "rgba"])
             .arg("-s")
@@ -87,12 +99,26 @@ impl Mp4Writer {
             .arg(fps.to_string())
             .args(["-i", "-", "-an"])
             .args(["-c:v", "libx264", "-tune", "animation", "-crf", "18"])
-            // Converted and tagged as bt709, so phones show the colours that went in
-            .args(["-vf", "scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int,format=yuv420p"])
+            // The animation tune doubles the reference frames, which pushes a
+            // story past level 4.2; with four it is level 4.0 at 30 fps
+            .args(["-refs", "4"])
+            // Converted and tagged as bt709, so phones show the colours that
+            // went in; the tags only reach the file when set in the filters
+            .args(["-vf", "scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int,format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv"])
             .args(["-pix_fmt", "yuv420p", "-colorspace", "bt709"])
             .args(["-color_primaries", "bt709", "-color_trc", "bt709"])
             .args(["-movflags", "+faststart", "-f", "mp4"])
-            .arg(output)
+            .arg(output);
+        Mp4Writer::spawn(command, (width, height), scale, PATIENCE)
+    }
+
+    fn spawn(
+        mut command: Command,
+        (width, height): (u32, u32),
+        scale: u32,
+        patience: Duration,
+    ) -> Result<Self, ExportError> {
+        let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
@@ -101,7 +127,6 @@ impl Mp4Writer {
                 io::ErrorKind::NotFound => ExportError::FfmpegMissing,
                 _ => error.into(),
             })?;
-        let stdin = child.stdin.take();
         // Drained as it comes, so ffmpeg never waits on a full pipe
         let stderr = child.stderr.take().map(|mut pipe| {
             std::thread::spawn(move || {
@@ -110,13 +135,31 @@ impl Mp4Writer {
                 String::from_utf8_lossy(&bytes).into_owned()
             })
         });
+        // Written from a thread of its own, so a stalled ffmpeg can be given up on
+        let (frames, queued) = mpsc::sync_channel::<Vec<u8>>(1);
+        let (report, written) = mpsc::channel();
+        let feeder = child.stdin.take().map(|mut stdin| {
+            std::thread::spawn(move || {
+                for bytes in queued {
+                    let result = stdin.write_all(&bytes);
+                    let failed = result.is_err();
+                    if report.send(result).is_err() || failed {
+                        break;
+                    }
+                }
+            })
+        });
         Ok(Mp4Writer {
             child,
-            stdin,
+            frames: Some(frames),
+            written,
+            feeder,
+            unwritten: 0,
             stderr,
             width,
             height,
             scale,
+            patience,
         })
     }
 
@@ -128,47 +171,102 @@ impl Mp4Writer {
             });
         }
         let big = upscale(frame, self.scale)?;
-        let written = match &mut self.stdin {
-            Some(stdin) => stdin.write_all(big.rgba()),
-            None => Err(io::ErrorKind::BrokenPipe.into()),
-        };
-        if let Err(error) = written {
-            // ffmpeg stopped reading, most likely because it failed
-            self.close()?;
-            return Err(error.into());
+        // The previous frame was written while this one was rendered
+        self.wait_for_writes()?;
+        let sent = self
+            .frames
+            .as_ref()
+            .is_some_and(|frames| frames.send(big.into_rgba()).is_ok());
+        if !sent {
+            return self.broken(io::ErrorKind::BrokenPipe.into());
         }
+        self.unwritten += 1;
         Ok(())
     }
 
     /// Ends the stream and waits for ffmpeg to finish the file
     pub fn finish(mut self) -> Result<(), ExportError> {
+        self.wait_for_writes()?;
         self.close()
     }
 
+    fn wait_for_writes(&mut self) -> Result<(), ExportError> {
+        while self.unwritten > 0 {
+            match self.written.recv_timeout(self.patience) {
+                Ok(Ok(())) => self.unwritten -= 1,
+                // ffmpeg stopped reading, most likely because it failed
+                Ok(Err(error)) => return self.broken(error),
+                Err(RecvTimeoutError::Disconnected) => {
+                    return self.broken(io::ErrorKind::BrokenPipe.into());
+                }
+                Err(RecvTimeoutError::Timeout) => return Err(self.stalled()),
+            }
+        }
+        Ok(())
+    }
+
+    /// ffmpeg's own error if it failed, otherwise `error`
+    fn broken(&mut self, error: io::Error) -> Result<(), ExportError> {
+        self.close()?;
+        Err(error.into())
+    }
+
     fn close(&mut self) -> Result<(), ExportError> {
-        drop(self.stdin.take());
-        let status = self.child.wait()?;
-        let stderr = self
-            .stderr
-            .take()
-            .and_then(|thread| thread.join().ok())
-            .unwrap_or_default();
+        self.unwritten = 0;
+        drop(self.frames.take());
+        if let Some(feeder) = self.feeder.take() {
+            let _ = feeder.join();
+        }
+        let deadline = Instant::now() + self.patience;
+        let status = loop {
+            if let Some(status) = self.child.try_wait()? {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                return Err(self.stalled());
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        let stderr = self.take_stderr();
         if status.success() {
             Ok(())
         } else {
-            Err(ExportError::Ffmpeg {
-                status,
-                stderr: stderr.trim().to_owned(),
-            })
+            Err(ExportError::Ffmpeg { status, stderr })
         }
+    }
+
+    fn stalled(&mut self) -> ExportError {
+        self.stop();
+        ExportError::FfmpegStalled {
+            seconds: self.patience.as_secs(),
+            stderr: self.take_stderr(),
+        }
+    }
+
+    /// Ending ffmpeg also frees the feeder from a write that would never end
+    fn stop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        drop(self.frames.take());
+        if let Some(feeder) = self.feeder.take() {
+            let _ = feeder.join();
+        }
+    }
+
+    fn take_stderr(&mut self) -> String {
+        self.stderr
+            .take()
+            .and_then(|thread| thread.join().ok())
+            .unwrap_or_default()
+            .trim()
+            .to_owned()
     }
 }
 
 impl Drop for Mp4Writer {
     fn drop(&mut self) {
-        if self.stdin.is_some() {
-            let _ = self.child.kill();
-            let _ = self.child.wait();
+        if self.frames.is_some() || self.feeder.is_some() {
+            self.stop();
         }
     }
 }
@@ -209,6 +307,32 @@ mod tests {
         let centre = &rgb[(8 * 32 + 16) * 3..][..3];
         for (got, want) in centre.iter().zip(RED) {
             assert!(got.abs_diff(want) <= 4, "{centre:?} is not {RED:?}");
+        }
+    }
+
+    /// Phones that refuse level 5.0 play it, and every colour field is set
+    #[test]
+    fn a_story_clip_is_level_4_and_fully_tagged() {
+        if !has_ffmpeg() {
+            return;
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let ffmpeg = Ffmpeg::find().unwrap();
+        for (fps, most) in [(30, 40), (50, 42)] {
+            let path = temp.path().join(format!("story-{fps}.mp4"));
+            let mut mp4 = Mp4Writer::create(&ffmpeg, &path, 360, 640, 3, fps).unwrap();
+            for i in 0..6u8 {
+                let rgba = [i * 40, 90, 160, 255].repeat(360 * 640);
+                mp4.push(&Frame::new(360, 640, rgba)).unwrap();
+            }
+            mp4.finish().unwrap();
+            let info = probe_video(&path);
+            assert_eq!((info.width, info.height), (1080, 1920));
+            assert!(info.level <= most, "level {} at {fps} fps", info.level);
+            assert_eq!(info.color_space, "bt709");
+            assert_eq!(info.color_transfer, "bt709");
+            assert_eq!(info.color_primaries, "bt709");
+            assert_eq!(info.color_range, "tv");
         }
     }
 
@@ -253,5 +377,39 @@ mod tests {
             matches!(&error, ExportError::Ffmpeg { stderr, .. } if !stderr.is_empty()),
             "{error:?}"
         );
+    }
+
+    /// A program that keeps running and never reads its input
+    fn deaf() -> Command {
+        if cfg!(windows) {
+            let mut command = Command::new("ping");
+            command.args(["-n", "30", "127.0.0.1"]);
+            command
+        } else {
+            let mut command = Command::new("sleep");
+            command.arg("30");
+            command
+        }
+    }
+
+    #[test]
+    fn a_stalled_ffmpeg_is_given_up_on() {
+        let patience = Duration::from_millis(500);
+        let Ok(mut mp4) = Mp4Writer::spawn(deaf(), (512, 512), 1, patience) else {
+            eprintln!("skipped: no program to stand in for a stalled ffmpeg");
+            return;
+        };
+        let started = Instant::now();
+        let frame = Frame::new(512, 512, RED.repeat(512 * 512));
+        let error = (0..10)
+            .find_map(|_| mp4.push(&frame).err())
+            .or_else(|| mp4.finish().err())
+            .unwrap();
+        assert!(
+            matches!(error, ExportError::FfmpegStalled { .. }),
+            "{error:?}"
+        );
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(error.to_string().contains("stopped"), "{error}");
     }
 }

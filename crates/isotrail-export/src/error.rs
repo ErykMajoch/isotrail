@@ -39,6 +39,12 @@ pub enum ExportError {
     #[error("ffmpeg failed ({status}): {stderr}")]
     Ffmpeg { status: ExitStatus, stderr: String },
 
+    #[error(
+        "ffmpeg made no progress for {seconds} s, so it was stopped{}",
+        last_words(.stderr)
+    )]
+    FfmpegStalled { seconds: u64, stderr: String },
+
     #[error("an MP4 must be an even number of pixels wide and high, not {width} × {height}")]
     Mp4Size { width: u32, height: u32 },
 
@@ -60,4 +66,11 @@ pub enum ExportError {
 
     #[error(transparent)]
     Io(#[from] std::io::Error),
+}
+
+fn last_words(stderr: &str) -> String {
+    match stderr.lines().last() {
+        Some(line) => format!(": {line}"),
+        None => String::new(),
+    }
 }

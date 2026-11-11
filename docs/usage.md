@@ -108,7 +108,17 @@ The available stats are:
 
 Stats are laid out in as few rows as fit. Any stat the recording can't provide (moving time for a file without timestamps, for example) is skipped with a warning.
 
-The data credit under the stats is required by the map and elevation data licences. When you hide it with `--no-attribution` or `--overlay none`, isotrail prints it instead:
+The text is printed in a pixel font with Latin letters and their accents (Polish, Czech, German, French and so on). Characters it doesn't have, such as emoji, are left out with a warning.
+
+At the coarser scales (`6` and `10`) the frame has fewer pixels, and the overlays may not fit. They then give way, one step at a time and only as far as needed, with a warning that names each step:
+
+1. a long date that doesn't fit its line is printed short (`14 Jun 2025`);
+2. while the panels leave the diorama less than a sixth of the frame's height, the title is printed small, then without its subtitle, the stats move closer together, the profile is left out, and then the data credit, which is printed for the caption instead;
+3. finally, stats are left out from the end of the list, keeping at least one.
+
+If even that doesn't fit, nothing is rendered and the command exits with code 2: choose a lower `--scale`, fewer `--stats` or fewer `--overlay` parts. The default `--scale 3` always has room for everything.
+
+The data credit under the stats is required by the map and elevation data licences. When you hide it with `--no-attribution` or `--overlay none`, or there is no room for it, isotrail prints it instead:
 
 ```text
 Credit for the caption: © OpenStreetMap contributors · Terrain Tiles (AWS)
@@ -137,7 +147,7 @@ When there was snow on the ground, the slopes above the snowline are white, with
 
 ### Animation
 
-A `.gif` or `.mp4` output renders an animation in three parts. It opens on the scene with only the start flag (the first 5%). Then the route draws itself with a marker at its head, while the elevation profile fills in and the stats count up (80%). It ends on the finished hike (15%). The camera starts turned away by `--orbit` and eases round to the same view as the PNG by the time the route reaches the finish.
+A `.gif` or `.mp4` output renders an animation in three parts. It opens on the scene with only the start flag (the first 5%). Then the route draws itself with a marker at its head, while the elevation profile fills in and the stats count up (80%). It ends on the finished hike (15%), however short the clip or low its `--step-fps`. The camera starts turned away by `--orbit` and eases round to the same view as the PNG by the time the route reaches the finish.
 
 The light follows the hike's clock: each frame is lit by the sun (and moon) at the time the route's head was walked, so the animation opens under the light at the start and ends under the light at the finish. A stop of 6 hours or more, such as a night on a multi-day trek, becomes a short pause: the head waits while the sun sets, the stars and moon cross the sky and the sun rises again. Each night takes 6% of the drawing time, and all of them together at most 30%. With `--time`, one light holds through the whole animation.
 
@@ -151,7 +161,7 @@ The light follows the hike's clock: each frame is lit by the sun (and moon) at t
 
 GIFs loop forever and use the render's palette, so `--palette none` can't be used with them. They are the same size as the PNG and store only what changes from one frame to the next. A turning camera changes nearly every pixel, so a 10-second story is several megabytes, while `--orbit 0` makes it a fraction of that.
 
-MP4s are H.264 videos without sound, made to post as stories, which can be up to 60 seconds long. They are encoded by [ffmpeg](https://ffmpeg.org/download.html), which must be on your `PATH`. Any palette works, including `none`. A video can't be transparent, so `--background transparent` can't be used with them; choose `sky` or a colour instead.
+MP4s are H.264 videos without sound, made to post as stories, which can be up to 60 seconds long. They are encoded at level 4.0 (4.2 above 30 frames a second) and tagged as BT.709 colour, so they also play as they are on older phones and in a web page's `<video>`. They are encoded by [ffmpeg](https://ffmpeg.org/download.html), which must be on your `PATH`. Any palette works, including `none`. A video can't be transparent, so `--background transparent` can't be used with them; choose `sky` or a colour instead.
 
 The animation options only apply to `.gif` and `.mp4` output. PNG renders ignore them, so they can sit in a [config file](configuration.md) that you use for both.
 
@@ -367,5 +377,5 @@ Before any download or render, isotrail checks where it will write:
 | --- | --- |
 | `0` | Success |
 | `1` | The command failed: a file couldn't be read or written, data couldn't be downloaded, the render failed |
-| `2` | The command line or a config file asks for something isotrail can't do, such as an unknown option, a bad value, options that can't go together or an output that would overwrite an input. Nothing has been downloaded or written |
+| `2` | The command line or a config file asks for something isotrail can't do, such as an unknown option, a bad value, options that can't go together or an output that would overwrite an input. Nothing has been downloaded or written. Overlays that don't fit the frame at all are found once the hike is prepared, so a GPX file's data may have been downloaded (and cached), but nothing is written |
 | `130` | Stopped with Ctrl+C |

@@ -883,3 +883,40 @@ fn the_time_of_day_relights_the_scene() {
     assert!(!output.status.success());
     assert!(text(&output.stderr).contains("track with times"));
 }
+
+#[test]
+fn a_coarse_scale_gives_parts_up_and_moves_the_credit_to_the_caption() {
+    let temp = with_hike();
+    let cache = temp.path().join("cache");
+    let output = isotrail(
+        &cache,
+        temp.path(),
+        &[
+            "render",
+            "hike.itb",
+            "--scale",
+            "10",
+            "--aspect",
+            "story,wide",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let stderr = text(&output.stderr);
+    for frame in ["story", "wide"] {
+        let warning = format!("the overlays don't fit the {frame} frame at --scale 10, so it has");
+        assert!(stderr.contains(&warning), "{stderr}");
+    }
+    assert!(stderr.contains("no profile"), "{stderr}");
+    let stdout = text(&output.stdout);
+    assert_eq!(
+        stdout.matches("Credit for the caption: ").count(),
+        1,
+        "{stdout}"
+    );
+
+    // A finer scale has room for everything
+    let output = isotrail(&cache, temp.path(), &["render", "hike.itb", "--scale", "3"]);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert!(output.stderr.is_empty(), "{}", text(&output.stderr));
+    assert!(!text(&output.stdout).contains("Credit for the caption"));
+}

@@ -4,11 +4,13 @@ use isotrail_bundle::{
 use isotrail_export::{ExportError, GifWriter, render_clip, render_still, upscale};
 use isotrail_render::{
     Aspect, Background, DEFAULT_PALETTE, DEFAULT_STATS, DEFAULT_YAW_OFFSET_DEG, DateFormat,
-    Diorama, Frame, GodRays, Gpu, Look, Mesher, Motion, OffscreenTarget, OverlayStyle, OverlayText,
-    Overlays, Pace, Palette, SmoothMesher, SunState, TerrainRenderer, Timeline, View, VoxelMesher,
-    Walk, draw_test_scene,
+    Diorama, Frame, GodRays, Gpu, Look, Mesher, Motion, OffscreenTarget, Orbit, OverlayStyle,
+    OverlayText, Overlays, Pace, Palette, SmoothMesher, SunState, TerrainRenderer, Timeline, View,
+    VoxelMesher, Walk, draw_test_scene,
 };
-use isotrail_testkit::{assert_golden, decode_gif, diorama_bundle, hike_bundle};
+use isotrail_testkit::{
+    Tolerance, assert_golden, decode_gif, differing_share, diorama_bundle, hike_bundle,
+};
 
 #[test]
 fn test_scene_matches_golden() {
@@ -438,7 +440,9 @@ fn overlays_on_the_diorama_match_golden() {
     let framing = Aspect::Story.framing(6).unwrap();
     let text = OverlayText::from_bundle(&bundle, Units::Metric, &DEFAULT_STATS, DateFormat::Long);
     assert_eq!(text.date.as_deref(), Some("Saturday 14 June 2025"));
-    let overlays = Overlays::layout(&text, &OverlayStyle::default(), &framing);
+    let overlays = Overlays::fit(&text, &OverlayStyle::default(), &framing)
+        .unwrap()
+        .overlays;
     let look = Look::default();
     let mut frame = render_still(
         &gpu,
@@ -460,10 +464,16 @@ fn overlays_on_the_diorama_match_golden() {
 }
 
 fn render_hike(gpu: &Gpu, aspect: Aspect, look: &Look) -> Frame {
+    render_hike_at(gpu, aspect, 6, look)
+}
+
+fn render_hike_at(gpu: &Gpu, aspect: Aspect, scale: u32, look: &Look) -> Frame {
     let bundle = hike_bundle();
-    let framing = aspect.framing(6).unwrap();
+    let framing = aspect.framing(scale).unwrap();
     let text = OverlayText::from_bundle(&bundle, Units::Metric, &DEFAULT_STATS, DateFormat::Long);
-    let overlays = Overlays::layout(&text, &OverlayStyle::default(), &framing);
+    let overlays = Overlays::fit(&text, &OverlayStyle::default(), &framing)
+        .unwrap()
+        .overlays;
     let mut frame = render_still(
         gpu,
         &bundle,
@@ -487,6 +497,23 @@ fn every_preset_matches_its_golden() {
         assert_eq!((frame.width(), frame.height()), (width / 6, height / 6));
         assert_golden(
             &format!("preset-{}", aspect.name()),
+            frame.width(),
+            frame.height(),
+            frame.rgba(),
+        );
+    }
+}
+
+/// The coarsest scale, where the overlays give up parts to fit
+#[test]
+fn every_preset_at_scale_10_matches_its_golden() {
+    let gpu = isotrail_testkit::gpu();
+    for aspect in Aspect::ALL {
+        let frame = render_hike_at(&gpu, aspect, 10, &Look::default());
+        let (width, height) = aspect.output_size();
+        assert_eq!((frame.width(), frame.height()), (width / 10, height / 10));
+        assert_golden(
+            &format!("preset-{}-10", aspect.name()),
             frame.width(),
             frame.height(),
             frame.rgba(),
@@ -532,7 +559,9 @@ fn animation_frames_match_goldens() {
     let framing = Aspect::Square.framing(6).unwrap();
     let units = Units::Metric;
     let text = OverlayText::from_bundle(&bundle, units, &DEFAULT_STATS, DateFormat::Long);
-    let overlays = Overlays::layout(&text, &OverlayStyle::default(), &framing);
+    let overlays = Overlays::fit(&text, &OverlayStyle::default(), &framing)
+        .unwrap()
+        .overlays;
     let look = Look::default();
     let motion = Motion {
         timeline: Timeline {
@@ -583,6 +612,65 @@ fn animation_frames_match_goldens() {
             frame.width,
             frame.height,
             &frame.rgba,
+        );
+    }
+}
+
+/// However short or choppy, a clip ends on the still: the route finished,
+/// the camera at rest and, with the sun held as `--time` holds it, the
+/// same light
+#[test]
+fn every_clip_ends_on_the_still() {
+    let gpu = isotrail_testkit::gpu();
+    let mut bundle = hike_bundle();
+    for (i, point) in bundle.route.points.iter_mut().enumerate() {
+        point.time = Some(1_750_000_000 + i as i64 * 600);
+    }
+    let framing = Aspect::Square.framing(6).unwrap();
+    let look = Look::default();
+    let sun = SunState::for_hike(&bundle);
+    let still = render_still(
+        &gpu,
+        &bundle,
+        &VoxelMesher::default(),
+        &framing,
+        DEFAULT_YAW_OFFSET_DEG,
+        &sun,
+        &look,
+    )
+    .unwrap();
+    for (duration_s, fps, step_fps) in [(5.0, 10, Some(1)), (1.0, 1, None), (2.0, 3, Some(2))] {
+        let motion = Motion {
+            timeline: Timeline {
+                duration_s,
+                fps,
+                step_fps,
+            },
+            orbit: Orbit { sweep_deg: 0.0 },
+            sun: Some(sun),
+            ..Motion::default()
+        };
+        let mut last = None;
+        render_clip(
+            &gpu,
+            &bundle,
+            &VoxelMesher::default(),
+            &framing,
+            &look,
+            &motion,
+            |moment, frame| -> Result<(), ExportError> {
+                last = Some((moment.progress, frame.clone()));
+                Ok(())
+            },
+        )
+        .unwrap();
+        let (progress, last) = last.unwrap();
+        assert_eq!(progress, 1.0);
+        let share = differing_share(last.rgba(), still.rgba(), Tolerance::default());
+        assert!(
+            share <= Tolerance::default().max_diff_fraction,
+            "{duration_s} s at {fps} fps, {step_fps:?}: {:.2}% differs",
+            share * 100.0
         );
     }
 }

@@ -49,6 +49,7 @@ fn story_overlays_match_golden() {
         title: format!("{POLISH} - Hala Gąsienicowa"),
         subtitle: Subtitle::Auto,
         date: Some("Saturday 14 June 2025".into()),
+        short_date: Some("14 Jun 2025".into()),
         stats: vec![
             Stat::new("18.3 km", "distance"),
             Stat::new("1204 m", "gain"),
@@ -98,6 +99,7 @@ fn story_overlays_without_panels_match_golden() {
         title: POLISH.into(),
         subtitle: Subtitle::Text("Tatry Wysokie".into()),
         date: Some("14 Jun 2025".into()),
+        short_date: None,
         stats: vec![
             Stat::new("18.3 km", "distance"),
             Stat::new("1188 m", "loss"),

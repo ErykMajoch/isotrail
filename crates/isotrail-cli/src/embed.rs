@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, bail};
 use clap::Args;
 use isotrail_export::{DEFAULT_SCALE, encode_png, upscale};
-use isotrail_render::{Aspect, Gpu, Overlays};
+use isotrail_render::{Aspect, Gpu};
 use tracing::warn;
 
 use crate::bundle::DataArgs;
@@ -192,7 +192,11 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
         )));
     }
     let text = args.overlay.text(&bundle)?;
-    let style = args.overlay.style();
+    let aspect = Aspect::from(args.aspect);
+    let framing = aspect
+        .framing(args.scale)
+        .context("the pixel scale doesn't divide the image size")?;
+    let fitted = args.overlay.fit(&text, aspect, &framing, args.scale)?;
     let sun = crate::sun::hike_sun(&bundle, args.look.time)?;
 
     if in_place {
@@ -207,16 +211,11 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
         );
     }
 
-    let aspect = Aspect::from(args.aspect);
-    let framing = aspect
-        .framing(args.scale)
-        .context("the pixel scale doesn't divide the image size")?;
-    let overlays = Overlays::layout(&text, &style, &framing);
     let poster = crate::render::still(
         &Gpu::headless()?,
         &bundle,
         mesher.as_ref(),
-        &overlays,
+        &fitted.overlays,
         &sun,
         &look,
     )?;
@@ -244,7 +243,10 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
     });
     output::write(&snippet_path, |file| Ok(file.write_all(html.as_bytes())?))?;
     println!("Wrote {}\n\n{html}", snippet_path.display());
-    if let Some(credit) = args.overlay.caption_credit(&bundle) {
+    if let Some(credit) = args
+        .overlay
+        .caption_credit(&bundle, fitted.credit_dropped())
+    {
         println!("Credit for the caption: {credit}");
     }
     Ok(())

@@ -10,8 +10,8 @@ use isotrail_export::{
     render_clip, render_still, upscale,
 };
 use isotrail_render::{
-    Aspect, Background, DEFAULT_YAW_OFFSET_DEG, Frame, Gpu, Look, Mesher, Motion, Overlays, Pace,
-    SunState, Walk,
+    Aspect, Background, DEFAULT_YAW_OFFSET_DEG, Fitted, Frame, Gpu, Look, Mesher, Motion, Overlays,
+    Pace, SunState, Walk,
 };
 use isotrail_track::Track;
 use tracing::{info, warn};
@@ -168,17 +168,26 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
         motion.sun = args.look.time.is_some().then_some(sun);
     }
     let text = args.overlay.text(&bundle)?;
-    let style = args.overlay.style();
+    let frames = aspects
+        .iter()
+        .map(|&aspect| {
+            let framing = aspect
+                .framing(args.scale)
+                .context("the pixel scale doesn't divide the image size")?;
+            Ok((aspect, framing))
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let fitted = frames
+        .iter()
+        .map(|(aspect, framing)| args.overlay.fit(&text, *aspect, framing, args.scale))
+        .collect::<anyhow::Result<Vec<_>>>()?;
     if motion.is_some_and(|motion| motion.pace == Pace::Time) && !Walk::new(&bundle).is_timed() {
         warn!("the track has no times to pace the route by, so it draws at an even speed");
     }
 
     let gpu = Gpu::headless()?;
-    for (&aspect, output) in aspects.iter().zip(&outputs) {
-        let framing = aspect
-            .framing(args.scale)
-            .context("the pixel scale doesn't divide the image size")?;
-        let overlays = Overlays::layout(&text, &style, &framing);
+    for (((_, framing), fit), output) in frames.iter().zip(&fitted).zip(&outputs) {
+        let overlays = &fit.overlays;
         let (width, height) = (framing.width * args.scale, framing.height * args.scale);
         let size = format!(
             "{width} × {height} from {} × {} pixels",
@@ -189,21 +198,22 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
                 gpu: &gpu,
                 bundle: &bundle,
                 mesher: mesher.as_ref(),
-                overlays: &overlays,
+                overlays,
                 look: &look,
                 motion,
             };
             let frames = write_clip(args, &clip, output, ffmpeg.as_ref())?;
             println!("Rendered {frames} frames of {size}");
         } else {
-            let frame = still(&gpu, &bundle, mesher.as_ref(), &overlays, &sun, &look)?;
+            let frame = still(&gpu, &bundle, mesher.as_ref(), overlays, &sun, &look)?;
             let image = upscale(&frame, args.scale)?;
             output::write(output, |file| Ok(encode_png(&image, file)?))?;
             println!("Rendered {size}");
         }
         println!("Wrote {}", output.display());
     }
-    if let Some(credit) = args.overlay.caption_credit(&bundle) {
+    let dropped = fitted.iter().any(Fitted::credit_dropped);
+    if let Some(credit) = args.overlay.caption_credit(&bundle, dropped) {
         println!("Credit for the caption: {credit}");
     }
     Ok(())

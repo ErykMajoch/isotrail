@@ -1,7 +1,8 @@
 use clap::{Args, ValueEnum};
 use isotrail_bundle::{HikeStats, SceneBundle, WEATHER_ATTRIBUTION};
 use isotrail_render::{
-    DateFormat, OverlayStyle, OverlayText, PanelStyle, Stat, StatKind, Subtitle, TitleSize,
+    Aspect, DateFormat, FitStep, Fitted, Framing, OverlayStyle, OverlayText, Overlays, PanelStyle,
+    PixelFont, Stat, StatKind, Subtitle, TitleSize,
 };
 use tracing::warn;
 
@@ -178,6 +179,7 @@ impl OverlayArgs {
         };
         if let Some(date) = &self.date {
             text.date = Some(date.clone());
+            text.short_date = None;
         }
 
         if !show(Part::Title) {
@@ -204,7 +206,50 @@ impl OverlayArgs {
         if !self.shows_attribution() {
             text.attribution = None;
         }
+        let subtitle = match &text.subtitle {
+            Subtitle::Text(subtitle) => subtitle.as_str(),
+            _ => "",
+        };
+        let font = PixelFont::monogram();
+        for (field, words) in [
+            ("title", text.title.as_str()),
+            ("subtitle", subtitle),
+            ("date", text.date.as_deref().unwrap_or_default()),
+        ] {
+            let missing = font.missing(words);
+            if !missing.is_empty() {
+                let missing: String = missing.iter().map(|c| format!(" {c:?}")).collect();
+                warn!("the {field} has characters the font can't draw, left out:{missing}");
+            }
+        }
         Ok(text)
+    }
+
+    /// The overlays laid out for a frame, with a warning if they had to give
+    /// something up to fit, or an error if they don't fit at all
+    pub fn fit(
+        &self,
+        text: &OverlayText,
+        aspect: Aspect,
+        framing: &Framing,
+        scale: u32,
+    ) -> anyhow::Result<Fitted> {
+        let frame = format!("the {} frame at --scale {scale}", aspect.name());
+        let fit = Overlays::fit(text, &self.style(), framing).map_err(|_| {
+            usage(format!(
+                "the overlays don't fit {frame}, even with a small title, no subtitle, \
+                 no profile, no credit and one stat; use a lower --scale, fewer --stats, \
+                 or fewer --overlay parts"
+            ))
+        })?;
+        if !fit.steps.is_empty() {
+            let steps: Vec<String> = fit.steps.iter().map(describe).collect();
+            warn!(
+                "the overlays don't fit {frame}, so it has {}",
+                and_list(&steps)
+            );
+        }
+        Ok(fit)
     }
 
     /// The stats of [`OverlayArgs::text`] part-way along the hike, with
@@ -230,17 +275,43 @@ impl OverlayArgs {
         self.title.as_deref().unwrap_or(&bundle.meta.title)
     }
 
-    /// The data credit to put in the caption, when the image leaves it out
-    pub fn caption_credit(&self, bundle: &SceneBundle) -> Option<String> {
+    /// The data credit to put in the caption, when the image leaves it out,
+    /// as asked or because it didn't fit
+    pub fn caption_credit(&self, bundle: &SceneBundle, dropped: bool) -> Option<String> {
         let mut credits: Vec<&str> = bundle.meta.attribution.iter().map(String::as_str).collect();
         if bundle.weather.is_some() {
             credits.push(WEATHER_ATTRIBUTION);
         }
-        (!self.shows_attribution() && !credits.is_empty()).then(|| credits.join(" · "))
+        let left_off = dropped || !self.shows_attribution();
+        (left_off && !credits.is_empty()).then(|| credits.join(" · "))
     }
 
     fn shows_attribution(&self) -> bool {
         !self.no_attribution && !self.overlay.contains(&Part::None)
+    }
+}
+
+fn describe(step: &FitStep) -> String {
+    match step {
+        FitStep::ShortDate => "the short date".into(),
+        FitStep::SmallTitle => "a small title".into(),
+        FitStep::NoSubtitle => "no subtitle".into(),
+        FitStep::TightStats => "the stats closer together".into(),
+        FitStep::NoProfile => "no profile".into(),
+        FitStep::NoCredit => "no credit (it is printed below, for the caption)".into(),
+        FitStep::LeftOutStats(labels) => {
+            let noun = if labels.len() == 1 { "stat" } else { "stats" };
+            format!("no {noun} {}", and_list(labels))
+        }
+    }
+}
+
+/// `a, b and c`
+fn and_list(items: &[String]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
     }
 }
 
@@ -296,7 +367,7 @@ mod tests {
         assert_eq!(labels, ["distance", "gain", "time", "high point"]);
         assert_eq!(text.profile, [400.0, 401.0, 402.0, 403.0]);
         assert_eq!(text.attribution.as_deref(), Some("© Mappers · Tiles"));
-        assert_eq!(args.caption_credit(&bundle()), None);
+        assert_eq!(args.caption_credit(&bundle(), false), None);
         assert_eq!(args.style(), OverlayStyle::default());
     }
 
@@ -306,7 +377,7 @@ mod tests {
             let args = parse(flags).unwrap();
             assert_eq!(args.text(&bundle()).unwrap().attribution, None);
             assert_eq!(
-                args.caption_credit(&bundle()).as_deref(),
+                args.caption_credit(&bundle(), false).as_deref(),
                 Some("© Mappers · Tiles")
             );
         }
@@ -315,15 +386,73 @@ mod tests {
         let mut bare = bundle();
         bare.meta.attribution.clear();
         let args = parse(&["--no-attribution"]).unwrap();
-        assert_eq!(args.caption_credit(&bare), None);
+        assert_eq!(args.caption_credit(&bare, false), None);
         let mut with_weather = bundle();
         with_weather.weather = Some(synthetic_weather(1_750_064_400, 3));
         assert_eq!(
-            args.caption_credit(&with_weather).as_deref(),
+            args.caption_credit(&with_weather, false).as_deref(),
             Some("© Mappers · Tiles · Weather data by Open-Meteo.com")
         );
         let drawn = parse(&[]).unwrap().text(&with_weather).unwrap().attribution;
         assert_eq!(drawn.as_deref(), Some("© Mappers · Tiles · Open-Meteo.com"));
+        // Or when the frame had no room for it
+        assert_eq!(
+            parse(&[])
+                .unwrap()
+                .caption_credit(&bundle(), true)
+                .as_deref(),
+            Some("© Mappers · Tiles")
+        );
+    }
+
+    #[test]
+    fn a_coarse_frame_gives_parts_up_or_is_refused() {
+        let args = parse(&["--stats", "distance,gain,time,high,low,speed"]).unwrap();
+        let mut bundle = bundle();
+        bundle.meta.stats.min_ele_m = Some(300.0);
+        let text = args.text(&bundle).unwrap();
+        assert_eq!(text.short_date.as_deref(), Some("14 Jun 2025"));
+        let fit =
+            |aspect: Aspect, scale| args.fit(&text, aspect, &aspect.framing(scale).unwrap(), scale);
+        assert_eq!(fit(Aspect::Story, 3).unwrap().steps, []);
+        let coarse = fit(Aspect::Story, 10).unwrap();
+        assert!(coarse.credit_dropped());
+        assert!(matches!(
+            coarse.steps.last(),
+            Some(FitStep::LeftOutStats(_))
+        ));
+        // Nothing gives way for a stat wider than the frame
+        let mut long = text.clone();
+        long.stats[0] = Stat::new("123456789012345 km", "distance");
+        let framing = Aspect::Square.framing(10).unwrap();
+        let refused = args.fit(&long, Aspect::Square, &framing, 10).unwrap_err();
+        assert!(refused.is::<crate::UsageError>());
+        let message = refused.to_string();
+        assert!(
+            message.contains("the square frame at --scale 10"),
+            "{message}"
+        );
+        assert!(message.contains("--stats"), "{message}");
+        // A date given as text has no shorter form
+        let given = parse(&["--date", "Summer 2025"]).unwrap();
+        assert_eq!(given.text(&bundle).unwrap().short_date, None);
+    }
+
+    #[test]
+    fn steps_read_as_a_list() {
+        let steps = [
+            FitStep::NoProfile,
+            FitStep::LeftOutStats(vec!["time".into(), "high point".into()]),
+        ];
+        let described: Vec<String> = steps.iter().map(describe).collect();
+        assert_eq!(
+            and_list(&described),
+            "no profile and no stats time and high point"
+        );
+        assert_eq!(
+            describe(&FitStep::LeftOutStats(vec!["speed".into()])),
+            "no stat speed"
+        );
     }
 
     #[test]

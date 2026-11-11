@@ -43,6 +43,8 @@ pub struct OverlayText {
     pub subtitle: Subtitle,
     /// Local start date, ready to print
     pub date: Option<String>,
+    /// The same date shorter, for a frame too narrow for it
+    pub short_date: Option<String>,
     pub stats: Vec<Stat>,
     /// Elevations evenly spaced along the route; fewer than two draw no profile
     pub profile: Vec<f32>,
@@ -117,6 +119,11 @@ impl OverlayText {
                 .local_date
                 .as_deref()
                 .and_then(|date| format_date(date, date_format)),
+            short_date: meta
+                .local_date
+                .as_deref()
+                .filter(|_| date_format == DateFormat::Long)
+                .and_then(|date| format_date(date, DateFormat::Short)),
             stats: stats
                 .iter()
                 .filter_map(|kind| kind.stat(&meta.stats, units))
@@ -148,7 +155,11 @@ impl Stat {
 impl StatKind {
     /// `None` if the track didn't record what this needs
     pub fn stat(self, stats: &HikeStats, units: Units) -> Option<Stat> {
-        let elevation = |m: f64| format!("{:.0} {}", units.elevation(m), units.elevation_unit());
+        // Adding zero turns -0 into 0
+        let elevation = |m: f64| {
+            let whole = units.elevation(m).round() + 0.0;
+            format!("{whole:.0} {}", units.elevation_unit())
+        };
         let time = stats.moving_s.or(stats.elapsed_s).filter(|&s| s > 0);
         let distance = units.distance(stats.distance_m);
         let (value, label) = match self {
@@ -260,6 +271,9 @@ pub fn format_date(iso: &str, format: DateFormat) -> Option<String> {
         parts.next()?.ok()?,
         parts.next()?.ok()?,
     );
+    if year == 0 {
+        return None;
+    }
     let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
     let days_in_month = match month {
         2 if leap => 29,
@@ -359,6 +373,8 @@ struct Metrics {
     small: u32,
     /// Between a panel's edge and what it holds
     pad: IVec2,
+    /// Between two stats side by side
+    stat_gap: i32,
 }
 
 impl Metrics {
@@ -386,7 +402,55 @@ pub struct Overlays {
     top_px: u32,
     bottom_px: u32,
     left_px: u32,
+    /// Pixels by which the overlays miss fitting the frame, or by which they
+    /// fit if not above zero
+    overflow: i32,
 }
+
+/// What a layout gave up to fit its frame, in the order it is given up
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FitStep {
+    /// The date in its short form, as the long one doesn't fit its line
+    ShortDate,
+    SmallTitle,
+    NoSubtitle,
+    /// Less space between the stats, so more of them share a row
+    TightStats,
+    NoProfile,
+    /// The credit left off the image, to go in the caption instead
+    NoCredit,
+    /// The labels of the stats left out, from the end of the list
+    LeftOutStats(Vec<String>),
+}
+
+/// Overlays that fit their frame, and what they gave up for it
+#[derive(Clone, Debug, PartialEq)]
+pub struct Fitted {
+    pub overlays: Overlays,
+    pub steps: Vec<FitStep>,
+}
+
+impl Fitted {
+    pub fn credit_dropped(&self) -> bool {
+        self.steps.contains(&FitStep::NoCredit)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "the overlays don't fit a {width} × {height} frame, even with a small title, no \
+     subtitle, no profile, no credit and a single stat"
+)]
+pub struct OverlaysDontFit {
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Stacked panels leave at least this share of the safe height to the diorama
+const DIORAMA_SHARE: f32 = 1.0 / 6.0;
+/// Between two stats side by side, in large text pixels
+const STAT_GAP: u32 = 8;
+const TIGHT_STAT_GAP: u32 = 3;
 
 impl Overlays {
     /// Portrait and square frames hang the title block from the top of the
@@ -394,14 +458,82 @@ impl Overlays {
     /// under it, on its bottom; landscape frames stack everything in one
     /// column on the left. Large text is two pixels per glyph pixel in a
     /// 360-pixel-wide frame, and keeps that size on screen at other pixel
-    /// scales
+    /// scales. The layout may not fit a coarse frame: see [`Overlays::fit`]
     pub fn layout(text: &OverlayText, style: &OverlayStyle, framing: &Framing) -> Overlays {
+        Overlays::arrange(text, style, framing, STAT_GAP)
+    }
+
+    /// The layout, giving up parts in a fixed order until it fits the frame:
+    /// first the long date if it doesn't fit its line, then while the panels
+    /// leave the diorama too little room, the large title, the subtitle, the
+    /// space between stats, the profile, the credit, and finally stats from
+    /// the last one back, keeping one. Steps that don't help are skipped
+    pub fn fit(
+        text: &OverlayText,
+        style: &OverlayStyle,
+        framing: &Framing,
+    ) -> Result<Fitted, OverlaysDontFit> {
+        let (mut text, mut style, mut gap) = (text.clone(), *style, STAT_GAP);
+        let mut overlays = Overlays::arrange(&text, &style, framing, gap);
+        let mut steps = Vec::new();
+        if let (Some(date), Some(short)) = (&text.date, &text.short_date)
+            && !overlays.shows_whole(date)
+        {
+            text.date = Some(short.clone());
+            overlays = Overlays::arrange(&text, &style, framing, gap);
+            steps.push(FitStep::ShortDate);
+        }
+        for step in [
+            FitStep::SmallTitle,
+            FitStep::NoSubtitle,
+            FitStep::TightStats,
+            FitStep::NoProfile,
+            FitStep::NoCredit,
+        ] {
+            if overlays.overflow <= 0 {
+                break;
+            }
+            let (mut tried_text, mut tried_style, mut tried_gap) = (text.clone(), style, gap);
+            match step {
+                FitStep::SmallTitle => tried_style.title_size = TitleSize::Small,
+                FitStep::NoSubtitle => tried_text.subtitle = Subtitle::None,
+                FitStep::TightStats => tried_gap = TIGHT_STAT_GAP,
+                FitStep::NoProfile => tried_text.profile.clear(),
+                _ => tried_text.attribution = None,
+            }
+            let tried = Overlays::arrange(&tried_text, &tried_style, framing, tried_gap);
+            if tried.overflow < overlays.overflow {
+                (text, style, gap, overlays) = (tried_text, tried_style, tried_gap, tried);
+                steps.push(step);
+            }
+        }
+        let mut left_out = Vec::new();
+        while overlays.overflow > 0 && text.stats.len() > 1 {
+            if let Some(stat) = text.stats.pop() {
+                left_out.insert(0, stat.label);
+            }
+            overlays = Overlays::arrange(&text, &style, framing, gap);
+        }
+        if overlays.overflow > 0 {
+            return Err(OverlaysDontFit {
+                width: framing.width,
+                height: framing.height,
+            });
+        }
+        if !left_out.is_empty() {
+            steps.push(FitStep::LeftOutStats(left_out));
+        }
+        Ok(Fitted { overlays, steps })
+    }
+
+    fn arrange(text: &OverlayText, style: &OverlayStyle, framing: &Framing, gap: u32) -> Overlays {
         let (width, height) = (framing.width, framing.height);
         let large = (width.min(height) / 180).clamp(1, 3);
         let metrics = Metrics {
             large,
             small: (large / 2).max(1),
             pad: IVec2::new(3 * large as i32, 2 * large as i32),
+            stat_gap: (gap * large) as i32,
         };
         // Half the diorama's side margin: the sides of a story stay uncovered
         let margin = ((width as f32 * framing.safe.left / 2.0).round() as i32).max(2);
@@ -420,6 +552,7 @@ impl Overlays {
             top_px: 0,
             bottom_px: 0,
             left_px: 0,
+            overflow: 0,
         };
         if width > height {
             let inner = (width as f32 * COLUMN_SHARE).round() as i32 - 2 * metrics.pad.x;
@@ -428,7 +561,44 @@ impl Overlays {
             let max_width = width as i32 - 2 * margin - 2 * metrics.pad.x;
             layout.place_stacked(text, &metrics, max_width.max(1));
         }
+        layout.overflow = layout.overflow.max(layout.outside_frame());
         layout
+    }
+
+    /// How far any panel, the profile or a line's ink reaches past the frame
+    fn outside_frame(&self) -> i32 {
+        let font = PixelFont::monogram();
+        let (width, height) = (self.framing.width as i32, self.framing.height as i32);
+        let inked = self.lines.iter().filter_map(|line| {
+            let (first, last) = font.ink_rows(&line.text)?;
+            Some(Rect {
+                min: IVec2::new(line.origin.x, line.origin.y + (first * line.scale) as i32),
+                max: IVec2::new(
+                    line.origin.x + font.width(&line.text, line.scale) as i32,
+                    line.origin.y + ((last + 1) * line.scale) as i32,
+                ),
+            })
+        });
+        self.panels
+            .iter()
+            .copied()
+            .chain(self.strip)
+            .chain(inked)
+            .map(|rect| {
+                (-rect.min.x)
+                    .max(-rect.min.y)
+                    .max(rect.max.x - width)
+                    .max(rect.max.y - height)
+            })
+            .fold(i32::MIN, i32::max)
+    }
+
+    /// Whether `text` is drawn on a line of its own, not cut short
+    fn shows_whole(&self, text: &str) -> bool {
+        let whole = PixelFont::monogram().wrap(text, 1, u32::MAX / 2, 1);
+        self.lines
+            .iter()
+            .any(|line| whole.first().is_some_and(|whole| *whole == line.text))
     }
 
     /// The framing with its safe area grown to keep the diorama clear of
@@ -515,17 +685,19 @@ impl Overlays {
         let pad = metrics.pad;
         let centre = width / 2;
 
+        let safe_top = (height as f32 * safe.top).round() as i32;
+        let safe_bottom = (height as f32 * (1.0 - safe.bottom)).round() as i32;
+        let mut above = safe_top;
         let heading = heading(text, &self.style, metrics, max_width as u32);
         if !heading.lines.is_empty() {
-            let top = (height as f32 * safe.top).round() as i32;
-            let bottom = top + heading.height + 2 * pad.y;
+            let bottom = safe_top + heading.height + 2 * pad.y;
             self.panels
-                .push(panel_rect(centre, heading.width, top, bottom, pad));
-            self.put(heading, IVec2::new(centre, top + pad.y));
+                .push(panel_rect(centre, heading.width, safe_top, bottom, pad));
+            self.put(heading, IVec2::new(centre, safe_top + pad.y));
             self.top_px = bottom.max(0) as u32;
+            above = bottom;
         }
 
-        let safe_bottom = (height as f32 * (1.0 - safe.bottom)).round() as i32;
         let mut reached = safe_bottom;
         let mut bottom = safe_bottom;
         let credit = credit(text, metrics, max_width as u32);
@@ -563,6 +735,8 @@ impl Overlays {
         if reached < safe_bottom {
             self.bottom_px = (height - reached).max(0) as u32;
         }
+        let diorama = ((safe_bottom - safe_top) as f32 * DIORAMA_SHARE).ceil() as i32;
+        self.overflow = above + diorama - reached;
     }
 
     /// One panel from the left margin holding the title, stats and profile,
@@ -601,6 +775,7 @@ impl Overlays {
         let safe_top = (height as f32 * safe.top).round() as i32;
         let safe_bottom = (height as f32 * (1.0 - safe.bottom)).round() as i32;
         let top = safe_top + ((safe_bottom - safe_top - panel_height - credit_height) / 2).max(0);
+        self.overflow = panel_height + credit_height - (safe_bottom - safe_top);
 
         if !parts.is_empty() {
             self.panels.push(Rect {
@@ -734,7 +909,7 @@ fn stats_block(stats: &[Stat], metrics: &Metrics, max_width: i32) -> Block {
     }
     let font = PixelFont::monogram();
     let (large, small) = (metrics.large, metrics.small);
-    let gap = 8 * large as i32;
+    let gap = metrics.stat_gap;
     let cell_width = |stat: &Stat| {
         value_runs(&stat.value, large, small)
             .1
@@ -1026,6 +1201,7 @@ mod tests {
             title: title.into(),
             subtitle: Subtitle::Auto,
             date: Some("Sunday 15 June 2025".into()),
+            short_date: Some("15 Jun 2025".into()),
             stats: vec![
                 Stat::new("12.4 km", "distance"),
                 Stat::new("846 m", "gain"),
@@ -1085,6 +1261,7 @@ mod tests {
             "2025-06",
             "June",
             "",
+            "0000-02-01",
         ] {
             for format in [DateFormat::Long, DateFormat::Short, DateFormat::Iso] {
                 assert_eq!(format_date(bad, format), None, "{bad}");
@@ -1185,6 +1362,18 @@ mod tests {
         };
         let time = StatKind::Time.stat(&unmoving, Units::Metric).unwrap();
         assert_eq!(time.value, "30h 25m");
+    }
+
+    #[test]
+    fn elevations_just_below_sea_level_print_as_zero() {
+        let shore = HikeStats {
+            min_ele_m: Some(-0.3),
+            max_ele_m: Some(-0.6),
+            ..hike_stats()
+        };
+        let value = |kind: StatKind| kind.stat(&shore, Units::Metric).unwrap().value;
+        assert_eq!(value(StatKind::Low), "0 m");
+        assert_eq!(value(StatKind::High), "-1 m");
     }
 
     #[test]
@@ -1352,6 +1541,7 @@ mod tests {
             title: " ".into(),
             subtitle: Subtitle::Text("not shown without a title".into()),
             date: None,
+            short_date: None,
             stats: Vec::new(),
             profile: vec![300.0],
             attribution: None,
@@ -1582,6 +1772,86 @@ mod tests {
             (diorama.safe.top, diorama.safe.bottom, diorama.safe.right),
             (framing.safe.top, framing.safe.bottom, framing.safe.right)
         );
+    }
+
+    fn six_stats() -> OverlayText {
+        OverlayText {
+            stats: vec![
+                Stat::new("101.5 km", "distance"),
+                Stat::new("5636 m", "gain"),
+                Stat::new("5590 m", "loss"),
+                Stat::new("31h 05m", "time"),
+                Stat::new("616 m", "high point"),
+                Stat::new("3.3 km/h", "speed"),
+            ],
+            date: Some("Wednesday 29 September 2026".into()),
+            short_date: Some("29 Sep 2026".into()),
+            attribution: Some(format!("{CREDIT} · Open-Meteo.com")),
+            ..full_text()
+        }
+    }
+
+    fn overlapping(a: Rect, b: Rect) -> bool {
+        a.min.x < b.max.x && b.min.x < a.max.x && a.min.y < b.max.y && b.min.y < a.max.y
+    }
+
+    #[test]
+    fn every_scale_fits_its_frame_or_says_it_cant() {
+        let font = PixelFont::monogram();
+        let text = six_stats();
+        for aspect in Aspect::ALL {
+            for scale in [2, 3, 5, 6, 10] {
+                let framing = aspect.framing(scale).unwrap();
+                let case = format!("{} at scale {scale}", aspect.name());
+                let Ok(fitted) = Overlays::fit(&text, &OverlayStyle::default(), &framing) else {
+                    assert!(scale >= 5, "{case} doesn't fit");
+                    continue;
+                };
+                let overlays = &fitted.overlays;
+                assert!(overlays.overflow <= 0, "{case}");
+                assert!(overlays.outside_frame() <= 0, "{case}");
+                let frame = Rect {
+                    min: IVec2::ZERO,
+                    max: IVec2::new(framing.width as i32, framing.height as i32),
+                };
+                let boxes: Vec<Rect> = overlays
+                    .lines
+                    .iter()
+                    .filter(|line| font.ink_rows(&line.text).is_some())
+                    .map(line_box)
+                    .collect();
+                for rect in boxes.iter().chain(&overlays.panels).chain(&overlays.strip) {
+                    assert!(inside(*rect, frame), "{case}: {rect:?}");
+                }
+                for (i, a) in overlays.panels.iter().enumerate() {
+                    for b in &overlays.panels[i + 1..] {
+                        assert!(!overlapping(*a, *b), "{case}: {a:?} {b:?}");
+                    }
+                }
+                let credit: Vec<&Line> = overlays
+                    .lines
+                    .iter()
+                    .filter(|line| line.tone == Tone::Credit)
+                    .collect();
+                for line in &credit {
+                    let rect = line_box(line);
+                    assert!(
+                        overlays.panels.iter().all(|p| !overlapping(rect, *p)),
+                        "{case}"
+                    );
+                }
+                let drawn: Vec<&str> = credit.iter().map(|line| line.text.as_str()).collect();
+                if fitted.credit_dropped() {
+                    assert!(drawn.is_empty(), "{case}");
+                } else {
+                    assert_eq!(Some(drawn.join(" ")), text.attribution, "{case}");
+                }
+                if scale <= 3 {
+                    assert_eq!(fitted.steps, [], "{case}");
+                }
+                eprintln!("{case}: {:?}", fitted.steps);
+            }
+        }
     }
 
     #[test]

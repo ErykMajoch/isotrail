@@ -16,6 +16,7 @@ isotrail-track = { path = "../isotrail-track" }
 png.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+unicode-normalization.workspace = true
 wgpu.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

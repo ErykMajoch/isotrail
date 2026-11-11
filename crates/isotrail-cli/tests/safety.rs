@@ -220,7 +220,8 @@ fn data_flags_typed_for_a_bundle_are_warned_about() {
     )
     .unwrap();
     let render = |extra: &[&str]| {
-        let mut args = vec!["render", "hike.itb", "--scale", "10"];
+        // No overlays, which give way at this scale with a warning of their own
+        let mut args = vec!["render", "hike.itb", "--scale", "10", "--overlay", "none"];
         args.extend_from_slice(extra);
         isotrail(temp.path(), &args)
     };

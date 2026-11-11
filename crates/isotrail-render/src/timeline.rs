@@ -72,6 +72,17 @@ impl Timeline {
     pub fn draw_share(&self, time_s: f32) -> f32 {
         ((self.share(time_s) - INTRO_SHARE) / DRAW_SHARE).clamp(0.0, 1.0)
     }
+
+    /// Seconds into the clip where the hold on the finished hike begins
+    pub fn hold_s(&self) -> f32 {
+        self.duration_s * (INTRO_SHARE + DRAW_SHARE)
+    }
+
+    /// Whether frame `index` falls in the hold. The last frame always does,
+    /// so a short or choppy clip still ends on the finished hike
+    pub fn holds(&self, index: u32) -> bool {
+        index + 1 >= self.frame_count() || index as f32 / self.fps.max(1) as f32 >= self.hold_s()
+    }
 }
 
 /// An eased turn of the camera that ends on the still's view as the route
@@ -142,6 +153,15 @@ pub struct Moment {
 impl Motion {
     pub fn moment(&self, walk: &Walk, index: u32) -> Moment {
         let time_s = self.timeline.frame_time(index);
+        if self.timeline.holds(index) {
+            // A held image from before the hold would show the route unfinished
+            return Moment {
+                time_s: time_s.max(self.timeline.hold_s()),
+                yaw_offset_deg: 0.0,
+                progress: 1.0,
+                hike_time_s: walk.step(self.pace, 1.0).time_s,
+            };
+        }
         let step = walk.step(self.pace, self.timeline.draw_share(time_s));
         Moment {
             time_s,
@@ -242,6 +262,12 @@ impl Walk {
                 time_s: None,
             };
         };
+        if share >= 1.0 {
+            return Step {
+                progress: 1.0,
+                time_s: Some(clock.start_s + clock.real_s.last().copied().unwrap_or(0.0)),
+            };
+        }
         let timed = pace == Pace::Time && span > 0.0;
         let walked = |at: usize| -> f32 {
             if timed {
@@ -893,6 +919,81 @@ mod tests {
         assert_eq!(last.progress, 1.0);
         assert_eq!(last.hike_time_s, Some(START + 4_600.0));
         assert_eq!(last.yaw_offset_deg, 0.0);
+    }
+
+    /// Six days of 100 m, each but the last followed by a night
+    fn six_days() -> SceneBundle {
+        let points: Vec<(f32, Option<i64>)> = (0..12)
+            .map(|i| {
+                let day = i / 2;
+                let distance = (day * 100 + (i % 2) * 100) as f32;
+                (distance, Some(day as i64 * 86_400 + (i % 2) as i64 * 2_000))
+            })
+            .collect();
+        hike(&points, (1..6).map(|d| d * 2).collect())
+    }
+
+    #[test]
+    fn every_clip_ends_on_the_finished_hike() {
+        for bundle in [paused(), six_days()] {
+            let walk = Walk::new(&bundle);
+            let finish =
+                START + bundle.route.points.last().unwrap().time.unwrap() as f64 - 1_750_000_000.0;
+            for pace in [Pace::Distance, Pace::Time] {
+                for duration_s in 1..=60 {
+                    for fps in [1, 12, 30, 50] {
+                        for step_fps in [None, Some(1), Some(6), Some(12), Some(fps)] {
+                            let motion = Motion {
+                                timeline: Timeline {
+                                    duration_s: duration_s as f32,
+                                    fps,
+                                    step_fps,
+                                },
+                                pace,
+                                ..Motion::default()
+                            };
+                            let count = motion.timeline.frame_count();
+                            let last = motion.moment(&walk, count - 1);
+                            let case = format!("{duration_s} s, {fps} fps, {step_fps:?}, {pace:?}");
+                            assert_eq!(last.progress, 1.0, "{case}");
+                            assert_eq!(last.yaw_offset_deg, 0.0, "{case}");
+                            assert_eq!(last.hike_time_s, Some(finish), "{case}");
+                            // Every frame from the hold on shows the same
+                            let hold = (0..count).find(|&i| motion.timeline.holds(i)).unwrap();
+                            for i in hold..count {
+                                assert_eq!(motion.moment(&walk, i).progress, 1.0, "{case}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_choppy_clip_holds_its_last_image_on_the_finish() {
+        // Five seconds at one image a second used to end at 94%
+        let walk = Walk::new(&paused());
+        let motion = Motion {
+            timeline: Timeline {
+                duration_s: 5.0,
+                fps: 30,
+                step_fps: Some(1),
+            },
+            ..Motion::default()
+        };
+        let moments: Vec<Moment> = (0..150).map(|i| motion.moment(&walk, i)).collect();
+        assert!(moments[119].progress < 1.0);
+        for moment in &moments[128..] {
+            assert_eq!(moment.time_s, 4.25);
+            assert_eq!(moment.progress, 1.0);
+        }
+        // One image for the whole hold, so it is rendered once
+        let images = moments
+            .windows(2)
+            .filter(|w| w[0].time_s != w[1].time_s)
+            .count();
+        assert_eq!(images, 5);
     }
 
     #[test]

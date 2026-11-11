@@ -58,6 +58,13 @@ All notable changes to `isotrail` are documented here.
 - An embed whose WebGL context was lost no longer stays blank with working-looking buttons: it starts again, and keeps its poster if the context is lost again within a minute.
 - The embed's keyboard focus ring is visible on the diorama, and its buttons and progress line are easier to hit on touch screens.
 - An embed that can't show a hike says why (it couldn't be loaded, was saved by another version of isotrail, or the browser can't show 3D) instead of always blaming the browser.
+- **Overlays fit at every pixel scale.** At `--scale 6` and `10`, panels no longer overlap each other or the diorama, and text no longer runs off the image. When the overlays don't fit, they give way one step at a time with a warning: a short date, a small title, no subtitle, closer stats, no profile, no credit (printed for the caption instead), then fewer stats. If even that doesn't fit, the command stops with a usage error before rendering.
+- Short animations and those with a low `--step-fps` always end on the finished hike, with the route drawn to the finish flag and the camera at rest; a 5-second clip at one image a second used to stop short of the finish.
+- MP4s are encoded at H.264 level 4.0 (4.2 above 30 frames a second) instead of 5.0, which some older phones refuse, and carry all their colour tags (BT.709 primaries and transfer were missing).
+- An ffmpeg that stops taking frames without exiting is stopped after a minute with its last message, instead of leaving the render waiting for ever.
+- Titles with accents typed as separate marks, as macOS file names store them, are drawn with their accented letters, and characters the font lacks, such as emoji, are left out with a warning instead of drawn as `?`.
+- An elevation just below sea level prints as `0 m`, not `-0 m`.
+- `.hex` palette files saved with a byte-order mark, as PowerShell 5.1 writes them, are read.
 - An error inside the web renderer ends in the poster instead of a frozen picture, and numbers that aren't finite passed to the `Viewer` API are ignored.
 - A renderer download that failed once is tried again by the next embed instead of failing every embed until the page is reloaded, and playback no longer jumps ahead after the tab was in the background.
 - `embed` percent-encodes `:` in file names, which made a browser read `Rysy:2025.itb` as an address with its own scheme.

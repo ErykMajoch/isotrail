@@ -79,6 +79,18 @@ pub fn assert_golden_with(name: &str, width: u32, height: u32, rgba: &[u8], tole
     }
 }
 
+/// Share of pixels that differ between two RGBA8 images of the same size,
+/// counted as a golden comparison counts them
+///
+/// # Panics
+///
+/// If the images aren't the same size
+pub fn differing_share(a: &[u8], b: &[u8], tolerance: Tolerance) -> f64 {
+    assert_eq!(a.len(), b.len(), "the images differ in size");
+    let differs = diff_mask(a, b, tolerance.channel_epsilon);
+    differs.iter().filter(|&&d| d).count() as f64 / differs.len().max(1) as f64
+}
+
 fn update_requested() -> bool {
     std::env::var(UPDATE_ENV).is_ok_and(|value| !value.is_empty() && value != "0")
 }

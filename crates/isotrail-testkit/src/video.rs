@@ -7,6 +7,12 @@ pub struct VideoInfo {
     pub codec: String,
     pub pixel_format: String,
     pub color_space: String,
+    pub color_transfer: String,
+    pub color_primaries: String,
+    /// `tv` for limited range
+    pub color_range: String,
+    /// H.264 level times ten, so 40 is level 4.0
+    pub level: i32,
     pub width: u32,
     pub height: u32,
     pub frames: u32,
@@ -38,7 +44,7 @@ pub fn probe_video(path: &Path) -> VideoInfo {
     let output = Command::new("ffprobe")
         .args(["-v", "error", "-select_streams", "v:0", "-count_frames"])
         .args(["-show_entries"])
-        .arg("stream=codec_name,pix_fmt,color_space,width,height,nb_read_frames,r_frame_rate")
+        .arg("stream=codec_name,pix_fmt,color_space,color_transfer,color_primaries,color_range,level,width,height,nb_read_frames,r_frame_rate")
         .args(["-of", "default=noprint_wrappers=1"])
         .arg(path)
         .output()
@@ -56,10 +62,15 @@ pub fn probe_video(path: &Path) -> VideoInfo {
             .to_owned()
     };
     let number = |key: &str| field(key).parse().expect("a number");
+    let level = |key: &str| field(key).parse().expect("a number");
     VideoInfo {
         codec: field("codec_name"),
         pixel_format: field("pix_fmt"),
         color_space: field("color_space"),
+        color_transfer: field("color_transfer"),
+        color_primaries: field("color_primaries"),
+        color_range: field("color_range"),
+        level: level("level"),
         width: number("width"),
         height: number("height"),
         frames: number("nb_read_frames"),

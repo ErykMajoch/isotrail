@@ -48,6 +48,7 @@ impl Palette {
     /// ```
     pub fn parse_hex(text: &str) -> Result<Palette, PaletteError> {
         let mut colours = Vec::new();
+        let text = text.strip_prefix('\u{feff}').unwrap_or(text);
         for (i, line) in text.lines().enumerate() {
             let hex = line.trim();
             if hex.is_empty() {
@@ -133,6 +134,9 @@ mod tests {
     #[test]
     fn hex_files_allow_hashes_blank_lines_and_crlf() {
         let palette = Palette::parse_hex("#FF0040\r\n\r\n  131313 \r\n").unwrap();
+        assert_eq!(palette.colours(), [[255, 0, 64], [19, 19, 19]]);
+        // As PowerShell 5.1 writes UTF-8
+        let palette = Palette::parse_hex("\u{feff}ff0040\r\n131313\r\n").unwrap();
         assert_eq!(palette.colours(), [[255, 0, 64], [19, 19, 19]]);
     }
 

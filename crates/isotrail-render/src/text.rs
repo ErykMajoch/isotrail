@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use glam::IVec2;
+use unicode_normalization::UnicodeNormalization;
 
 use crate::Frame;
 
@@ -76,31 +77,40 @@ impl PixelFont {
         self.glyphs.contains_key(&c)
     }
 
-    /// The characters that will be drawn: whitespace becomes a space,
-    /// invisible characters go, look-alikes stand in for missing glyphs and
-    /// anything else becomes `?`
+    /// The characters that will be drawn: accents joined to their letters
+    /// (NFC), whitespace as a space, look-alikes for missing glyphs, and
+    /// invisible characters and anything the font lacks left out
     pub fn normalise(&self, text: &str) -> String {
-        text.chars()
-            .filter_map(|c| {
-                if c.is_whitespace() {
-                    return Some(' ');
-                }
-                if c.is_control() || matches!(c, '\u{ad}' | '\u{200b}'..='\u{200f}' | '\u{feff}') {
-                    return None;
-                }
-                if self.has_glyph(c) {
-                    return Some(c);
-                }
-                Some(match c {
-                    '‐' | '‑' | '‒' | '–' | '−' => '-',
-                    '‘' | '‚' | '′' => '\'',
-                    '“' | '”' | '„' | '″' => '"',
-                    'ſ' => 's',
-                    '•' => '·',
-                    _ => '?',
-                })
-            })
-            .collect()
+        text.nfc().filter_map(|c| self.drawn_as(c)).collect()
+    }
+
+    /// The visible characters of `text` that the font can't draw, once each
+    pub fn missing(&self, text: &str) -> Vec<char> {
+        let mut missing = Vec::new();
+        for c in text.nfc() {
+            if self.drawn_as(c).is_none() && !invisible(c) && !missing.contains(&c) {
+                missing.push(c);
+            }
+        }
+        missing
+    }
+
+    fn drawn_as(&self, c: char) -> Option<char> {
+        if c.is_whitespace() {
+            return Some(' ');
+        }
+        if invisible(c) || self.has_glyph(c) {
+            return (!invisible(c)).then_some(c);
+        }
+        let stand_in = match c {
+            '‐' | '‑' | '‒' | '–' | '−' => '-',
+            '‘' | '‚' | '′' => '\'',
+            '“' | '”' | '„' | '″' => '"',
+            'ſ' => 's',
+            '•' => '·',
+            _ => return None,
+        };
+        Some(stand_in)
     }
 
     /// Width in pixels from the first glyph's ink to the last's
@@ -219,6 +229,11 @@ impl PixelFont {
     }
 }
 
+fn invisible(c: char) -> bool {
+    !c.is_whitespace()
+        && (c.is_control() || matches!(c, '\u{ad}' | '\u{200b}'..='\u{200f}' | '\u{feff}'))
+}
+
 /// `line` cut back far enough for an ellipsis to fit in `per_line`
 /// characters, without a dangling space or separator before it
 fn with_ellipsis(line: &str, per_line: usize) -> String {
@@ -275,7 +290,18 @@ mod tests {
             "Giewont | Łańcuch"
         );
         assert_eq!(font().normalise("so\u{ad}ft\u{200b}"), "soft");
-        assert_eq!(font().normalise("A–B “C” ſ 山"), "A-B \"C\" s ?");
+        assert_eq!(font().normalise("A–B “C” ſ 山"), "A-B \"C\" s ");
+    }
+
+    #[test]
+    fn separate_accents_join_their_letters_and_unknown_characters_go() {
+        assert_eq!(font().normalise("Mie\u{328}guszowiecki"), "Mięguszowiecki");
+        assert_eq!(font().normalise("Rysy 🏔️ x\u{301}"), "Rysy  x");
+        assert_eq!(
+            font().missing("Rysy 🏔️\u{200b} x\u{301} 🏔"),
+            ['🏔', '\u{fe0f}', '\u{301}']
+        );
+        assert!(font().missing("Łańcuch\tA–B").is_empty());
     }
 
     #[test]
