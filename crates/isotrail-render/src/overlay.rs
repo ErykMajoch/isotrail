@@ -122,15 +122,18 @@ impl OverlayText {
                 .filter_map(|kind| kind.stat(&meta.stats, units))
                 .collect(),
             profile: bundle.profile.iter().map(|sample| sample.ele_m).collect(),
-            attribution: {
-                let mut credits: Vec<&str> = meta.attribution.iter().map(String::as_str).collect();
-                if bundle.weather.is_some() {
-                    credits.push(WEATHER_CREDIT);
-                }
-                (!credits.is_empty()).then(|| credits.join(" · "))
-            },
+            attribution: credit_line(bundle),
         }
     }
+}
+
+/// The bundle's data credits on one line, as drawn under the stats
+pub fn credit_line(bundle: &SceneBundle) -> Option<String> {
+    let mut credits: Vec<&str> = bundle.meta.attribution.iter().map(String::as_str).collect();
+    if bundle.weather.is_some() {
+        credits.push(WEATHER_CREDIT);
+    }
+    (!credits.is_empty()).then(|| credits.join(" · "))
 }
 
 impl Stat {

@@ -2,10 +2,10 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
 use glam::Vec2;
-use isotrail_bundle::SceneBundle;
+use isotrail_bundle::{BundleError, SceneBundle};
 use isotrail_render::{
     Diorama, Framing, Gpu, Insets, Look, OffscreenTarget, Pace, PixelGrid, Present, SunState,
-    TerrainMesh, TerrainRenderer, View, VoxelMesher, Walk, mesh_within,
+    TerrainMesh, TerrainRenderer, View, VoxelMesher, Walk, credit_line, mesh_within,
 };
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
@@ -57,12 +57,14 @@ struct Stage {
 impl Viewer {
     /// Opens the GPU for `canvas` and loads a scene bundle (`.itb` bytes).
     /// `backend` is `"auto"` (the default: WebGPU where the browser has it,
-    /// WebGL2 otherwise) or `"webgl"`. Nothing shows until `resize`
+    /// WebGL2 otherwise) or `"webgl"`. Nothing shows until `resize`;
+    /// a failure is an `Error` whose `reason` is `"version"` (a bundle from
+    /// another isotrail), `"damaged"` (not a bundle, or cut short) or `"gpu"`
     pub async fn load(
         canvas: HtmlCanvasElement,
         bundle: Vec<u8>,
         backend: Option<String>,
-    ) -> Result<Viewer, JsError> {
+    ) -> Result<Viewer, JsValue> {
         console_error_panic_hook::set_once();
         let webgl_only = match backend.as_deref() {
             None | Some("" | "auto") => false,
@@ -70,12 +72,21 @@ impl Viewer {
             Some(other) => {
                 return Err(JsError::new(&format!(
                     "unknown backend {other:?}: expected auto or webgl"
-                )));
+                ))
+                .into());
             }
         };
-        let bundle = SceneBundle::from_bytes(&bundle)?;
+        let bundle = SceneBundle::from_bytes(&bundle).map_err(|err| {
+            let reason = match err {
+                BundleError::OlderVersion { .. } | BundleError::NewerVersion { .. } => "version",
+                _ => "damaged",
+            };
+            failure(reason, err)
+        })?;
         let (width, height) = (canvas.width().max(1), canvas.height().max(1));
-        let (gpu, surface) = Gpu::for_canvas(canvas, webgl_only).await?;
+        let (gpu, surface) = Gpu::for_canvas(canvas, webgl_only)
+            .await
+            .map_err(|err| failure("gpu", err))?;
         let id = NEXT_ID.with(|next| next.replace(next.get().wrapping_add(1)));
         gpu.device()
             .set_device_lost_callback(move |reason, message| {
@@ -90,7 +101,7 @@ impl Viewer {
         let capabilities = surface.get_capabilities(gpu.adapter());
         let mut config = surface
             .get_default_config(gpu.adapter(), width, height)
-            .ok_or_else(|| JsError::new("the GPU can't draw into this canvas"))?;
+            .ok_or_else(|| failure("gpu", "the GPU can't draw into this canvas"))?;
         // Frames hold exact palette colours, so a format that doesn't
         // re-encode them is best
         if let Some(&format) = capabilities.formats.iter().find(|f| !f.is_srgb()) {
@@ -104,7 +115,8 @@ impl Viewer {
         }
         let renderer = TerrainRenderer::new(&gpu);
         let present = Present::new(&gpu, config.format);
-        let mesh = mesh_within(&VoxelMesher::default(), &bundle, gpu.max_buffer_size())?;
+        let mesh = mesh_within(&VoxelMesher::default(), &bundle, gpu.max_buffer_size())
+            .map_err(|err| failure("gpu", err))?;
         let (walk, sun) = (Walk::new(&bundle), SunState::for_hike(&bundle));
         Ok(Viewer {
             gpu,
@@ -145,6 +157,12 @@ impl Viewer {
         self.bundle.meta.title.clone()
     }
 
+    /// The data credits to show beside the diorama, joined with " · "
+    #[wasm_bindgen(getter)]
+    pub fn credit(&self) -> String {
+        credit_line(&self.bundle).unwrap_or_default()
+    }
+
     /// Magnification, from 1 (the whole slab) to 3
     #[wasm_bindgen(getter)]
     pub fn zoom(&self) -> f32 {
@@ -152,17 +170,18 @@ impl Viewer {
     }
 
     /// Sets the canvas's drawing buffer size in device pixels, and the pixel
-    /// grid that fits it
-    pub fn resize(&mut self, width: u32, height: u32) {
+    /// grid that fits it; fails with reason `"gpu"` when the GPU can't hold
+    /// the diorama at that size
+    pub fn resize(&mut self, width: u32, height: u32) -> Result<(), JsValue> {
         if width == 0 || height == 0 {
             self.stage = None;
-            return;
+            return Ok(());
         }
         (self.config.width, self.config.height) = (width, height);
         self.surface.configure(self.gpu.device(), &self.config);
         let grid = PixelGrid::for_canvas(width, height);
         if self.stage.as_ref().is_some_and(|stage| stage.grid == grid) {
-            return;
+            return Ok(());
         }
         let framing = Framing {
             width: grid.width,
@@ -170,7 +189,8 @@ impl Viewer {
             safe: SAFE_AREA,
         };
         let turn: Vec<f32> = (0..360).step_by(FIT_STEP_DEG).map(|d| d as f32).collect();
-        let diorama = match Diorama::new(
+        self.stage = None;
+        let diorama = Diorama::new(
             &self.gpu,
             &self.renderer,
             &self.bundle,
@@ -178,14 +198,8 @@ impl Viewer {
             &framing,
             &turn,
             self.sun,
-        ) {
-            Ok(diorama) => diorama,
-            Err(err) => {
-                web_sys::console::error_1(&JsValue::from_str(&err.to_string()));
-                self.stage = None;
-                return;
-            }
-        };
+        )
+        .map_err(|err| failure("gpu", err))?;
         let frame = OffscreenTarget::new(&self.gpu, grid.width, grid.height);
         // At the new scale the focus can fall outside the whole-slab view
         self.view = diorama.turntable().clamp(self.view);
@@ -194,6 +208,7 @@ impl Viewer {
             diorama,
             frame,
         });
+        Ok(())
     }
 
     /// How far through drawing the route, from 0 to 1, at an even speed with
@@ -202,6 +217,9 @@ impl Viewer {
     /// start, as on the poster
     #[wasm_bindgen(js_name = setProgress)]
     pub fn set_progress(&mut self, share: f32) {
+        if !share.is_finite() {
+            return;
+        }
         let step = self.walk.step(Pace::Distance, share);
         self.progress = step.progress;
         self.sun = step.time_s.map_or_else(
@@ -217,6 +235,9 @@ impl Viewer {
     /// clock
     #[wasm_bindgen(js_name = setTime)]
     pub fn set_time(&mut self, seconds: f32) {
+        if !seconds.is_finite() {
+            return;
+        }
         self.time_s = seconds;
     }
 
@@ -230,6 +251,9 @@ impl Viewer {
     /// Degrees the view turns from the still's
     #[wasm_bindgen(js_name = setYaw)]
     pub fn set_yaw(&mut self, degrees: f32) {
+        if !degrees.is_finite() {
+            return;
+        }
         self.view.yaw_offset_deg = degrees;
         if let Some(stage) = &self.stage {
             self.view = stage.diorama.turntable().clamp(self.view);
@@ -240,6 +264,9 @@ impl Viewer {
     /// in place
     #[wasm_bindgen(js_name = zoomBy)]
     pub fn zoom_by(&mut self, factor: f32, x: f32, y: f32) {
+        if ![factor, x, y].iter().all(|n| n.is_finite()) {
+            return;
+        }
         if let Some(stage) = &self.stage {
             let pixel = self.frame_point(stage, x, y);
             self.view = stage.diorama.turntable().zoom_at(self.view, factor, pixel);
@@ -248,6 +275,9 @@ impl Viewer {
 
     /// Moves the view with a drag of `dx`, `dy` canvas pixels, once zoomed in
     pub fn pan(&mut self, dx: f32, dy: f32) {
+        if !dx.is_finite() || !dy.is_finite() {
+            return;
+        }
         if let Some(stage) = &self.stage {
             let pixels = Vec2::new(dx, dy) / stage.grid.scale as f32;
             self.view = stage.diorama.turntable().pan(self.view, pixels);
@@ -304,6 +334,13 @@ impl Drop for Viewer {
         ON_LOST.with_borrow_mut(|callbacks| callbacks.remove(&self.id));
         self.gpu.device().destroy();
     }
+}
+
+/// An `Error` with a `reason` the element can tell apart
+fn failure(reason: &str, err: impl std::fmt::Display) -> JsValue {
+    let error = js_sys::Error::new(&err.to_string());
+    let _ = js_sys::Reflect::set(&error, &"reason".into(), &reason.into());
+    error.into()
 }
 
 impl Viewer {

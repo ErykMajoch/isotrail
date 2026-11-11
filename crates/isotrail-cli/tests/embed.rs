@@ -52,8 +52,14 @@ fn writes_a_bundle_poster_and_snippet() {
     assert_eq!(png_size(&site.join("ridge.png")), (1920, 1080));
     assert_eq!(
         fs::read_to_string(site.join("snippet.html")).unwrap(),
-        "<script type=\"module\" src=\"isotrail-embed.js\"></script>\n\
-         <isotrail-hike src=\"ridge.itb\" poster=\"ridge.png\" aspect=\"wide\"></isotrail-hike>\n"
+        format!(
+            "<script type=\"module\" src=\"isotrail-embed.js?v={}\"></script>\n\
+             <isotrail-hike src=\"ridge.itb\" poster=\"ridge.png\" aspect=\"wide\" \
+             style=\"display:block;aspect-ratio:16/9\"><img src=\"ridge.png\" \
+             alt=\"Diorama of {}\" style=\"display:block;width:100%\"></isotrail-hike>\n",
+            env!("CARGO_PKG_VERSION"),
+            hike_bundle().meta.title
+        )
     );
     assert!(!site.join("isotrail-embed.js").exists());
     assert!(!site.join("pkg").exists());
@@ -105,7 +111,7 @@ fn copies_the_runtime_and_writes_urls_under_the_base() {
     );
     let html = fs::read_to_string(site.join("snippet.html")).unwrap();
     assert!(
-        html.contains(r#"<script type="module" src="/hikes/isotrail-embed.js">"#),
+        html.contains(r#"<script type="module" src="/hikes/isotrail-embed.js?v="#),
         "{html}"
     );
     assert!(
@@ -145,7 +151,7 @@ fn the_script_can_point_at_a_shared_runtime() {
     assert_eq!(png_size(&site.join("ridge.png")), (1080, 1080));
     let html = fs::read_to_string(site.join("snippet.html")).unwrap();
     assert!(
-        html.contains(r#"<script type="module" src="/isotrail/isotrail-embed.js">"#),
+        html.contains(r#"<script type="module" src="/isotrail/isotrail-embed.js?v="#),
         "{html}"
     );
     assert!(html.contains(r#"src="ridge.itb""#), "{html}");

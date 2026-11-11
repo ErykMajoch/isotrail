@@ -1,6 +1,10 @@
 // <isotrail-hike>: an interactive diorama of a hike for any web page
 
-const RUNTIME = new URL('./pkg/isotrail_web.js', import.meta.url);
+// The script's own query (such as ?v=1.3.1) goes on to the files it loads,
+// so a browser never pairs a cached old renderer with a new script
+const QUERY = new URL(import.meta.url).search;
+const RUNTIME = new URL(`./pkg/isotrail_web.js${QUERY}`, import.meta.url);
+const WASM = new URL(`./pkg/isotrail_web_bg.wasm${QUERY}`, import.meta.url);
 
 const ASPECTS = { story: '9 / 16', feed: '4 / 5', square: '1 / 1', wide: '16 / 9' };
 const INTRO_S = 0.5;
@@ -12,16 +16,42 @@ const KEY_TURN_DEG = 10;
 const KEY_PAN_PX = 40;
 const KEY_ZOOM = 1.25;
 const HINT_MS = 1500;
+// A hidden tab resumes where it was rather than jumping ahead
+const MAX_STEP_S = 0.1;
+// Browsers keep only about 16 WebGL contexts per page, so embeds far off
+// screen give theirs back
+const RELEASE_MS = 3000;
+// A second lost GPU this soon after the first keeps the poster
+const RESTART_WINDOW_MS = 60000;
+
+const MESSAGES = {
+  load: "This hike couldn't be loaded.",
+  damaged: "This hike couldn't be loaded.",
+  version: 'This hike was saved by a different version of isotrail.',
+  gpu: "This browser can't show the 3D view.",
+  runtime: "This browser can't show the 3D view.",
+};
+const CREDIT_LINKS = {
+  OpenStreetMap: 'https://www.openstreetmap.org/copyright',
+  'Open-Meteo.com': 'https://open-meteo.com/',
+};
 
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 const ZOOM_KEY = MAC ? '⌘' : 'Ctrl';
 
-let runtime;
+let runtime = null;
 function loadRuntime() {
-  runtime ??= import(RUNTIME.href).then(async (module) => {
-    await module.default();
-    return module;
-  });
+  if (!runtime) {
+    const loading = import(RUNTIME.href).then(async (module) => {
+      await module.default({ module_or_path: WASM });
+      return module;
+    });
+    // A failed download is tried again by the next embed that needs it
+    loading.catch(() => {
+      if (runtime === loading) runtime = null;
+    });
+    runtime = loading;
+  }
   return runtime;
 }
 
@@ -61,9 +91,7 @@ const ICONS = {
   ),
 };
 
-const template = document.createElement('template');
-template.innerHTML = `
-<style>
+const CSS = `
   :host {
     --isotrail-panel: rgb(32 46 55 / 0.78);
     --isotrail-edge: #819796;
@@ -102,7 +130,11 @@ template.innerHTML = `
     outline: none;
   }
   canvas.dragging { cursor: grabbing; }
-  canvas:focus-visible { box-shadow: inset 0 0 0 2px var(--isotrail-accent); }
+  /* An outline paints over the canvas's own pixels, an inset shadow doesn't */
+  canvas:focus-visible {
+    outline: 2px solid var(--isotrail-accent);
+    outline-offset: -2px;
+  }
   :host([data-state="ready"]) canvas { opacity: 1; }
   :host([data-state="ready"]) img { visibility: hidden; }
   .message {
@@ -115,47 +147,85 @@ template.innerHTML = `
     color: var(--isotrail-text);
     background: var(--isotrail-panel);
   }
-  :host([data-state="fallback"]:not([poster])) .message { display: grid; }
+  :host([data-state="fallback"]) .frame:not(.has-poster) .message { display: grid; }
   .controls {
+    --hit: 28px;
+    --gap: 2px;
     position: absolute;
     inset: 0;
     pointer-events: none;
     color: var(--isotrail-text);
   }
-  .controls > * { pointer-events: auto; }
-  :host(:not([data-state="ready"])) .controls { visibility: hidden; }
-  .buttons {
-    position: absolute;
-    bottom: 16px;
-    display: flex;
-    gap: 2px;
+  /* Finger-sized targets around buttons that look the same */
+  @media (pointer: coarse) {
+    .controls { --hit: 44px; --gap: 0px; }
+    input { --scrub: 24px; }
   }
-  .start { left: 8px; }
-  .end { right: 8px; }
-  /* Square, with the corners cut and a lit top edge, like the panels in the stills */
+  :host(:not([data-state="ready"])) .controls { visibility: hidden; }
+  .bar {
+    --spare: calc((var(--hit) - 28px) / 2);
+    position: absolute;
+    left: calc(8px - var(--spare));
+    right: calc(8px - var(--spare));
+    bottom: calc(16px - var(--spare));
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+  }
+  .bar > *, input { pointer-events: auto; }
+  .buttons {
+    display: flex;
+    gap: var(--gap);
+  }
   button {
+    position: relative;
     display: grid;
     place-items: center;
-    width: 28px;
-    height: 28px;
+    width: var(--hit);
+    height: var(--hit);
     padding: 0;
     border: 0;
-    border-radius: 0;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+    outline: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* Square, with the corners cut and a lit top edge, like the panels in the stills */
+  button::before {
+    content: '';
+    position: absolute;
+    inset: calc((var(--hit) - 28px) / 2);
     background: var(--isotrail-panel);
     box-shadow: inset 0 2px 0 -1px var(--isotrail-edge);
     clip-path: polygon(2px 0, calc(100% - 2px) 0, 100% 2px, 100% calc(100% - 2px),
       calc(100% - 2px) 100%, 2px 100%, 0 calc(100% - 2px), 0 2px);
-    color: inherit;
-    cursor: pointer;
   }
-  button:hover { background-color: rgb(52 70 80 / 0.9); }
+  button:hover::before { background-color: rgb(52 70 80 / 0.9); }
+  button:focus-visible::before { box-shadow: inset 0 0 0 2px var(--isotrail-accent); }
   button[aria-disabled="true"] { cursor: default; }
   button[aria-disabled="true"] svg { opacity: 0.4; }
-  button:focus-visible {
-    outline: none;
-    box-shadow: inset 0 0 0 2px var(--isotrail-accent);
+  svg {
+    position: relative;
+    width: 16px;
+    height: 16px;
   }
-  svg { width: 16px; height: 16px; }
+  .credit {
+    flex: 1;
+    min-width: 0;
+    margin: 0 0 calc((var(--hit) - 28px) / 2);
+    font: 11px/1.3 system-ui, sans-serif;
+    text-align: center;
+    color: var(--isotrail-accent);
+    text-shadow: 1px 0 #10141f, -1px 0 #10141f, 0 1px #10141f, 0 -1px #10141f;
+    overflow-wrap: anywhere;
+  }
+  .credit span {
+    display: inline-block;
+    max-width: 100%;
+  }
+  .credit a { color: inherit; }
+  :host([credit="none"]) .credit { visibility: hidden; }
   /* The route drawn so far, as a line along the bottom edge with a light
      tick at its head; the input is taller than the line, to be easy to grab */
   input {
@@ -163,7 +233,7 @@ template.innerHTML = `
     left: 0;
     bottom: 0;
     width: 100%;
-    height: 12px;
+    height: var(--scrub, 12px);
     margin: 0;
     appearance: none;
     -webkit-appearance: none;
@@ -183,13 +253,13 @@ template.innerHTML = `
   input::-webkit-slider-thumb {
     -webkit-appearance: none;
     width: 2px;
-    height: 12px;
+    height: var(--scrub, 12px);
     border: 0;
     background: transparent;
   }
   input::-moz-range-thumb {
     width: 2px;
-    height: 12px;
+    height: var(--scrub, 12px);
     border: 0;
     border-radius: 0;
     background: transparent;
@@ -217,21 +287,44 @@ template.innerHTML = `
     clip-path: inset(50%);
     white-space: nowrap;
   }
-</style>
+`;
+
+// A constructed style sheet needs no 'unsafe-inline' in a page's
+// Content-Security-Policy, unlike a <style> element
+let sheet = null;
+function adoptStyles(root) {
+  if ('adoptedStyleSheets' in Document.prototype && 'replaceSync' in CSSStyleSheet.prototype) {
+    if (!sheet) {
+      sheet = new CSSStyleSheet();
+      sheet.replaceSync(CSS);
+    }
+    root.adoptedStyleSheets = [sheet];
+  } else {
+    const style = document.createElement('style');
+    style.textContent = CSS;
+    root.prepend(style);
+  }
+}
+
+const template = document.createElement('template');
+template.innerHTML = `
 <div class="frame">
   <img alt="Hike diorama">
-  <div class="message">This browser can't show the 3D view.</div>
+  <div class="message">${MESSAGES.gpu}</div>
   <div class="hint" aria-live="polite"></div>
   <div class="controls">
-    <div class="buttons start">
-      <button type="button" part="play" data-action="play" aria-label="Play">${ICONS.play}</button>
-    </div>
-    <div class="buttons end">
-      <button type="button" part="zoom-out" data-action="zoom-out" aria-label="Zoom out">${ICONS.zoomOut}</button>
-      <button type="button" part="zoom-in" data-action="zoom-in" aria-label="Zoom in">${ICONS.zoomIn}</button>
-      <button type="button" part="reset" data-action="reset" aria-label="Reset view">${ICONS.reset}</button>
-    </div>
     <input type="range" part="scrubber" min="0" max="1000" value="1000" aria-label="Route drawn">
+    <div class="bar">
+      <div class="buttons">
+        <button type="button" part="play" data-action="play" aria-label="Play">${ICONS.play}</button>
+      </div>
+      <p class="credit" part="credit"></p>
+      <div class="buttons">
+        <button type="button" part="zoom-out" data-action="zoom-out" aria-label="Zoom out">${ICONS.zoomOut}</button>
+        <button type="button" part="zoom-in" data-action="zoom-in" aria-label="Zoom in">${ICONS.zoomIn}</button>
+        <button type="button" part="reset" data-action="reset" aria-label="Reset view">${ICONS.reset}</button>
+      </div>
+    </div>
   </div>
 </div>
 <p class="help" id="help">Drag to turn the diorama. Pinch, or hold ${ZOOM_KEY} and scroll, to zoom; once zoomed in, drag to move around and Shift-drag to turn. Keys: left and right arrows turn, plus and minus zoom, Shift with the arrows moves, 0 resets the view, Space plays and pauses.</p>
@@ -240,7 +333,10 @@ template.innerHTML = `
 class IsotrailHike extends HTMLElement {
   static observedAttributes = ['src', 'poster', 'aspect'];
 
+  #frameBox;
   #poster;
+  #message;
+  #credit;
   #canvas = null;
   #controls;
   #playButton;
@@ -251,14 +347,16 @@ class IsotrailHike extends HTMLElement {
   #hintTimer = 0;
 
   #viewer = null;
+  #webgl = false;
   #generation = 0;
   #started = false;
   #near = false;
   #intersection = null;
+  #releaseTimer = 0;
   #resize = null;
   #frame = 0;
   #drawn = false;
-  #restarted = false;
+  #restartedAt = null;
 
   #progress = 1;
   // Until played or scrubbed, the viewer shows the poster's light
@@ -273,8 +371,12 @@ class IsotrailHike extends HTMLElement {
   constructor() {
     super();
     const root = this.attachShadow({ mode: 'open' });
+    adoptStyles(root);
     root.append(template.content.cloneNode(true));
+    this.#frameBox = root.querySelector('.frame');
     this.#poster = root.querySelector('img');
+    this.#message = root.querySelector('.message');
+    this.#credit = root.querySelector('.credit');
     this.#controls = root.querySelector('.controls');
     this.#playButton = root.querySelector('[data-action="play"]');
     this.#scrubber = root.querySelector('input');
@@ -295,21 +397,19 @@ class IsotrailHike extends HTMLElement {
   }
 
   connectedCallback() {
+    this.#syncPoster();
     if (!this.hasAttribute('data-state')) this.#setState('poster');
-    this.#intersection = new IntersectionObserver(
-      ([entry]) => {
-        this.#near = entry.isIntersecting;
-        if (this.#near && !this.#started) this.#start();
-        if (this.#near && (this.#playing || this.#weatherMoves())) this.#schedule();
-      },
-      { rootMargin: '200px' },
-    );
+    this.#intersection = new IntersectionObserver((entries) => this.#onIntersect(entries), {
+      rootMargin: '200px',
+    });
     this.#intersection.observe(this);
   }
 
   disconnectedCallback() {
     this.#intersection?.disconnect();
     this.#intersection = null;
+    this.#near = false;
+    clearTimeout(this.#releaseTimer);
     this.#teardown();
     this.#setState('poster');
   }
@@ -318,9 +418,10 @@ class IsotrailHike extends HTMLElement {
     if (name === 'aspect') {
       const ratio = ASPECTS[value] ?? ASPECTS.wide;
       this.style.setProperty('--isotrail-aspect', ratio);
+      // The snippet sizes the element before the script runs; keep it in step
+      if (this.style.aspectRatio) this.style.aspectRatio = ratio;
     } else if (name === 'poster') {
-      if (value) this.#poster.src = value;
-      else this.#poster.removeAttribute('src');
+      this.#syncPoster();
     } else if (name === 'src' && this.#started) {
       this.#teardown();
       this.#setState('poster');
@@ -354,49 +455,122 @@ class IsotrailHike extends HTMLElement {
     this.#syncPlayButton();
   }
 
+  // The poster attribute, or else the image the snippet puts inside the
+  // element for pages where the script doesn't run
+  #syncPoster() {
+    const fallback = this.querySelector(':scope > img');
+    const src = this.getAttribute('poster') || fallback?.getAttribute('src');
+    if (src) this.#poster.src = new URL(src, document.baseURI).href;
+    else this.#poster.removeAttribute('src');
+    this.#poster.alt = fallback?.alt || 'Hike diorama';
+    this.#frameBox.classList.toggle('has-poster', Boolean(src));
+  }
+
+  #onIntersect(entries) {
+    this.#near = entries[entries.length - 1].isIntersecting;
+    clearTimeout(this.#releaseTimer);
+    if (this.#near) {
+      if (!this.#started) this.#start();
+      else if (this.#playing || this.#weatherMoves()) this.#schedule();
+    } else if (this.#viewer) {
+      this.#releaseTimer = setTimeout(() => this.#release(), RELEASE_MS);
+    }
+  }
+
+  #release() {
+    if (this.#near || !this.#viewer) return;
+    this.#teardown();
+    this.#setState('poster');
+  }
+
   async #start() {
     this.#started = true;
     const generation = ++this.#generation;
     const src = this.getAttribute('src');
     if (!src) return;
     if (!hasGpu()) {
-      this.#setState('fallback');
+      this.#fail('gpu', new Error('the browser has neither WebGPU nor WebGL2'));
       return;
     }
     this.#setState('loading');
+    let module;
+    let bytes;
     try {
-      const [{ Viewer }, bytes] = await Promise.all([loadRuntime(), fetchBytes(src)]);
-      if (generation !== this.#generation) return;
-      const canvas = this.#makeCanvas();
-      const viewer = await Viewer.load(canvas, bytes, this.getAttribute('backend') || 'auto');
-      if (generation !== this.#generation) {
-        viewer.free();
-        return;
-      }
-      this.#viewer = viewer;
-      viewer.onLost((message) => this.#onLost(message));
-      canvas.setAttribute('aria-label', `3D diorama of ${viewer.title || 'a hike'}`);
-      this.#resize = new ResizeObserver(([entry]) => this.#onResize(entry));
-      this.#resize.observe(canvas);
+      [module, bytes] = await Promise.all([loadRuntime(), fetchBytes(src)]);
     } catch (error) {
-      if (generation !== this.#generation) return;
-      console.warn(`<isotrail-hike> could not show ${src}:`, error);
-      this.#teardown();
-      this.#setState('fallback');
-    }
-  }
-
-  // One fresh start, in case the browser reset its GPU; the poster after that
-  #onLost(message) {
-    console.warn('<isotrail-hike> lost the GPU:', message);
-    this.#teardown();
-    if (this.#restarted) {
-      this.#setState('fallback');
+      if (generation === this.#generation) this.#fail('load', error);
       return;
     }
-    this.#restarted = true;
+    if (generation !== this.#generation) return;
+    const canvas = this.#makeCanvas();
+    const backend = this.getAttribute('backend') === 'webgl' ? 'webgl' : 'auto';
+    let viewer;
+    try {
+      viewer = await module.Viewer.load(canvas, bytes, backend);
+    } catch (error) {
+      if (generation === this.#generation) this.#fail(error?.reason ?? 'runtime', error);
+      return;
+    }
+    if (generation !== this.#generation) {
+      viewer.free();
+      return;
+    }
+    this.#viewer = viewer;
+    const lost = (message) => {
+      if (this.#viewer === viewer) this.#onLost(message);
+    };
+    canvas.addEventListener('webglcontextlost', () => lost('the WebGL context was lost'));
+    this.#guard(() => {
+      viewer.onLost(lost);
+      this.#webgl = viewer.backend === 'gl';
+      canvas.setAttribute('aria-label', `3D diorama of ${viewer.title || 'a hike'}`);
+      this.#showCredit(viewer.credit);
+    });
+    if (this.#viewer !== viewer) return;
+    this.#resize = new ResizeObserver(([entry]) => this.#onResize(entry));
+    this.#resize.observe(canvas);
+  }
+
+  // One fresh start, in case the browser reset its GPU; the poster if it
+  // happens again within a minute
+  #onLost(message) {
+    console.warn('<isotrail-hike> lost the GPU:', message);
+    const now = performance.now();
+    if (this.#restartedAt !== null && now - this.#restartedAt < RESTART_WINDOW_MS) {
+      this.#fail('gpu', new Error(message));
+      return;
+    }
+    this.#restartedAt = now;
+    this.#teardown();
     this.#setState('poster');
     if (this.#near) this.#start();
+  }
+
+  #fail(reason, error) {
+    console.warn(`<isotrail-hike> could not show ${this.getAttribute('src')}:`, error);
+    this.#teardown();
+    // Stays put until src changes or the element is put back in the page
+    this.#started = true;
+    this.#message.textContent = MESSAGES[reason] ?? MESSAGES.runtime;
+    this.#setState('fallback');
+    this.#emit('isotrail-error', { reason, message: String(error?.message ?? error ?? '') });
+  }
+
+  #emit(name, detail) {
+    this.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true }));
+  }
+
+  // Calls into the renderer; an error there ends in the fallback rather
+  // than a frozen picture with live controls
+  #guard(call) {
+    const viewer = this.#viewer;
+    if (!viewer) return undefined;
+    try {
+      return call(viewer);
+    } catch (error) {
+      if (this.#viewer === viewer) this.#fail(error?.reason ?? 'runtime', error);
+      return undefined;
+    }
   }
 
   #teardown() {
@@ -408,8 +582,15 @@ class IsotrailHike extends HTMLElement {
     this.#frame = 0;
     this.#resize?.disconnect();
     this.#resize = null;
-    this.#viewer?.free();
+    try {
+      this.#viewer?.free();
+    } catch {
+      // A renderer that has already failed may not free cleanly
+    }
     this.#viewer = null;
+    // Gives the context back now, rather than whenever it is collected
+    if (this.#webgl) this.#canvas?.getContext('webgl2')?.getExtension('WEBGL_lose_context')?.loseContext();
+    this.#webgl = false;
     this.#canvas?.remove();
     this.#canvas = null;
     this.#drawn = false;
@@ -442,6 +623,31 @@ class IsotrailHike extends HTMLElement {
     return canvas;
   }
 
+  // The data credits, each kept on one line, with links where the licences
+  // ask for them
+  #showCredit(text) {
+    const names = Object.keys(CREDIT_LINKS).map((name) => name.replace(/[.]/g, '\\.'));
+    const linked = new RegExp(`(${names.join('|')})`);
+    const sources = text ? text.split(' · ') : [];
+    this.#credit.replaceChildren(
+      ...sources.flatMap((source, i) => {
+        const span = document.createElement('span');
+        span.append(
+          ...source.split(linked).map((part, j) => {
+            if (j % 2 === 0) return part;
+            const link = document.createElement('a');
+            link.href = CREDIT_LINKS[part];
+            link.target = '_blank';
+            link.rel = 'noopener';
+            link.textContent = part;
+            return link;
+          }),
+        );
+        return i === 0 ? [span] : [' · ', span];
+      }),
+    );
+  }
+
   #setState(state) {
     this.setAttribute('data-state', state);
   }
@@ -450,9 +656,11 @@ class IsotrailHike extends HTMLElement {
     const box = entry.devicePixelContentBoxSize?.[0];
     const width = box ? box.inlineSize : Math.round(entry.contentRect.width * devicePixelRatio);
     const height = box ? box.blockSize : Math.round(entry.contentRect.height * devicePixelRatio);
+    if (!this.#viewer) return;
     this.#canvas.width = width;
     this.#canvas.height = height;
-    this.#viewer.resize(width, height);
+    this.#guard((viewer) => viewer.resize(width, height));
+    if (!this.#viewer) return;
     this.#syncZoom();
     if (!this.#drawn && width > 0 && this.hasAttribute('autoplay') && !reducedMotion()) {
       this.play();
@@ -467,10 +675,9 @@ class IsotrailHike extends HTMLElement {
 
   #draw(now) {
     this.#frame = 0;
-    const viewer = this.#viewer;
-    if (!viewer) return;
+    if (!this.#viewer) return;
     if (this.#playing) {
-      if (this.#last !== null) this.#time += (now - this.#last) / 1000;
+      if (this.#last !== null) this.#time += Math.min((now - this.#last) / 1000, MAX_STEP_S);
       this.#last = now;
       this.#progress = Math.min(Math.max((this.#time - INTRO_S) / DRAW_S, 0), 1);
       if (this.#time >= INTRO_S + DRAW_S) {
@@ -481,13 +688,18 @@ class IsotrailHike extends HTMLElement {
       }
       this.#syncScrubber();
     }
-    if (this.#moved) viewer.setProgress(this.#progress);
-    viewer.setYaw(this.#yaw + (this.#settling ? orbit(this.#time) : 0));
-    viewer.setTime(reducedMotion() ? 0 : now / 1000);
-    viewer.draw();
+    const drawn = this.#guard((viewer) => {
+      if (this.#moved) viewer.setProgress(this.#progress);
+      viewer.setYaw(this.#yaw + (this.#settling ? orbit(this.#time) : 0));
+      viewer.setTime(reducedMotion() ? 0 : now / 1000);
+      viewer.draw();
+      return true;
+    });
+    if (!drawn) return;
     if (!this.#drawn && this.#canvas.width > 0) {
       this.#drawn = true;
       this.#setState('ready');
+      this.#emit('isotrail-ready', { backend: this.#guard((viewer) => viewer.backend) });
     }
     if (this.#playing) {
       if (this.#near) this.#schedule();
@@ -499,7 +711,7 @@ class IsotrailHike extends HTMLElement {
 
   // Rain and snow keep falling while the hike is on screen
   #weatherMoves() {
-    return !!this.#viewer?.weatherMoves && !reducedMotion();
+    return !reducedMotion() && Boolean(this.#guard((viewer) => viewer.weatherMoves));
   }
 
   #cancelSettle() {
@@ -515,13 +727,14 @@ class IsotrailHike extends HTMLElement {
   }
 
   #pan(dx, dy) {
-    this.#viewer.pan(dx, dy);
+    this.#guard((viewer) => viewer.pan(dx, dy));
     this.#schedule();
   }
 
   #zoom(factor, x, y) {
     const canvas = this.#canvas;
-    this.#viewer.zoomBy(factor, x ?? canvas.width / 2, y ?? canvas.height / 2);
+    if (!canvas) return;
+    this.#guard((viewer) => viewer.zoomBy(factor, x ?? canvas.width / 2, y ?? canvas.height / 2));
     this.#syncZoom();
     this.#schedule();
   }
@@ -529,13 +742,13 @@ class IsotrailHike extends HTMLElement {
   #resetView() {
     this.#settling = false;
     this.#yaw = 0;
-    this.#viewer.resetView();
+    this.#guard((viewer) => viewer.resetView());
     this.#syncZoom();
     this.#schedule();
   }
 
   #zoomed() {
-    return this.#viewer.zoom > 1.001;
+    return (this.#guard((viewer) => viewer.zoom) ?? 1) > 1.001;
   }
 
   // Canvas pixels per CSS pixel, and a pointer's position in canvas pixels
@@ -597,6 +810,7 @@ class IsotrailHike extends HTMLElement {
         const [x, y] = this.#toCanvas(after.x, after.y);
         this.#zoom(after.distance / before.distance, x, y);
       }
+      if (!this.#canvas) return;
       const { scale } = this.#canvasScale();
       this.#pan((after.x - before.x) * scale, (after.y - before.y) * scale);
       const twist = Math.atan2(Math.sin(after.angle - before.angle), Math.cos(after.angle - before.angle));
@@ -687,8 +901,8 @@ class IsotrailHike extends HTMLElement {
   }
 
   #syncZoom() {
-    if (!this.#viewer) return;
-    const zoom = this.#viewer.zoom;
+    const zoom = this.#guard((viewer) => viewer.zoom);
+    if (zoom === undefined || !this.#canvas) return;
     this.#zoomIn.setAttribute('aria-disabled', String(zoom >= MAX_ZOOM - 0.001));
     this.#zoomOut.setAttribute('aria-disabled', String(zoom <= 1.001));
     this.#canvas.style.touchAction = zoom > 1.001 ? 'none' : 'pan-y';

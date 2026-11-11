@@ -182,6 +182,7 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
 
     let html = snippet(
         &name,
+        args.overlay.title(&bundle),
         aspect,
         args.base_url.as_deref(),
         args.runtime_url.as_deref(),
@@ -233,8 +234,12 @@ fn runtime_file(dir: &Path, file: &str) -> PathBuf {
         .fold(dir.to_owned(), |path, part| path.join(part))
 }
 
+/// The script, and the element with its poster inside, so the poster shows
+/// at its size even when the script can't run. The script's address carries
+/// the version, so browsers fetch a new runtime after an update
 fn snippet(
     name: &str,
+    title: &str,
     aspect: Aspect,
     base_url: Option<&str>,
     runtime_url: Option<&str>,
@@ -244,7 +249,19 @@ fn snippet(
         base.push('/');
     }
     let file = |extension: &str| format!("{base}{}", url_segment(&format!("{name}.{extension}")));
-    let script = runtime_url.map_or_else(|| format!("{base}{}", RUNTIME_FILES[0]), str::to_owned);
+    let version = concat!("v=", env!("CARGO_PKG_VERSION"));
+    let script = match runtime_url {
+        Some(url) if url.contains('?') => url.to_owned(),
+        Some(url) => format!("{url}?{version}"),
+        None => format!("{base}{}?{version}", RUNTIME_FILES[0]),
+    };
+    let (width, height) = aspect.output_size();
+    let common = gcd(width, height);
+    let alt = match title.trim() {
+        "" => "Diorama of a hike".to_owned(),
+        title => format!("Diorama of {title}"),
+    };
+    let poster = html_attr(&file("png"));
     let mut html = String::new();
     let _ = writeln!(
         html,
@@ -253,12 +270,18 @@ fn snippet(
     );
     let _ = writeln!(
         html,
-        r#"<isotrail-hike src="{}" poster="{}" aspect="{}"></isotrail-hike>"#,
+        r#"<isotrail-hike src="{}" poster="{poster}" aspect="{}" style="display:block;aspect-ratio:{}/{}"><img src="{poster}" alt="{}" style="display:block;width:100%"></isotrail-hike>"#,
         html_attr(&file("itb")),
-        html_attr(&file("png")),
-        aspect.name()
+        aspect.name(),
+        width / common,
+        height / common,
+        html_attr(&alt),
     );
     html
+}
+
+fn gcd(a: u32, b: u32) -> u32 {
+    if b == 0 { a } else { gcd(b, a % b) }
 }
 
 /// Percent-encodes everything but the characters a URL path segment can hold
@@ -266,7 +289,8 @@ fn snippet(
 fn url_segment(text: &str) -> String {
     let mut encoded = String::new();
     for byte in text.bytes() {
-        if byte.is_ascii_alphanumeric() || b"-._~!$&'()*+,;=:@".contains(&byte) {
+        // A `:` would turn the start of a relative address into a scheme
+        if byte.is_ascii_alphanumeric() || b"-._~!$&'()*+,;=@".contains(&byte) {
             encoded.push(char::from(byte));
         } else {
             let _ = write!(encoded, "%{byte:02X}");
@@ -294,6 +318,7 @@ mod tests {
             "%C5%81%C4%85ka%2050%25%231%3F.png"
         );
         assert_eq!(url_segment("a/b"), "a%2Fb");
+        assert_eq!(url_segment("Rysy:2025.itb"), "Rysy%3A2025.itb");
         assert!(looks_like_a_drive_path("C:/Program Files/Git/hikes/"));
         assert!(looks_like_a_drive_path(r"d:\hikes"));
         for url in ["/hikes/", "https://a.b/", "hikes/", "C:"] {
@@ -307,17 +332,25 @@ mod tests {
 
     #[test]
     fn snippet_paths_follow_the_base_url() {
-        let html = snippet("ridge", Aspect::Wide, None, None);
+        let html = snippet("ridge", "Ridge <walk>", Aspect::Wide, None, None);
         assert_eq!(
             html,
-            "<script type=\"module\" src=\"isotrail-embed.js\"></script>\n\
-             <isotrail-hike src=\"ridge.itb\" poster=\"ridge.png\" aspect=\"wide\"></isotrail-hike>\n"
+            format!(
+                "<script type=\"module\" src=\"isotrail-embed.js?v={}\"></script>\n\
+                 <isotrail-hike src=\"ridge.itb\" poster=\"ridge.png\" aspect=\"wide\" \
+                 style=\"display:block;aspect-ratio:16/9\"><img src=\"ridge.png\" \
+                 alt=\"Diorama of Ridge &lt;walk&gt;\" style=\"display:block;width:100%\">\
+                 </isotrail-hike>\n",
+                env!("CARGO_PKG_VERSION")
+            )
         );
-        let html = snippet("Tom & Jo", Aspect::Story, Some("/hikes/x"), None);
+        let html = snippet("Tom & Jo", " ", Aspect::Story, Some("/hikes/x"), None);
         assert!(
-            html.contains(r#"src="/hikes/x/isotrail-embed.js""#),
+            html.contains(r#"src="/hikes/x/isotrail-embed.js?v="#),
             "{html}"
         );
+        assert!(html.contains("aspect-ratio:9/16"), "{html}");
+        assert!(html.contains(r#"alt="Diorama of a hike""#), "{html}");
         assert!(
             html.contains(r#"src="/hikes/x/Tom%20&amp;%20Jo.itb""#),
             "{html}"
@@ -329,14 +362,22 @@ mod tests {
         assert!(html.contains(r#"aspect="story""#), "{html}");
         let html = snippet(
             "r",
+            "R",
             Aspect::Square,
             Some("https://a.b/h/"),
             Some("/js/e.js"),
         );
         assert!(
-            html.contains(r#"<script type="module" src="/js/e.js">"#),
+            html.contains(&format!(
+                r#"<script type="module" src="/js/e.js?v={}">"#,
+                env!("CARGO_PKG_VERSION")
+            )),
             "{html}"
         );
         assert!(html.contains(r#"src="https://a.b/h/r.itb""#), "{html}");
+        assert!(html.contains("aspect-ratio:1/1"), "{html}");
+        let html = snippet("r", "R", Aspect::Feed, None, Some("/e.js?v=2"));
+        assert!(html.contains(r#"src="/e.js?v=2""#), "{html}");
+        assert!(html.contains("aspect-ratio:4/5"), "{html}");
     }
 }

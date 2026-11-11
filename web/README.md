@@ -49,9 +49,11 @@ static/hikes/derwent/
 `snippet.html` holds the two lines that show the hike, also printed by the command:
 
 ```html
-<script type="module" src="/hikes/derwent/isotrail-embed.js"></script>
-<isotrail-hike src="/hikes/derwent/derwent-edge.itb" poster="/hikes/derwent/derwent-edge.png" aspect="wide"></isotrail-hike>
+<script type="module" src="/hikes/derwent/isotrail-embed.js?v=1.3.0"></script>
+<isotrail-hike src="/hikes/derwent/derwent-edge.itb" poster="/hikes/derwent/derwent-edge.png" aspect="wide" style="display:block;aspect-ratio:16/9"><img src="/hikes/derwent/derwent-edge.png" alt="Diorama of Derwent Edge" style="display:block;width:100%"></isotrail-hike>
 ```
+
+The image inside the element is the poster for pages where the script doesn't run, because it is blocked, missing or still loading: the element already has its size and shows the poster, so nothing jumps when the script arrives. Once it runs, the element shows its own copy of the poster and hides this one. The `?v=` on the script's address is the isotrail version; the script passes it on to the renderer files in `pkg/`, so after you update isotrail and its snippets, browsers fetch the new runtime instead of mixing cached old files with new ones.
 
 `--base-url` is the address the directory will be served at. Without it the snippet uses bare file names, so serving the directory and opening `snippet.html` shows a preview. `--aspect` picks the element's shape and its poster's, and the poster takes `render`'s overlay options, such as `--title` or `--overlay none`. [The usage guide](../docs/usage.md#embed) lists every option.
 
@@ -61,7 +63,7 @@ static/hikes/derwent/
 isotrail embed derwent-edge.gpx -o static/hikes/derwent --base-url /hikes/derwent/ --runtime-url /isotrail/isotrail-embed.js
 ```
 
-`isotrail-embed.js` loads the renderer from the `pkg/` folder next to it. A page that shows several hikes only loads the script and the renderer once.
+`isotrail-embed.js` loads the renderer from the `pkg/` folder next to it. A page that shows several hikes only loads the script and the renderer once, as long as every snippet uses the same address for the script, `?v=` included. `--runtime-url` gets `?v=` too, unless the address you give already has a query.
 
 ### Hugo
 
@@ -108,8 +110,46 @@ import Hike from '../components/Hike.astro';
 | `aspect` | `story` (9:16), `feed` (4:5), `square` or `wide` (16:9, the default). The element fills its container's width at this aspect |
 | `autoplay` | Plays the route once as soon as the diorama is ready, unless the visitor prefers reduced motion |
 | `backend` | `webgl` forces the WebGL2 fallback, for testing it in a browser that has WebGPU |
+| `credit` | `none` hides the data credit line. Only use it when the page credits the data itself (see below) |
 
-The poster shows at once. The renderer (about 3 MB) only downloads when the element comes near the screen, and it downloads once however many hikes are on the page. If the browser has neither WebGPU nor WebGL2, or the bundle can't be loaded, the poster stays and a warning goes to the console. If the GPU is lost while the page is open, for instance when its driver resets, the element starts again once and keeps the poster if that fails too.
+The poster shows at once. The renderer (about 1.2 MB gzipped) only downloads when the element comes near the screen, and it downloads once however many hikes are on the page. When an element has been well off screen for a few seconds it frees its renderer and shows its poster, and starts again when it comes back; browsers only give a page about 16 WebGL contexts, so a page with many hikes keeps working as it scrolls. A view the visitor turned or zoomed starts again from the default when this happens.
+
+If the GPU is lost while the page is open, for instance when its driver resets or the browser reclaims a WebGL context, the element starts again. If that happens again within a minute, it keeps the poster.
+
+### When something fails
+
+The element keeps its poster when it can't show the diorama. Without a poster, it shows one of three messages instead:
+
+| `reason` | Message |
+|---|---|
+| `load` | This hike couldn't be loaded. (the bundle or the renderer didn't download) |
+| `damaged` | This hike couldn't be loaded. (the file isn't a scene bundle, or is cut short) |
+| `version` | This hike was saved by a different version of isotrail. (make the bundle again with the isotrail that matches the runtime) |
+| `gpu` | This browser can't show the 3D view. (no WebGPU or WebGL2, or the GPU failed twice) |
+| `runtime` | This browser can't show the 3D view. (an error inside the renderer) |
+
+A warning with the details also goes to the console. A failed element stays as it is until its `src` changes or it is taken out of the page and put back; a renderer that failed to download is downloaded again then.
+
+### Events
+
+| Event | When | `detail` |
+|---|---|---|
+| `isotrail-ready` | the diorama has drawn its first frame and replaced the poster | `{ backend }`: `"webgpu"` or `"gl"` |
+| `isotrail-error` | the element gave up and shows its poster or a message | `{ reason, message }`, with `reason` from the table above |
+
+Both bubble, and cross shadow roots:
+
+```js
+document.addEventListener('isotrail-error', (event) => {
+  console.log(event.target.getAttribute('src'), event.detail.reason);
+});
+```
+
+### Data credit
+
+Once the diorama replaces the poster, a small line along its bottom edge credits the data, as the licences require: OpenStreetMap (ODbL), the terrain tiles, and Open-Meteo (CC BY 4.0) when the hike has weather. The text comes from the bundle, so it is the same as the credit drawn on stills. "OpenStreetMap" links to its copyright page and "Open-Meteo.com" to its site.
+
+The line can be restyled with `::part(credit)`. If you hide it, with `credit="none"` or with CSS, the page must credit the same sources elsewhere, close to the embed, for instance in a caption under it. `isotrail embed --no-attribution` prints the text to use.
 
 ### Controls
 
@@ -135,14 +175,29 @@ isotrail-hike {
   --isotrail-panel: rgb(32 46 55 / 0.78); /* buttons */
   --isotrail-edge: #819796;             /* the buttons' lit top edge */
   --isotrail-text: #ebede9;             /* icons, and the head of the progress line */
-  --isotrail-accent: #a4dddb;           /* focus rings */
+  --isotrail-accent: #a4dddb;           /* focus rings and the data credit */
   --isotrail-progress: #d64834;         /* the route drawn so far */
   --isotrail-track: rgb(32 46 55 / 0.45); /* the route still to come */
   border-radius: 6px;
 }
 ```
 
-The parts `canvas`, `play`, `scrubber` (the progress line), `zoom-in`, `zoom-out` and `reset` can be styled with `::part()`. The element sets `data-state` to `poster`, `loading`, `ready` or `fallback`.
+The parts `canvas`, `play`, `scrubber` (the progress line), `zoom-in`, `zoom-out`, `reset` and `credit` can be styled with `::part()`. The element sets `data-state` to `poster`, `loading`, `ready` or `fallback`.
+
+On touch screens the buttons and the progress line take touches across 44 and 24 pixels, though they look the same size.
+
+## Hosting checklist
+
+- **MIME types.** Serve `.wasm` as `application/wasm` and `.js` as `text/javascript`. Most servers and static hosts already do; with another type for `.wasm`, the renderer still loads, but more slowly and with a warning in the console. `.itb` can be `application/octet-stream`.
+- **Caching.** `isotrail-embed.js`, `pkg/` and the bundles can be cached for a long time, because the snippet's `?v=` changes with every isotrail version. When you update isotrail, update the runtime and remake the snippets (and bundles, if the bundle format changed) together.
+- **Content-Security-Policy.** The element needs `script-src` to allow the script's origin and `'wasm-unsafe-eval'` (to compile the renderer), `connect-src` to allow the origins of the bundle and of `pkg/`, and `img-src` the poster's. It needs no inline scripts, and its styles need no `'unsafe-inline'`. This policy works when everything is served by the site itself:
+
+  ```text
+  default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self'; connect-src 'self'
+  ```
+
+  The `style` attributes in the snippet are inline styles, which `style-src 'self'` blocks: the element then works as usual, but a page without the script doesn't reserve its height. Remove the two `style` attributes and add a rule like `isotrail-hike { display: block; aspect-ratio: 16 / 9 } isotrail-hike > img { display: block; width: 100% }` to your stylesheet instead.
+- **Secure pages.** Browsers only offer WebGPU on HTTPS pages (and `localhost`); elsewhere the element uses WebGL2.
 
 ## The demo
 
@@ -173,10 +228,26 @@ viewer.setYaw(30);                            // degrees turned from the still i
 viewer.zoomBy(1.5, x, y);                     // zoom, keeping canvas pixel (x, y) in place
 viewer.pan(dx, dy);                           // move with a drag of (dx, dy) canvas pixels
 viewer.resetView();                           // the whole slab, from the still image's view
+viewer.setTime(performance.now() / 1000);     // moves rain, snow and clouds on: any steadily rising clock, in seconds
 viewer.draw();
 console.log(viewer.backend, viewer.zoom, viewer.title);   // "webgpu" or "gl", 1 to 3, the hike's name
+console.log(viewer.credit);                   // the data credits, joined with " · "
+console.log(viewer.weatherMoves);             // true while rain or snow falls, so frames keep changing
 viewer.onLost((message) => { ... });          // the GPU was lost: free the viewer and load again
 viewer.free();                                // releases the GPU memory at once
 ```
 
-Nothing is drawn until the first `resize`. Until the first `setProgress`, the whole route shows under the light at the start, as on the poster; `setProgress` draws the route at an even speed with a pause for each night of a multi-day trek, lit by the time at its head. Each art pixel covers a whole number of device pixels, chosen so that the frame's long side is at most 640 pixels, as in a still rendered at `--scale 3`. Call `resize` again whenever the canvas changes size, and `draw` after any change.
+Nothing is drawn until the first `resize`. Until the first `setProgress`, the whole route shows under the light at the start, as on the poster; `setProgress` draws the route at an even speed with a pause for each night of a multi-day trek, lit by the time at its head. Each art pixel covers a whole number of device pixels, chosen so that the frame's long side is at most 640 pixels, as in a still rendered at `--scale 3`. Call `resize` again whenever the canvas changes size, and `draw` after any change. While `weatherMoves` is true, keep calling `setTime` and `draw` every frame for the rain and snow to fall.
+
+Arguments that aren't finite numbers, such as `NaN`, are ignored. `Viewer.load` rejects with an `Error` whose `reason` is `"version"`, `"damaged"` or `"gpu"`, as in [When something fails](#when-something-fails); `resize` throws one with reason `"gpu"` if the GPU can't hold the diorama at that size. After any error from the viewer, free it. `onLost` is only called on WebGPU; on WebGL2, listen for `webglcontextlost` on the canvas.
+
+## Testing the element
+
+`web/test/check.mjs` loads synthetic hikes into headless Chrome or Edge and checks the element: the credit, the focus ring, each failure's message and event, a lost GPU, twenty embeds on one page, touch targets, a strict Content-Security-Policy, and that playing creates no GPU objects. It needs Node 22 or later and the runtime built with `sh web/build.sh`:
+
+```bash
+node web/test/check.mjs chrome           # WebGPU where the browser has it
+node web/test/check.mjs edge --webgl     # every embed on WebGL2, drawn by SwiftShader
+```
+
+`ISOTRAIL_BROWSER` sets the browser's path if it isn't in the usual place. CI runs it in Chrome with `--webgl`.

@@ -57,7 +57,7 @@ jobs:
         run: cargo clippy --target wasm32-unknown-unknown -p isotrail-track -p isotrail-bundle -p isotrail-render -p isotrail-web -- -D warnings
 
   web-runtime:
-    name: web runtime size
+    name: web runtime
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -92,3 +92,11 @@ jobs:
             echo "::error::the web runtime is $total bytes gzipped, over the 3 MB budget"
             exit 1
           fi
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # The runner has no GPU, so every embed is drawn on WebGL2 by SwiftShader
+      - name: Browser check of the embed
+        run: node web/test/check.mjs chrome --webgl

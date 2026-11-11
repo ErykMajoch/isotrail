@@ -316,6 +316,9 @@ impl Turntable {
     /// Magnified `factor` times, keeping the ground under internal pixel
     /// `pixel` (from the top-left) where it is
     pub fn zoom_at(&self, view: View, factor: f32, pixel: Vec2) -> View {
+        if !factor.is_finite() || !pixel.is_finite() {
+            return view;
+        }
         let zoom = (view.zoom * factor).clamp(1.0, MAX_ZOOM);
         let fit = self.fit(&view);
         let (before, after) = (
@@ -334,6 +337,9 @@ impl Turntable {
 
     /// Dragged `pixels` internal pixels, right and down
     pub fn pan(&self, view: View, pixels: Vec2) -> View {
+        if !pixels.is_finite() {
+            return view;
+        }
         let fit = self.fit(&view);
         let per_pixel = self.metres_per_px / view.zoom.max(1.0);
         let shift = fit.to_screen(view.focus) + Vec2::new(-pixels.x, pixels.y) * per_pixel;
@@ -343,8 +349,18 @@ impl Turntable {
         })
     }
 
-    /// Moved back inside the whole-slab view, as a turn can push it out
+    /// Moved back inside the whole-slab view, as a turn can push it out;
+    /// any part that isn't a finite number starts again from the default
     pub fn clamp(&self, view: View) -> View {
+        let view = View {
+            yaw_offset_deg: finite_or(view.yaw_offset_deg, 0.0),
+            zoom: finite_or(view.zoom, 1.0),
+            focus: if view.focus.is_finite() {
+                view.focus
+            } else {
+                Vec2::ZERO
+            },
+        };
         let zoom = view.zoom.clamp(1.0, MAX_ZOOM);
         let fit = self.fit(&view);
         let centre = safe_centre(&self.framing);
@@ -373,6 +389,10 @@ impl Turntable {
 /// Slab-frame angle, counter-clockwise from +x, that the hike heads in: from
 /// start to finish, or from the start to the halfway point for loops and
 /// out-and-backs
+fn finite_or(value: f32, default: f32) -> f32 {
+    if value.is_finite() { value } else { default }
+}
+
 pub fn route_heading(bundle: &SceneBundle) -> Option<f32> {
     let grid = &bundle.grid;
     let points = &bundle.route.points;
@@ -691,6 +711,29 @@ mod tests {
         let whole = turntable.zoom_at(close, 0.01, Vec2::new(10.0, 10.0));
         assert_eq!(whole.zoom, 1.0);
         assert!(whole.focus.length() < 1e-3, "{}", whole.focus);
+    }
+
+    #[test]
+    fn numbers_that_are_not_finite_leave_the_view_alone() {
+        let (turntable, _) = turntable();
+        let view = turntable.zoom_at(View::turned(20.0), 2.0, Vec2::new(300.0, 150.0));
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert_eq!(turntable.zoom_at(view, bad, Vec2::ZERO), view);
+            assert_eq!(turntable.zoom_at(view, 1.5, Vec2::new(bad, 0.0)), view);
+            assert_eq!(turntable.pan(view, Vec2::new(0.0, bad)), view);
+            let turned = turntable.clamp(View {
+                yaw_offset_deg: bad,
+                ..view
+            });
+            assert_eq!(turned.yaw_offset_deg, 0.0);
+            assert!(turned.zoom.is_finite() && turned.focus.is_finite());
+        }
+        let reset = turntable.clamp(View {
+            zoom: f32::NAN,
+            focus: Vec2::NAN,
+            ..view
+        });
+        assert_eq!(reset, View::turned(20.0));
     }
 
     #[test]

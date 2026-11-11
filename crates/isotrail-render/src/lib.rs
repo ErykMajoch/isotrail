@@ -41,7 +41,8 @@ pub use mesh::{
 };
 pub use overlay::{
     DEFAULT_STATS, DateFormat, OverlayStyle, OverlayText, Overlays, PANEL_TINT, PanelStyle,
-    SUBTEXT, Stat, StatKind, Subtitle, TEXT, TEXT_SHADOW, TitleSize, WEATHER_CREDIT, format_date,
+    SUBTEXT, Stat, StatKind, Subtitle, TEXT, TEXT_SHADOW, TitleSize, WEATHER_CREDIT, credit_line,
+    format_date,
 };
 pub use palette::{DEFAULT_PALETTE, MAX_COLOURS, Palette, PaletteError, srgb_to_oklab};
 pub use post::{

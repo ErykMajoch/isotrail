@@ -220,6 +220,11 @@ impl OverlayArgs {
             .collect()
     }
 
+    /// The hike's name, as `--title` gives it or the bundle has it
+    pub fn title<'a>(&'a self, bundle: &'a SceneBundle) -> &'a str {
+        self.title.as_deref().unwrap_or(&bundle.meta.title)
+    }
+
     /// The data credit to put in the caption, when the image leaves it out
     pub fn caption_credit(&self, bundle: &SceneBundle) -> Option<String> {
         let mut credits: Vec<&str> = bundle.meta.attribution.iter().map(String::as_str).collect();

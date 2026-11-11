@@ -8,6 +8,10 @@ All notable changes to `isotrail` are documented here.
 
 - **`--no-map-data`** on `render`, `bundle`, `embed` and `style-lab` builds the diorama from the elevation alone, without OpenStreetMap's lakes, woods and paths, for when the map server is busy or out of reach. The OpenStreetMap credit is left out of such a scene.
 - **`isotrail cache clear --older-than DAYS`** deletes only downloads made more than that many days ago. Map data stays cached until it is cleared, so this is the way to pick up newer maps for an area.
+- **Data credit in the web embed.** Once the interactive diorama replaces its poster, a small line along its bottom edge credits OpenStreetMap, the terrain tiles and, for hikes with weather, Open-Meteo, as the stills do, with links to OpenStreetMap's copyright page and Open-Meteo's site. It can be restyled with `::part(credit)`; `credit="none"` hides it for pages that credit the data themselves.
+- **Events from `<isotrail-hike>`:** `isotrail-ready` once the diorama shows, and `isotrail-error` with a `reason` (`load`, `damaged`, `version`, `gpu` or `runtime`) when it gives up.
+- The web runtime's `Viewer` has a `credit` getter, and its load errors carry a `reason`.
+- A browser check of the embed (`web/test/check.mjs`) runs in CI.
 
 ### Changed
 
@@ -21,6 +25,10 @@ All notable changes to `isotrail` are documented here.
 - Mistakes in how a command is called, such as `--step-fps` above `--fps` or a GIF without a palette, exit with code 2 and a usage hint, like unknown options. Ctrl+C exits with 130. The exit codes are listed in the usage guide.
 - `--block-height` with `--mesher smooth` does nothing, with a warning, instead of stopping the render.
 - A GPX file with a few bad points is read instead of refused: a point without a valid position is skipped, and an elevation or time that can't be read (such as `nan`) is treated as missing, with one warning that counts them. Files saved as UTF-16 with a byte-order mark and times with offsets such as `+0000` are read too, and a file with several tracks says that they were joined.
+- **`embed` snippets keep a poster without the script.** The element now holds an image of the poster and is sized before the script runs, so pages show the poster where the script is blocked or missing, and nothing jumps when it loads.
+- The snippet's script address ends in `?v=<version>`, and the script passes it on to the renderer files, so a browser never runs a cached old renderer after an update.
+- An embed well off screen frees its renderer and shows its poster, and starts again when it comes back, so pages with many hikes stay within the browser's limit on WebGL contexts.
+- The embed's styles no longer need `'unsafe-inline'` in a page's Content-Security-Policy. `web/README.md` has a hosting checklist (MIME types, caching, Content-Security-Policy).
 
 ### Fixed
 
@@ -42,6 +50,13 @@ All notable changes to `isotrail` are documented here.
 - A damaged or hand-edited bundle is refused as damaged, instead of crashing or freezing the renderer, and a bundle made by a newer isotrail asks for an update instead of being made again.
 - Very tall terrain, such as `--exaggeration 30 --block-height 0.25` on a mountain hike, renders instead of crashing: the slab's sides use far less graphics memory. Terrain that is still too big for the GPU, such as `--detail 1024 --exaggeration 100`, stops at once with a message naming the options to lower, instead of using gigabytes of memory and crashing.
 - `isotrail bundle` given a scene bundle says that it already is one, instead of reporting a text-encoding error.
+- An embed whose WebGL context was lost no longer stays blank with working-looking buttons: it starts again, and keeps its poster if the context is lost again within a minute.
+- The embed's keyboard focus ring is visible on the diorama, and its buttons and progress line are easier to hit on touch screens.
+- An embed that can't show a hike says why (it couldn't be loaded, was saved by another version of isotrail, or the browser can't show 3D) instead of always blaming the browser.
+- An error inside the web renderer ends in the poster instead of a frozen picture, and numbers that aren't finite passed to the `Viewer` API are ignored.
+- A renderer download that failed once is tried again by the next embed instead of failing every embed until the page is reloaded, and playback no longer jumps ahead after the tab was in the background.
+- `embed` percent-encodes `:` in file names, which made a browser read `Rysy:2025.itb` as an address with its own scheme.
+
 
 ## [1.3.0] - 2026-11-10
 

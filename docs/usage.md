@@ -225,9 +225,11 @@ Writes everything a web page needs to show the hike as an interactive diorama wi
 `<name>` is the input's file name without its extension. A GPX file is first prepared in the same way as [`bundle`](#bundle), with the same data options.
 
 ```html
-<script type="module" src="/hikes/derwent/isotrail-embed.js"></script>
-<isotrail-hike src="/hikes/derwent/derwent-edge.itb" poster="/hikes/derwent/derwent-edge.png" aspect="wide"></isotrail-hike>
+<script type="module" src="/hikes/derwent/isotrail-embed.js?v=1.3.0"></script>
+<isotrail-hike src="/hikes/derwent/derwent-edge.itb" poster="/hikes/derwent/derwent-edge.png" aspect="wide" style="display:block;aspect-ratio:16/9"><img src="/hikes/derwent/derwent-edge.png" alt="Diorama of Derwent Edge" style="display:block;width:100%"></isotrail-hike>
 ```
+
+The image inside the element shows the poster, at the element's size, on pages where the script can't run. `?v=` carries the isotrail version, so browsers load the new runtime after an update instead of a cached old one; `--runtime-url` gets it too unless that address already has a query. Once the diorama is running, it shows the same data credit as the stills along its bottom edge. A page that hides it with the element's `credit="none"` must credit the data itself; `--no-attribution` prints the text.
 
 | Option | Default | Description |
 | --- | --- | --- |
