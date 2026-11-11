@@ -4,6 +4,22 @@ All notable changes to `isotrail` are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- **Outputs are written safely.** Every file is written under a temporary name and only replaces the previous one once complete, so a render that fails or is stopped with Ctrl+C leaves the old file as it was, with no half-written file behind.
+- Missing output folders are created, and outputs are checked before anything is downloaded or rendered: an output that is one of the command's own inputs (such as `isotrail bundle walk.gpx -o walk.gpx`) or an existing folder is refused, and so is an `embed --runtime-dir` that is the output folder.
+- `embed` given a bundle that already sits in its output folder leaves it untouched, and refuses when `--season`, `--no-weather` or `--exaggeration` would change it.
+- Mistakes in how a command is called, such as `--step-fps` above `--fps` or a GIF without a palette, exit with code 2 and a usage hint, like unknown options. Ctrl+C exits with 130. The exit codes are listed in the usage guide.
+- `--block-height` with `--mesher smooth` does nothing, with a warning, instead of stopping the render.
+
+### Fixed
+
+- `--overlay none` combined with other parts, a stat listed twice in `--stats`, a GIF palette with more than 255 colours and `--time` on a track without times are reported at once, instead of after the download.
+- Options typed on the command line win over config file settings they conflict with: `--date` no longer fails when a config file sets `date-format`.
+- A missing file named by `ISOTRAIL_CONFIG` is reported instead of ignored.
+- `time` in a config file accepts a TOML time such as `07:30:00`.
+- `--detail`, `--offline` and `--overpass-url` typed for a scene bundle, which they don't affect, give a warning.
+
 ## [1.3.0] - 2026-11-10
 
 Light, weather and seasons: every hike is lit by the sun and moon of its day, in the weather it had and the season it was in.

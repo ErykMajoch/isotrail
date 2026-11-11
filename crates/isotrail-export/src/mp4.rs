@@ -91,7 +91,7 @@ impl Mp4Writer {
             .args(["-vf", "scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int,format=yuv420p"])
             .args(["-pix_fmt", "yuv420p", "-colorspace", "bt709"])
             .args(["-color_primaries", "bt709", "-color_trc", "bt709"])
-            .args(["-movflags", "+faststart"])
+            .args(["-movflags", "+faststart", "-f", "mp4"])
             .arg(output)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())

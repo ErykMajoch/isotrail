@@ -1,8 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufWriter, Write};
-use std::path::Path;
+use std::io::Write;
 
 use gif::{DisposalMethod, Encoder, Repeat};
 use isotrail_render::{Background, Frame, Look};
@@ -103,23 +101,9 @@ impl Setup {
     }
 }
 
-impl GifWriter<BufWriter<File>> {
-    /// Like [`GifWriter::new`], creating the file once the settings check out
-    pub fn create(
-        path: &Path,
-        width: u32,
-        height: u32,
-        scale: u32,
-        look: &Look,
-        fps: u32,
-    ) -> Result<Self, ExportError> {
-        let setup = Setup::from_look(width, height, scale, look, fps)?;
-        let file = File::create(path).map_err(|source| ExportError::Write {
-            path: path.to_owned(),
-            source: Box::new(source.into()),
-        })?;
-        GifWriter::start(BufWriter::new(file), setup)
-    }
+/// Checks that `look` can colour a GIF, before any frame is drawn
+pub fn check_gif_look(look: &Look) -> Result<(), ExportError> {
+    Setup::from_look(1, 1, 1, look, 1).map(drop)
 }
 
 impl<W: Write> GifWriter<W> {
@@ -308,6 +292,7 @@ impl<W: Write> GifWriter<W> {
 
 #[cfg(test)]
 mod tests {
+    use isotrail_render::Palette;
     use isotrail_testkit::decode_gif;
 
     use super::*;
@@ -437,6 +422,23 @@ mod tests {
         };
         let none = GifWriter::new(Vec::new(), 10, 10, 1, &look, 30);
         assert!(matches!(none.err().unwrap(), ExportError::GifPalette));
+        assert!(matches!(
+            check_gif_look(&look),
+            Err(ExportError::GifPalette)
+        ));
+        assert!(check_gif_look(&Look::default()).is_ok());
+        let hex: String = colours
+            .iter()
+            .map(|[r, g, b]| format!("{r:02x}{g:02x}{b:02x}\n"))
+            .collect();
+        let look = Look {
+            palette: Some(Palette::parse_hex(&hex).unwrap()),
+            ..Look::default()
+        };
+        assert!(matches!(
+            check_gif_look(&look),
+            Err(ExportError::GifColours(256))
+        ));
         let mut gif = writer(false, 10);
         let wrong = gif.push(&Frame::new(1, 1, vec![0; 4]));
         assert!(matches!(wrong, Err(ExportError::FrameSize { .. })));

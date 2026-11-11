@@ -1,4 +1,3 @@
-use anyhow::bail;
 use clap::{Args, ValueEnum};
 use isotrail_bundle::{HikeStats, SceneBundle, WEATHER_ATTRIBUTION};
 use isotrail_render::{
@@ -6,7 +5,7 @@ use isotrail_render::{
 };
 use tracing::warn;
 
-use crate::UnitsArg;
+use crate::{UnitsArg, usage};
 
 /// What the render prints over the diorama
 #[derive(Debug, Args)]
@@ -142,17 +141,23 @@ impl OverlayArgs {
         }
     }
 
-    /// The bundle's text with the flags applied, leaving out the parts that
-    /// weren't asked for
-    pub fn text(&self, bundle: &SceneBundle) -> anyhow::Result<OverlayText> {
+    /// Checks the lists of parts and stats, before any work
+    pub fn check(&self) -> anyhow::Result<()> {
         if self.overlay.contains(&Part::None) && self.overlay.len() > 1 {
-            bail!("--overlay none can't be combined with other parts");
+            return Err(usage("--overlay none can't be combined with other parts"));
         }
         for (i, stat) in self.stats.iter().enumerate() {
             if self.stats[..i].contains(stat) {
-                bail!("--stats lists {} twice", name(*stat));
+                return Err(usage(format!("--stats lists {} twice", name(*stat))));
             }
         }
+        Ok(())
+    }
+
+    /// The bundle's text with the flags applied, leaving out the parts that
+    /// weren't asked for
+    pub fn text(&self, bundle: &SceneBundle) -> anyhow::Result<OverlayText> {
+        self.check()?;
         let show = |part| self.overlay.contains(&part);
         let kinds: Vec<StatKind> = self.stats.iter().map(|&stat| stat.into()).collect();
         let date_format = match self.date_format {

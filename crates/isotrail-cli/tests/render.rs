@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::fs::{self, File};
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
@@ -19,11 +20,21 @@ fn isotrail(cache_dir: &Path, current_dir: &Path, args: &[&str]) -> Output {
         .args(args)
         .current_dir(current_dir)
         .env("ISOTRAIL_CACHE_DIR", cache_dir)
-        .env("ISOTRAIL_CONFIG", current_dir.join("user-config.toml"))
+        .env("ISOTRAIL_CONFIG", user_config(current_dir))
         .env_remove("ISOTRAIL_OVERPASS_URL")
         .stdin(Stdio::null())
         .output()
         .unwrap()
+}
+
+/// `user-config.toml` in the current directory when there is one, else none
+fn user_config(current_dir: &Path) -> OsString {
+    let path = current_dir.join("user-config.toml");
+    if path.is_file() {
+        path.into_os_string()
+    } else {
+        OsString::new()
+    }
 }
 
 fn text(bytes: &[u8]) -> String {
@@ -333,12 +344,26 @@ fn block_height_and_exaggeration_change_the_image() {
         }
     }
 
+    // Typed, it does nothing but warn; from a config file, not even that
     let output = render("x.png", &["--mesher", "smooth", "--block-height", "2"]);
-    assert!(!output.status.success());
+    assert!(output.status.success(), "{}", text(&output.stderr));
     let stderr = text(&output.stderr);
     assert!(
         stderr.contains("only applies to --mesher voxel"),
         "{stderr}"
+    );
+    fs::write(
+        temp.path().join("user-config.toml"),
+        "[render]\nblock-height = 2\n",
+    )
+    .unwrap();
+    let output = render("y.png", &["--mesher", "smooth"]);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let stderr = text(&output.stderr);
+    assert!(!stderr.contains("block-height"), "{stderr}");
+    assert_eq!(
+        fs::read(temp.path().join("x.png")).unwrap(),
+        fs::read(temp.path().join("y.png")).unwrap()
     );
 }
 

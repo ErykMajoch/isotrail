@@ -9,6 +9,8 @@ isotrail has six commands. Each one prints its options with `--help`, for exampl
 - [`style-lab`](#style-lab): compare every look on one contact sheet
 - [`cache`](#cache): manage downloaded data
 
+The rest of this page also covers [how outputs are written](#writing-files) and [exit codes](#exit-codes).
+
 isotrail reads GPX 1.0 and 1.1 files, with tracks (`<trk>`) or routes (`<rte>`). Every pause in a recording starts a new track segment. Where two segments are more than 50 m apart, the route is drawn with a gap instead of a straight jump. Files without timestamps still render, but without time-based stats. Files without elevations take their heights from the terrain.
 
 ## render
@@ -41,7 +43,7 @@ Stories leave the top 14% and bottom 20% of the image free of text, because Inst
 | Option | Default | Description |
 | --- | --- | --- |
 | `--mesher voxel\|smooth` | `voxel` | Stepped blocks, or a smooth low-poly surface |
-| `--block-height F` | `1` | Voxel block height as a share of its width, from `0.25` (fine terraces) to `4` (chunky steps). Voxel mesher only |
+| `--block-height F` | `1` | Voxel block height as a share of its width, from `0.25` (fine terraces) to `4` (chunky steps). Voxel mesher only: with `--mesher smooth` it does nothing |
 | `--exaggeration X` | automatic | How many times taller than life the terrain is drawn, from `0.1` to `100`. By default, the relief is scaled to about 15% of the slab's length, between 1× and 5× |
 | `--palette NAME\|FILE` | `apollo` | A built-in palette (`apollo`, `resurrect-64`, `aap-64`), any [Lospec](https://lospec.com/palette-list) `.hex` file, or `none` to keep the unquantised colours |
 | `--time HH:MM` | start of the hike | Light the scene as at this local time on the day of the hike, such as `20:30` for a sunset. Needs a track with times |
@@ -120,7 +122,7 @@ The light follows the hike's clock: each frame is lit by the sun (and moon) at t
 | --- | --- | --- |
 | `--duration SECONDS` | `10s` | Length of the animation, from `1s` to `60s`, such as `8s` or `2.5` |
 | `--fps N` | `30` | Frames per second, up to `50` |
-| `--step-fps N` | off | Different images per second, fewer than `--fps`, for choppy, game-like motion |
+| `--step-fps N` | off | Different images per second, at most `--fps`; fewer gives choppy, game-like motion |
 | `--orbit DEG` | `30` | How far the camera turns, from `0` (a still camera) to `360` (a full turn) |
 | `--pace distance\|time` | `distance` | Draw the route at an even speed, or follow the recorded times, so slow climbs take longer than quick descents. Stops are cut to a minute, and nights become pauses as described above. Without timestamps, the route draws at an even speed |
 
@@ -140,6 +142,8 @@ The animation options only apply to `.gif` and `.mp4` output. PNG renders ignore
 | `--no-weather` | off | Leave the weather out: don't look it up, or draw the weather a bundle holds, along with its snow and ice |
 | `--season SEASON` | `auto` | The [season](#season) to show: the hike's own, or `spring`, `summer`, `autumn` or `winter` |
 | `--config FILE` | none | Read settings from a TOML file (see [Configuration](configuration.md)) |
+
+A scene bundle already holds its terrain and map data, so `--detail`, `--offline` and `--overpass-url` do nothing with one; isotrail warns when you type them for a bundle.
 
 ## bundle
 
@@ -223,6 +227,8 @@ Writes everything a web page needs to show the hike as an interactive diorama wi
 | `--runtime-url URL` | `isotrail-embed.js` in `DIR` | The address of `isotrail-embed.js`, when one copy serves every hike on the site |
 | `--exaggeration X` | automatic | As for [`render`](#terrain-and-look) |
 
+When the input is a bundle that already sits in `DIR` under the name `embed` would give it, as in `isotrail embed site/hike.itb -o site`, it is left as it is and only the poster and snippet are written. If `--season`, `--no-weather` or `--exaggeration` would change it, the command stops instead, so the bundle you started from is never replaced; write to another folder.
+
 The poster also takes the [text and overlay options](#text-and-overlays) of `render`, such as `--title` or `--overlay none`, and the [data options](#data). Settings from config files apply to `render` only.
 
 In Git Bash on Windows, an argument starting with `/` is turned into a Windows path before isotrail sees it, so `--base-url /hikes/derwent/` becomes `C:/Program Files/Git/hikes/derwent/`. isotrail warns when an address looks like that. Run the command as `MSYS_NO_PATHCONV=1 isotrail embed …`, or from PowerShell or Command Prompt.
@@ -295,3 +301,22 @@ Downloaded elevation tiles, map data and weather are cached on disk, so later re
 | macOS | `~/Library/Caches/isotrail` |
 
 Set `ISOTRAIL_CACHE_DIR` to use another directory.
+
+## Writing files
+
+Every command writes each file under a temporary name beside it, such as `hike.gif.4120.tmp`, and only puts it in place once it is complete. A render that fails or is stopped with Ctrl+C leaves the previous file as it was, and removes its temporary file. Existing files are overwritten without asking.
+
+Before any download or render, isotrail checks where it will write:
+
+- Missing folders are created.
+- An output can't be one of the run's own inputs, however the path is spelt: `isotrail bundle walk.gpx -o walk.gpx` is refused, and so is a `--runtime-dir` that is the `embed` output folder.
+- An output name can't be an existing folder, and an output folder can't be an existing file.
+
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success |
+| `1` | The command failed: a file couldn't be read or written, data couldn't be downloaded, the render failed |
+| `2` | The command line or a config file asks for something isotrail can't do, such as an unknown option, a bad value, options that can't go together or an output that would overwrite an input. Nothing has been downloaded or written |
+| `130` | Stopped with Ctrl+C |

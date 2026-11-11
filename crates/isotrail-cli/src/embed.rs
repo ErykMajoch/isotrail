@@ -1,16 +1,20 @@
 use std::fmt::Write as _;
-use std::fs;
+use std::fs::File;
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
 use clap::Args;
-use isotrail_export::{DEFAULT_SCALE, upscale, write_png};
+use isotrail_export::{DEFAULT_SCALE, encode_png, upscale};
 use isotrail_render::{Aspect, Gpu, Look, Overlays, SunState, VoxelMesher};
 use tracing::warn;
 
 use crate::bundle::DataArgs;
+use crate::config::Typed;
+use crate::output;
 use crate::overlay::OverlayArgs;
-use crate::render::AspectArg;
+use crate::render::{AspectArg, Source};
+use crate::usage;
 
 /// The element's script and the WebAssembly renderer it loads, at the paths
 /// the script expects them relative to itself
@@ -66,9 +70,17 @@ pub struct EmbedArgs {
     data: DataArgs,
 }
 
-pub fn run(args: &EmbedArgs) -> anyhow::Result<()> {
+pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
+    let dir = &args.output;
     let runtime = if args.with_runtime {
-        Some(runtime_dir(args.runtime_dir.as_deref())?)
+        let runtime = runtime_dir(args.runtime_dir.as_deref())?;
+        if output::same_file(&runtime, dir) {
+            return Err(usage(format!(
+                "--runtime-dir {} is the folder being written to; copy the runtime from another folder",
+                runtime.display()
+            )));
+        }
+        Some(runtime)
     } else {
         None
     };
@@ -89,31 +101,63 @@ pub fn run(args: &EmbedArgs) -> anyhow::Result<()> {
         .with_context(|| format!("{} has no file name", args.file.display()))?
         .to_string_lossy()
         .into_owned();
-    let mut bundle = crate::render::read_scene(&args.file, &args.data)?;
+    let bundle_path = dir.join(format!("{name}.itb"));
+    let poster_path = dir.join(format!("{name}.png"));
+    let snippet_path = dir.join("snippet.html");
+    let runtime_copies: Vec<(PathBuf, PathBuf)> = runtime
+        .iter()
+        .flat_map(|runtime| {
+            RUNTIME_FILES.map(|file| (runtime_file(runtime, file), runtime_file(dir, file)))
+        })
+        .collect();
+    // The bundle being embedded may already sit where it would be written
+    let in_place = output::same_file(&args.file, &bundle_path);
+    output::folder(dir)?;
+    let outputs = [&poster_path, &snippet_path]
+        .into_iter()
+        .chain((!in_place).then_some(&bundle_path))
+        .chain(runtime_copies.iter().map(|(_, to)| to));
+    output::plan(outputs.map(PathBuf::as_path), &[&args.file])?;
+    args.overlay.check()?;
+
+    let source = Source::open(&args.file)?;
+    if source.is_bundle() {
+        args.data.warn_unused_with_bundle(typed);
+    }
+    let original = match (&source, in_place) {
+        (Source::Bundle(bundle), true) => Some(bundle.clone()),
+        _ => None,
+    };
+    let mut bundle = source.into_bundle(&args.file, &args.data)?;
     if let Some(exaggeration) = args.exaggeration {
         bundle.grid.exaggeration = exaggeration;
+    }
+    if original.is_some_and(|original| *original != bundle) {
+        return Err(usage(format!(
+            "{} is the bundle being embedded, and the flags would change it; write to another folder",
+            bundle_path.display()
+        )));
     }
     let text = args.overlay.text(&bundle)?;
     let style = args.overlay.style();
 
-    let dir = &args.output;
-    fs::create_dir_all(dir).with_context(|| format!("could not create {}", dir.display()))?;
-    let bundle_path = dir.join(format!("{name}.itb"));
-    let bytes = bundle.to_bytes();
-    fs::write(&bundle_path, &bytes)
-        .with_context(|| format!("could not write {}", bundle_path.display()))?;
-    println!(
-        "Wrote {} ({} KB)",
-        bundle_path.display(),
-        bytes.len().div_ceil(1024)
-    );
+    if in_place {
+        println!("Kept {} as it is", bundle_path.display());
+    } else {
+        let bytes = bundle.to_bytes();
+        output::write(&bundle_path, |file| Ok(file.write_all(&bytes)?))?;
+        println!(
+            "Wrote {} ({} KB)",
+            bundle_path.display(),
+            bytes.len().div_ceil(1024)
+        );
+    }
 
     let aspect = Aspect::from(args.aspect);
     let framing = aspect
         .framing(DEFAULT_SCALE)
         .context("the pixel scale doesn't divide the image size")?;
     let overlays = Overlays::layout(&text, &style, &framing);
-    let poster_path = dir.join(format!("{name}.png"));
     let poster = crate::render::still(
         &Gpu::headless()?,
         &bundle,
@@ -122,21 +166,18 @@ pub fn run(args: &EmbedArgs) -> anyhow::Result<()> {
         &SunState::for_hike(&bundle),
         &Look::default(),
     )?;
-    write_png(&poster_path, &upscale(&poster, DEFAULT_SCALE)?)?;
+    let poster = upscale(&poster, DEFAULT_SCALE)?;
+    output::write(&poster_path, |file| Ok(encode_png(&poster, file)?))?;
     println!("Wrote {}", poster_path.display());
 
-    if let Some(runtime) = runtime {
-        for file in RUNTIME_FILES {
-            let (from, to) = (runtime_file(&runtime, file), runtime_file(dir, file));
-            if let Some(parent) = to.parent() {
-                fs::create_dir_all(parent)
-                    .with_context(|| format!("could not create {}", parent.display()))?;
-            }
-            fs::copy(&from, &to).with_context(|| {
-                format!("could not copy {} to {}", from.display(), to.display())
-            })?;
-            println!("Wrote {}", to.display());
-        }
+    for (from, to) in &runtime_copies {
+        output::write(to, |file| {
+            let mut source =
+                File::open(from).with_context(|| format!("could not copy {}", from.display()))?;
+            io::copy(&mut source, file)?;
+            Ok(())
+        })?;
+        println!("Wrote {}", to.display());
     }
 
     let html = snippet(
@@ -145,9 +186,7 @@ pub fn run(args: &EmbedArgs) -> anyhow::Result<()> {
         args.base_url.as_deref(),
         args.runtime_url.as_deref(),
     );
-    let snippet_path = dir.join("snippet.html");
-    fs::write(&snippet_path, &html)
-        .with_context(|| format!("could not write {}", snippet_path.display()))?;
+    output::write(&snippet_path, |file| Ok(file.write_all(html.as_bytes())?))?;
     println!("Wrote {}\n\n{html}", snippet_path.display());
     if let Some(credit) = args.overlay.caption_credit(&bundle) {
         println!("Credit for the caption: {credit}");

@@ -1,6 +1,5 @@
 use std::fmt::Write as _;
-use std::fs::{self, File};
-use std::io::BufWriter;
+use std::io::Write as _;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
@@ -12,15 +11,26 @@ use isotrail_geo::{
     HttpFetcher, Landcover, LandcoverMap, OVERPASS_URL, OsmFeatures, OverpassSource, Provenance,
     SceneBundle, TERRARIUM_URL, TerrariumSource, line_mask, scene_bundle,
 };
+use isotrail_track::Track;
 use png::ColorType;
-use tracing::info;
+use tracing::{info, warn};
 
+use crate::config::Typed;
+use crate::output;
 use crate::season::{self, SeasonArg};
 use crate::weather;
 
 const PREVIEW_SCALE: u32 = 4;
 const ROUTE_RGB: [u8; 3] = [230, 32, 48];
 const MIN_REPORTED_SHARE: f64 = 0.01;
+const DEBUG_IMAGES: [&str; 5] = [
+    "heightmap.png",
+    "hillshade.png",
+    "landcover.png",
+    "water.png",
+    "paths.png",
+];
+const DEBUG_LEGEND: &str = "landcover-legend.txt";
 
 #[derive(Debug, Args)]
 pub struct BundleArgs {
@@ -81,6 +91,23 @@ pub struct DataArgs {
     pub season: SeasonArg,
 }
 
+impl DataArgs {
+    /// Warns about flags typed for fetching data, which a bundle doesn't need
+    pub fn warn_unused_with_bundle(&self, typed: &Typed) {
+        for (id, flag) in [
+            ("detail", "--detail"),
+            ("offline", "--offline"),
+            ("overpass_url", "--overpass-url"),
+        ] {
+            if typed.has(id) {
+                warn!(
+                    "{flag} does nothing with a scene bundle, which already holds its terrain and map data"
+                );
+            }
+        }
+    }
+}
+
 /// A scene bundle and what went into it
 pub struct Prepared {
     pub bundle: SceneBundle,
@@ -97,11 +124,10 @@ pub fn fetcher(offline: bool) -> anyhow::Result<CachedFetcher<HttpFetcher>> {
     Ok(CachedFetcher::new(HttpFetcher::new()?, Cache::new(crate::cache::dir()?)).offline(offline))
 }
 
-/// Fetches terrain, map data and weather around a GPX route and packs them
-/// into a bundle
-pub fn prepare(file: &Path, data: &DataArgs) -> anyhow::Result<Prepared> {
-    let track = crate::read_track(file)?;
-    let footprint = Footprint::from_track(&track)?;
+/// Fetches terrain, map data and weather around the track read from `file`
+/// and packs them into a bundle
+pub fn prepare(track: &Track, file: &Path, data: &DataArgs) -> anyhow::Result<Prepared> {
+    let footprint = Footprint::from_track(track)?;
     let detail = NonZeroU32::new(data.detail).context("--detail must be positive")?;
     let grid = Grid::new(&footprint, detail);
 
@@ -128,7 +154,7 @@ pub fn prepare(file: &Path, data: &DataArgs) -> anyhow::Result<Prepared> {
     let weather = if data.no_weather {
         None
     } else {
-        weather::look_up(&track, &fetcher)
+        weather::look_up(track, &fetcher)
     };
 
     let provenance = Provenance {
@@ -138,15 +164,15 @@ pub fn prepare(file: &Path, data: &DataArgs) -> anyhow::Result<Prepared> {
         weather: weather.as_ref().map(|(_, provenance)| provenance.clone()),
     };
     let mut bundle = scene_bundle(
-        &track,
-        &crate::title(&track, file),
+        track,
+        &crate::title(track, file),
         &grid,
         &heightmap,
         &landcover,
         provenance,
     )?;
     bundle.weather = weather.map(|(weather, _)| weather);
-    season::estimate(&mut bundle, &track, &fetcher);
+    season::estimate(&mut bundle, track, &fetcher);
     season::apply(&mut bundle, data.season);
     Ok(Prepared {
         bundle,
@@ -160,6 +186,26 @@ pub fn prepare(file: &Path, data: &DataArgs) -> anyhow::Result<Prepared> {
 }
 
 pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
+    let debug: Vec<PathBuf> = args
+        .debug_dir
+        .iter()
+        .flat_map(|dir| {
+            DEBUG_IMAGES
+                .iter()
+                .chain([&DEBUG_LEGEND])
+                .map(|name| dir.join(name))
+        })
+        .collect();
+    if let Some(dir) = &args.debug_dir {
+        output::folder(dir)?;
+    }
+    output::plan(
+        [args.output.as_path()]
+            .into_iter()
+            .chain(debug.iter().map(PathBuf::as_path)),
+        &[&args.file],
+    )?;
+    let track = crate::read_track(&args.file)?;
     let Prepared {
         mut bundle,
         grid,
@@ -168,13 +214,13 @@ pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
         features,
         tiles,
         elevation_range: (min, max),
-    } = prepare(&args.file, &args.data)?;
+    } = prepare(&track, &args.file, &args.data)?;
     if let Some(exaggeration) = args.exaggeration {
         bundle.grid.exaggeration = exaggeration;
     }
     let bytes = bundle.to_bytes();
     let output = &args.output;
-    fs::write(output, &bytes).with_context(|| format!("could not write {}", output.display()))?;
+    output::write(output, |file| Ok(file.write_all(&bytes)?))?;
     let mut written = vec![(output.clone(), Some(bytes.len()))];
     if let Some(dir) = &args.debug_dir {
         let images = write_debug_images(dir, &grid, &heightmap, &landcover, &bundle)?;
@@ -239,7 +285,6 @@ fn write_debug_images(
     landcover: &LandcoverMap,
     bundle: &SceneBundle,
 ) -> anyhow::Result<Vec<PathBuf>> {
-    fs::create_dir_all(dir).with_context(|| format!("could not create {}", dir.display()))?;
     let (cols, rows) = (grid.cols, grid.rows);
     let (width, height) = (cols * PREVIEW_SCALE, rows * PREVIEW_SCALE);
     let shade = heightmap.hillshade(grid.cell_size_m, bundle.grid.exaggeration);
@@ -250,29 +295,29 @@ fn write_debug_images(
 
     let images = [
         (
-            "heightmap.png",
+            DEBUG_IMAGES[0],
             cols,
             rows,
             ColorType::Grayscale,
             heightmap.greyscale(),
         ),
-        ("hillshade.png", width, height, ColorType::Rgb, hillshade),
+        (DEBUG_IMAGES[1], width, height, ColorType::Rgb, hillshade),
         (
-            "landcover.png",
+            DEBUG_IMAGES[2],
             width,
             height,
             ColorType::Rgb,
             landcover_rgb,
         ),
         (
-            "water.png",
+            DEBUG_IMAGES[3],
             width,
             height,
             ColorType::Grayscale,
             enlarge(&landcover.water_mask(), cols, 1),
         ),
         (
-            "paths.png",
+            DEBUG_IMAGES[4],
             width,
             height,
             ColorType::Rgb,
@@ -285,9 +330,9 @@ fn write_debug_images(
         write_png(&path, w, h, color, &data)?;
         written.push(path);
     }
-    let legend = dir.join("landcover-legend.txt");
-    fs::write(&legend, legend_text(landcover))
-        .with_context(|| format!("could not write {}", legend.display()))?;
+    let legend = dir.join(DEBUG_LEGEND);
+    let text = legend_text(landcover);
+    output::write(&legend, |file| Ok(file.write_all(text.as_bytes())?))?;
     written.push(legend);
     Ok(written)
 }
@@ -369,8 +414,7 @@ fn write_png(
     color: ColorType,
     data: &[u8],
 ) -> anyhow::Result<()> {
-    let write = || -> anyhow::Result<()> {
-        let file = BufWriter::new(File::create(path)?);
+    output::write(path, |file| {
         let mut encoder = png::Encoder::new(file, width, height);
         encoder.set_color(color);
         encoder.set_depth(png::BitDepth::Eight);
@@ -378,8 +422,7 @@ fn write_png(
         writer.write_image_data(data)?;
         writer.finish()?;
         Ok(())
-    };
-    write().with_context(|| format!("could not write {}", path.display()))
+    })
 }
 
 #[cfg(test)]

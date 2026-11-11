@@ -194,7 +194,9 @@ fn offline_bundle_without_cached_tiles_explains_why() {
         "{stderr}"
     );
     assert!(stderr.contains("offline mode is on"), "{stderr}");
-    assert!(!debug.exists() && !itb.exists());
+    assert!(!itb.exists());
+    // The folder is made before any download, but nothing is written into it
+    assert_eq!(std::fs::read_dir(&debug).unwrap().count(), 0);
 }
 
 #[test]
@@ -225,7 +227,9 @@ fn offline_bundle_without_cached_map_data_explains_why() {
         "{stderr}"
     );
     assert!(stderr.contains("offline mode is on"), "{stderr}");
-    assert!(!debug.exists() && !itb.exists());
+    assert!(!itb.exists());
+    // The folder is made before any download, but nothing is written into it
+    assert_eq!(std::fs::read_dir(&debug).unwrap().count(), 0);
 }
 
 #[test]

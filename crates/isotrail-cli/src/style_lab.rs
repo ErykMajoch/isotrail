@@ -1,9 +1,8 @@
-use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use clap::Args;
-use isotrail_export::{render_still, upscale, write_png};
+use isotrail_export::{encode_png, render_still, upscale};
 use isotrail_render::{
     Aspect, DEFAULT_YAW_OFFSET_DEG, Frame, Gpu, Look, Mesher, Palette, SmoothMesher, SunState,
     VoxelMesher,
@@ -11,6 +10,9 @@ use isotrail_render::{
 use tracing::info;
 
 use crate::bundle::DataArgs;
+use crate::config::Typed;
+use crate::output;
+use crate::render::Source;
 
 const SCALES: [u32; 3] = [3, 5, 6];
 const BACKGROUND: [u8; 4] = [28, 28, 32, 255];
@@ -35,16 +37,31 @@ pub struct StyleLabArgs {
     data: DataArgs,
 }
 
-pub fn run(args: &StyleLabArgs) -> anyhow::Result<()> {
-    let bundle = crate::render::read_scene(&args.file, &args.data)?;
+pub fn run(args: &StyleLabArgs, typed: &Typed) -> anyhow::Result<()> {
     let dir = &args.output;
-    fs::create_dir_all(dir).with_context(|| format!("could not create {}", dir.display()))?;
-
     let meshers: [(&str, Box<dyn Mesher>); 2] = [
         ("voxel", Box::new(VoxelMesher::default())),
         ("smooth", Box::new(SmoothMesher)),
     ];
     let palettes: Vec<&str> = Palette::builtin_names().collect();
+    let image = |mesher: &str, scale: u32, palette: &str| {
+        dir.join(format!("{mesher}-{scale}-{palette}.png"))
+    };
+    let sheet_path = dir.join("contact-sheet.png");
+    let mut outputs = vec![sheet_path.clone()];
+    for palette in &palettes {
+        for (mesher, _) in &meshers {
+            outputs.extend(SCALES.map(|scale| image(mesher, scale, palette)));
+        }
+    }
+    output::folder(dir)?;
+    output::plan(outputs.iter().map(PathBuf::as_path), &[&args.file])?;
+    let source = Source::open(&args.file)?;
+    if source.is_bundle() {
+        args.data.warn_unused_with_bundle(typed);
+    }
+    let bundle = source.into_bundle(&args.file, &args.data)?;
+
     let aspect = Aspect::Story;
     let (width, height) = aspect.output_size();
     let columns = meshers.len() * SCALES.len();
@@ -74,7 +91,7 @@ pub fn run(args: &StyleLabArgs) -> anyhow::Result<()> {
                     &look,
                 )?;
                 let frame = upscale(&frame, scale)?;
-                let path = dir.join(format!("{mesher_name}-{scale}-{palette}.png"));
+                let path = image(mesher_name, scale, palette);
                 write_png(&path, &frame)?;
                 println!("Wrote {}", path.display());
                 sheet.place(
@@ -87,10 +104,13 @@ pub fn run(args: &StyleLabArgs) -> anyhow::Result<()> {
         }
     }
 
-    let path = dir.join("contact-sheet.png");
-    write_png(&path, &sheet.into_frame())?;
-    println!("Wrote {}", path.display());
+    write_png(&sheet_path, &sheet.into_frame())?;
+    println!("Wrote {}", sheet_path.display());
     Ok(())
+}
+
+fn write_png(path: &Path, frame: &Frame) -> anyhow::Result<()> {
+    output::write(path, |file| Ok(encode_png(frame, file)?))
 }
 
 /// Equal-sized images in a grid, each under a label band

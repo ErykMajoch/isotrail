@@ -2,24 +2,28 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, bail};
+use anyhow::Context;
 use chrono::NaiveTime;
 use clap::{Args, ValueEnum};
 use isotrail_bundle::SceneBundle;
 use isotrail_export::{
-    DEFAULT_SCALE, ExportError, Ffmpeg, GifWriter, Mp4Writer, render_clip, render_still, upscale,
-    write_png,
+    DEFAULT_SCALE, ExportError, Ffmpeg, GifWriter, Mp4Writer, check_gif_look, encode_png,
+    render_clip, render_still, upscale,
 };
 use isotrail_render::{
     Aspect, Background, DEFAULT_OCCLUSION, DEFAULT_PALETTE, DEFAULT_SOFT_SHADOWS,
     DEFAULT_YAW_OFFSET_DEG, Frame, GodRays, Gpu, Look, Mesher, Motion, Overlays, Pace, Palette,
     SmoothMesher, SunState, VoxelMesher, Walk,
 };
+use isotrail_track::Track;
 use tracing::{info, warn};
 
 use crate::animation::AnimationArgs;
 use crate::bundle::DataArgs;
+use crate::config::Typed;
+use crate::output::{self, Pending};
 use crate::overlay::OverlayArgs;
+use crate::usage;
 
 #[derive(Debug, Args)]
 pub struct RenderArgs {
@@ -152,26 +156,26 @@ impl RenderArgs {
         let aspects: Vec<Aspect> = self.aspect.iter().map(|&a| a.into()).collect();
         for (i, aspect) in aspects.iter().enumerate() {
             if aspects[..i].contains(aspect) {
-                bail!("--aspect lists {} twice", aspect.name());
+                return Err(usage(format!("--aspect lists {} twice", aspect.name())));
             }
         }
         Ok(aspects)
     }
 
-    fn mesher(&self) -> anyhow::Result<Box<dyn Mesher>> {
-        Ok(match self.mesher {
+    fn mesher(&self, typed: &Typed) -> Box<dyn Mesher> {
+        match self.mesher {
             MesherArg::Voxel => Box::new(VoxelMesher {
                 block_height: self
                     .block_height
                     .unwrap_or(VoxelMesher::default().block_height),
             }),
             MesherArg::Smooth => {
-                if self.block_height.is_some() {
-                    bail!("--block-height only applies to --mesher voxel");
+                if typed.has("block_height") {
+                    warn!("--block-height only applies to --mesher voxel, so it does nothing here");
                 }
                 Box::new(SmoothMesher)
             }
-        })
+        }
     }
 }
 
@@ -188,10 +192,10 @@ fn read_palette(value: &str) -> anyhow::Result<Option<Palette>> {
         .is_some_and(|ext| ext.eq_ignore_ascii_case("hex"));
     if !is_hex && !path.is_file() {
         let names: Vec<&str> = Palette::builtin_names().collect();
-        bail!(
+        return Err(usage(format!(
             "unknown palette {value:?}: expected {}, none or a .hex file",
             names.join(", ")
-        );
+        )));
     }
     let bytes = crate::read_file(path)?;
     let text = String::from_utf8_lossy(&bytes);
@@ -234,14 +238,22 @@ fn parse_block_height(value: &str) -> Result<f32, String> {
     }
 }
 
-pub fn run(args: &RenderArgs) -> anyhow::Result<()> {
+pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
     let aspects = args.aspects()?;
     let (outputs, format) = output_paths(&args.file, args.output.as_deref(), &aspects)?;
+    let palette_file = Path::new(&args.palette);
+    let inputs: Vec<&Path> = [Some(args.file.as_path()), args.config.as_deref()]
+        .into_iter()
+        .flatten()
+        .chain(palette_file.is_file().then_some(palette_file))
+        .collect();
+    output::plan(outputs.iter().map(PathBuf::as_path), &inputs)?;
     let mut motion = match format {
         Format::Png => None,
         Format::Gif | Format::Mp4 => Some(args.animation.motion()?),
     };
-    let mesher = args.mesher()?;
+    args.overlay.check()?;
+    let mesher = args.mesher(typed);
     let look = Look {
         palette: read_palette(&args.palette)?,
         background: args.background,
@@ -254,18 +266,27 @@ pub fn run(args: &RenderArgs) -> anyhow::Result<()> {
         },
         ..Look::default()
     };
-    if format == Format::Gif && look.palette.is_none() {
-        return Err(ExportError::GifPalette.into());
+    if format == Format::Gif {
+        check_gif_look(&look).map_err(|error| usage(error.to_string()))?;
     }
     let ffmpeg = if format == Format::Mp4 {
         if look.background == Background::Transparent {
-            return Err(ExportError::Mp4Transparent.into());
+            return Err(usage(ExportError::Mp4Transparent.to_string()));
         }
         Some(Ffmpeg::find()?)
     } else {
         None
     };
-    let mut bundle = read_scene(&args.file, &args.data)?;
+    let source = Source::open(&args.file)?;
+    if source.is_bundle() {
+        args.data.warn_unused_with_bundle(typed);
+    }
+    if args.time.is_some() && !source.has_times() {
+        return Err(usage(
+            "--time needs a track with times, to know which day to light",
+        ));
+    }
+    let mut bundle = source.into_bundle(&args.file, &args.data)?;
     if let Some(exaggeration) = args.exaggeration {
         bundle.grid.exaggeration = exaggeration;
     }
@@ -300,12 +321,12 @@ pub fn run(args: &RenderArgs) -> anyhow::Result<()> {
                 look: &look,
                 motion,
             };
-            let frames = write_clip(args, &clip, output, ffmpeg.as_ref())
-                .with_context(|| format!("could not write {}", output.display()))?;
+            let frames = write_clip(args, &clip, output, ffmpeg.as_ref())?;
             println!("Rendered {frames} frames of {size}");
         } else {
             let frame = still(&gpu, &bundle, mesher.as_ref(), &overlays, &sun, &look)?;
-            write_png(output, &upscale(&frame, args.scale)?)?;
+            let image = upscale(&frame, args.scale)?;
+            output::write(output, |file| Ok(encode_png(&image, file)?))?;
             println!("Rendered {size}");
         }
         println!("Wrote {}", output.display());
@@ -353,6 +374,37 @@ enum ClipWriter {
 }
 
 impl ClipWriter {
+    /// Writes into `pending`'s temporary file, as an MP4 when given ffmpeg
+    /// and a GIF otherwise
+    fn open(
+        pending: &Pending,
+        clip: &Clip,
+        scale: u32,
+        ffmpeg: Option<&Ffmpeg>,
+    ) -> anyhow::Result<ClipWriter> {
+        let framing = clip.overlays.diorama_framing();
+        let (width, height) = (framing.width, framing.height);
+        let fps = clip.motion.timeline.fps;
+        Ok(match ffmpeg {
+            Some(ffmpeg) => ClipWriter::Mp4(Mp4Writer::create(
+                ffmpeg,
+                pending.temp(),
+                width,
+                height,
+                scale,
+                fps,
+            )?),
+            None => ClipWriter::Gif(GifWriter::new(
+                pending.open()?,
+                width,
+                height,
+                scale,
+                clip.look,
+                fps,
+            )?),
+        })
+    }
+
     fn push(&mut self, frame: &Frame) -> Result<(), ExportError> {
         match self {
             ClipWriter::Gif(gif) => gif.push(frame),
@@ -369,25 +421,33 @@ impl ClipWriter {
     }
 }
 
-/// Renders the animation with its stats counting up, as an MP4 when given
-/// ffmpeg and a GIF otherwise, and returns how many frames it has
+/// Renders the animation into `output`, which is only replaced once the
+/// whole clip is written, and returns how many frames it has
 fn write_clip(
     args: &RenderArgs,
     clip: &Clip,
     output: &Path,
     ffmpeg: Option<&Ffmpeg>,
 ) -> anyhow::Result<u32> {
-    let framing = clip.overlays.diorama_framing();
-    let (width, height) = (framing.width, framing.height);
-    let fps = clip.motion.timeline.fps;
-    let mut writer = match ffmpeg {
-        Some(ffmpeg) => ClipWriter::Mp4(Mp4Writer::create(
-            ffmpeg, output, width, height, args.scale, fps,
-        )?),
-        None => ClipWriter::Gif(GifWriter::create(
-            output, width, height, args.scale, clip.look, fps,
-        )?),
+    let write = || -> anyhow::Result<u32> {
+        let pending = Pending::new(output);
+        let mut writer = ClipWriter::open(&pending, clip, args.scale, ffmpeg)?;
+        let frames = draw_clip(args, clip, |frame| Ok(writer.push(frame)?))?;
+        writer.finish()?;
+        pending.commit()?;
+        Ok(frames)
     };
+    write().with_context(|| format!("could not write {}", output.display()))
+}
+
+/// Draws each frame of the animation with its stats counting up, hands it
+/// to `push`, and returns how many there were
+fn draw_clip(
+    args: &RenderArgs,
+    clip: &Clip,
+    mut push: impl FnMut(&Frame) -> anyhow::Result<()>,
+) -> anyhow::Result<u32> {
+    let framing = clip.overlays.diorama_framing();
     let walk = Walk::new(clip.bundle);
     let palette = clip.look.palette.as_ref();
     let mut frames = 0;
@@ -399,35 +459,67 @@ fn write_clip(
         clip.look,
         clip.motion,
         |moment, frame| -> anyhow::Result<()> {
+            output::check_interrupted()?;
             let mut frame = frame.clone();
             let walked = walk.stats_at(moment);
             let stats = args.overlay.walked_stats(clip.bundle, &walked);
             clip.overlays
                 .with_stats(&stats)
                 .draw(&mut frame, palette, moment.progress);
-            writer.push(&frame)?;
+            push(&frame)?;
             frames += 1;
             Ok(())
         },
     )?;
-    writer.finish()?;
     Ok(frames)
 }
 
-pub(crate) fn read_scene(path: &Path, data: &DataArgs) -> anyhow::Result<SceneBundle> {
-    let bytes = crate::read_file(path)?;
-    if crate::is_bundle_file(path, &bytes) {
-        let mut bundle = SceneBundle::from_bytes(&bytes)
-            .with_context(|| format!("could not read {}", path.display()))?;
-        if data.no_weather {
-            bundle.weather = None;
-            bundle.meta.provenance.weather = None;
-            crate::season::without_weather(&mut bundle.season);
+/// A scene bundle as it is, or a track still to be made into one
+pub(crate) enum Source {
+    Bundle(Box<SceneBundle>),
+    Track(Track),
+}
+
+impl Source {
+    /// Reads the file without fetching anything
+    pub fn open(path: &Path) -> anyhow::Result<Source> {
+        let bytes = crate::read_file(path)?;
+        if crate::is_bundle_file(path, &bytes) {
+            let bundle = SceneBundle::from_bytes(&bytes)
+                .with_context(|| format!("could not read {}", path.display()))?;
+            Ok(Source::Bundle(Box::new(bundle)))
+        } else {
+            Ok(Source::Track(crate::parse_track(&bytes, path)?))
         }
-        crate::season::apply(&mut bundle, data.season);
-        return Ok(bundle);
     }
-    Ok(crate::bundle::prepare(path, data)?.bundle)
+
+    pub fn is_bundle(&self) -> bool {
+        matches!(self, Source::Bundle(_))
+    }
+
+    fn has_times(&self) -> bool {
+        match self {
+            Source::Bundle(bundle) => bundle.meta.local_date.is_some(),
+            Source::Track(track) => track.points().any(|point| point.time.is_some()),
+        }
+    }
+
+    /// The bundle with the data flags applied, fetching what a track needs
+    pub fn into_bundle(self, path: &Path, data: &DataArgs) -> anyhow::Result<SceneBundle> {
+        match self {
+            Source::Bundle(bundle) => {
+                let mut bundle = *bundle;
+                if data.no_weather {
+                    bundle.weather = None;
+                    bundle.meta.provenance.weather = None;
+                    crate::season::without_weather(&mut bundle.season);
+                }
+                crate::season::apply(&mut bundle, data.season);
+                Ok(bundle)
+            }
+            Source::Track(track) => Ok(crate::bundle::prepare(&track, path, data)?.bundle),
+        }
+    }
 }
 
 fn parse_share(value: &str) -> Result<f32, String> {
@@ -474,10 +566,10 @@ fn output_paths(
     } else if extension.eq_ignore_ascii_case("mp4") {
         Format::Mp4
     } else {
-        bail!(
+        return Err(usage(format!(
             "cannot write {}: only .png, .gif and .mp4 output are supported",
             output.display()
-        );
+        )));
     };
     if aspects.len() == 1 {
         return Ok((vec![output], format));
@@ -499,7 +591,60 @@ fn output_paths(
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
+    use anyhow::bail;
+    use clap::Parser;
+    use isotrail_testkit::hike_bundle;
+
     use super::*;
+
+    #[derive(Debug, Parser)]
+    struct Cli {
+        #[command(flatten)]
+        render: RenderArgs,
+    }
+
+    #[test]
+    fn a_clip_that_fails_part_way_leaves_the_old_file() {
+        let args = Cli::try_parse_from(["isotrail", "hike.itb", "--duration", "1", "--fps", "5"])
+            .unwrap()
+            .render;
+        let bundle = hike_bundle();
+        let framing = Aspect::Square.framing(10).unwrap();
+        let text = args.overlay.text(&bundle).unwrap();
+        let overlays = Overlays::layout(&text, &args.overlay.style(), &framing);
+        let motion = args.animation.motion().unwrap();
+        let gpu = isotrail_testkit::gpu();
+        let clip = Clip {
+            gpu: &gpu,
+            bundle: &bundle,
+            mesher: &VoxelMesher::default(),
+            overlays: &overlays,
+            look: &Look::default(),
+            motion: &motion,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("clip.gif");
+        fs::write(&target, "good").unwrap();
+
+        let pending = Pending::new(&target);
+        let mut writer = ClipWriter::open(&pending, &clip, 10, None).unwrap();
+        let mut pushed = 0;
+        let drawn = draw_clip(&args, &clip, |frame| {
+            pushed += 1;
+            if pushed == 3 {
+                bail!("the disk is full");
+            }
+            Ok(writer.push(frame)?)
+        });
+        assert!(drawn.is_err());
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
+        drop((writer, pending));
+
+        assert_eq!(fs::read(&target).unwrap(), b"good");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
 
     fn output_path(input: &Path, output: Option<&Path>) -> anyhow::Result<PathBuf> {
         Ok(output_paths(input, output, &[Aspect::Story])?.0.remove(0))

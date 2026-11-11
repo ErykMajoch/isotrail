@@ -29,7 +29,7 @@ isotrail reads two files, if they exist:
    | Linux | `~/.config/isotrail/config.toml` (or `$XDG_CONFIG_HOME/isotrail/config.toml`) |
    | macOS | `~/Library/Application Support/isotrail/config.toml` |
 
-   Set `ISOTRAIL_CONFIG` to use a different file, or set it to an empty value to ignore the user file.
+   Set `ISOTRAIL_CONFIG` to use a different file, or set it to an empty value to ignore the user file. A file named by `ISOTRAIL_CONFIG` must exist.
 
 2. **A file given with `--config`**, for one render. This is handy for keeping one file per project or per hike.
 
@@ -44,18 +44,22 @@ From highest to lowest:
 
 A switch set to `true` in the user file can be turned off again with `false` in the `--config` file.
 
+An option you type also wins over settings it can't be combined with: with `date-format = "short"` in a file, `--date "June 2025"` on the command line prints that text, and the setting is left out.
+
 ### Rules
 
 - Anything outside the `[render]` table is an error, so typos don't go unnoticed.
 - Unknown keys are errors, and so are `output` and `config`, which only make sense for one run.
 - A bad value is reported with the name of the file it came from, for example `scale in hike.toml: must be 2, 3, 5, 6 or 10`.
 - `--background` in a config file keeps its exact colour, just as it does on the command line.
+- `time` can be a string (`"07:30"`) or a TOML time (`07:30:00`).
+- Mistakes in a config file stop the render with exit code 2, like mistakes on the command line.
 
 ## Environment variables
 
 | Variable | Effect |
 | --- | --- |
-| `ISOTRAIL_CONFIG` | Path of the user config file. Empty means none |
+| `ISOTRAIL_CONFIG` | Path of the user config file, which must exist. Empty means none |
 | `ISOTRAIL_CACHE_DIR` | Directory for downloaded elevation, map data and weather (see [`cache`](usage.md#cache)) |
 | `ISOTRAIL_OVERPASS_URL` | Overpass API endpoint for OpenStreetMap data, the same as `--overpass-url` |
 | `ISOTRAIL_GPU` | `auto` (default), `hardware` or `software`. `software` forces a software renderer (WARP on Windows, lavapipe on Linux), which is useful on servers without a GPU |

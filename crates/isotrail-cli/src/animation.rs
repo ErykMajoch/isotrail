@@ -1,7 +1,8 @@
-use anyhow::bail;
 use clap::{Args, ValueEnum};
 use isotrail_export::MAX_GIF_FPS;
 use isotrail_render::{DEFAULT_FPS, DEFAULT_ORBIT_DEG, Motion, Orbit, Pace, Timeline};
+
+use crate::usage;
 
 const MAX_DURATION_S: f32 = 60.0;
 
@@ -21,8 +22,8 @@ pub struct AnimationArgs {
     )]
     fps: u32,
 
-    /// Different images per second, fewer than --fps for choppy, game-like
-    /// motion
+    /// Different images per second, at most --fps; fewer gives choppy,
+    /// game-like motion
     #[arg(
         long,
         value_name = "N",
@@ -53,10 +54,10 @@ impl AnimationArgs {
         if let Some(step) = self.step_fps
             && step > self.fps
         {
-            bail!(
+            return Err(usage(format!(
                 "--step-fps {step} is more than --fps {}: it can only slow the motion down",
                 self.fps
-            );
+            )));
         }
         Ok(Motion {
             timeline: Timeline {

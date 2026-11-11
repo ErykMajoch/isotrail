@@ -6,6 +6,7 @@ mod bundle;
 mod cache;
 mod config;
 mod embed;
+mod output;
 mod overlay;
 mod render;
 mod season;
@@ -14,12 +15,15 @@ mod style_lab;
 mod sun;
 mod weather;
 
+use std::fmt;
 use std::fs;
 use std::io::IsTerminal;
 use std::path::Path;
+use std::process::ExitCode;
 
 use anyhow::Context;
-use clap::{ArgAction, Parser, Subcommand, ValueEnum};
+use clap::error::ErrorKind;
+use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
 use isotrail_track::{GpxReader, Track, TrackReader, Units};
 use tracing::level_filters::LevelFilter;
 
@@ -55,17 +59,61 @@ enum Command {
     Cache(cache::CacheArgs),
 }
 
-fn main() -> anyhow::Result<()> {
-    let cli = config::parse()?;
+fn main() -> ExitCode {
+    let (cli, typed) = match config::parse() {
+        Ok(parsed) => parsed,
+        Err(error) => return report(&error, Some("render")),
+    };
     init_logging(cli.verbose);
-    match cli.command {
+    output::catch_interrupts();
+    let result = match cli.command {
         Command::Stats(args) => stats::run(&args),
         Command::Bundle(args) => bundle::run(&args),
-        Command::Render(args) => render::run(&args),
-        Command::Embed(args) => embed::run(&args),
-        Command::StyleLab(args) => style_lab::run(&args),
+        Command::Render(args) => render::run(&args, &typed),
+        Command::Embed(args) => embed::run(&args, &typed),
+        Command::StyleLab(args) => style_lab::run(&args, &typed),
         Command::Cache(args) => cache::run(&args),
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => report(&error, typed.command()),
     }
+}
+
+/// A mistake in how isotrail was called that only shows once the command line
+/// has been read; reported like clap's own, with exit code 2
+#[derive(Debug)]
+struct UsageError(String);
+
+impl fmt::Display for UsageError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for UsageError {}
+
+fn usage(message: impl Into<String>) -> anyhow::Error {
+    UsageError(message.into()).into()
+}
+
+fn report(error: &anyhow::Error, command: Option<&str>) -> ExitCode {
+    if output::interrupted() || error.is::<output::Interrupted>() {
+        eprintln!("Stopped; nothing was left half-written");
+        return ExitCode::from(output::INTERRUPTED_EXIT);
+    }
+    if error.is::<UsageError>() {
+        let mut cli = Cli::command();
+        cli.build();
+        let message = format!("{error:#}");
+        let clap_error = match command.and_then(|name| cli.find_subcommand_mut(name)) {
+            Some(subcommand) => subcommand.error(ErrorKind::ValueValidation, message),
+            None => cli.error(ErrorKind::ValueValidation, message),
+        };
+        clap_error.exit();
+    }
+    eprintln!("Error: {error:?}");
+    ExitCode::FAILURE
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]

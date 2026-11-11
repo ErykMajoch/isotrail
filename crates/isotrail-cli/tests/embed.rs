@@ -10,7 +10,7 @@ fn isotrail(current_dir: &Path, args: &[&str]) -> Output {
         .args(args)
         .current_dir(current_dir)
         .env("ISOTRAIL_CACHE_DIR", current_dir.join("cache"))
-        .env("ISOTRAIL_CONFIG", current_dir.join("user-config.toml"))
+        .env("ISOTRAIL_CONFIG", "")
         .stdin(Stdio::null())
         .output()
         .unwrap()
