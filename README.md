@@ -61,6 +61,12 @@ More looks are shown in [How it works](docs/how-it-works.md#styles). -->
 
 **Prebuilt binaries** for Windows, Linux and macOS are attached to every [release](https://github.com/ErykMajoch/isotrail/releases/latest). Download the archive for your system, unpack it and put `isotrail` (`isotrail.exe` on Windows) somewhere on your `PATH`. Keep the `web` folder next to it: [`embed`](docs/usage.md#embed) copies the web runtime from there.
 
+The binaries aren't signed, so your system may warn you the first time you run one:
+
+- **Windows:** if SmartScreen says it protected your PC, choose **More info**, then **Run anyway**.
+- **macOS:** Gatekeeper blocks programs downloaded from the internet. Remove the download flag from the binary with `xattr -d com.apple.quarantine path/to/isotrail`.
+- **Linux:** the binary needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 or later). On older systems, install it with Cargo.
+
 **With Cargo**, if you have [Rust](https://rustup.rs/) installed:
 
 ```bash
@@ -109,6 +115,15 @@ isotrail render hike.itb --palette aap-64 --mesher smooth
 isotrail embed hike.gpx -o site/hikes/my-hike --with-runtime
 ```
 
+### Which format for where
+
+| Where | Output | Why |
+| --- | --- | --- |
+| Instagram story | `--aspect story -o hike.mp4`, or a PNG | Instagram animates videos, not GIF files |
+| Instagram post | `--aspect feed`, as a PNG or `.mp4` | 4:5 takes up the most room in the feed |
+| Your website | [`isotrail embed`](docs/usage.md#embed), or `--aspect wide` as a PNG | The bundle is about 100 KB and the runtime (about 1.2 MB gzipped) is shared by every hike; a PNG is a few dozen KB |
+| Chats, forums, READMEs | `.gif` | Plays anywhere, but a 10-second story is several MB, often over 10 MB. A shorter `--duration` or a lower `--fps` makes it smaller |
+
 ## Commands
 
 | Command | What it does |
@@ -149,6 +164,8 @@ Bug reports, ideas and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBU
 - Palettes by AdamCYounis, Kerrie Lake and Adigun A. Polack, and the [monogram](https://datagoblin.itch.io/monogram) font by Vinícius Menézio (CC0); see [assets/README.md](assets/README.md)
 
 Every render carries a small data credit by default. If you leave it off with `--no-attribution`, please put the printed credit in your post's caption instead.
+
+The elevation, map and weather services are free and shared by everyone. [Data sources and fair use](docs/how-it-works.md#data-sources-and-fair-use) explains what isotrail downloads, how the cache keeps that to a minimum, and the services' terms: in particular, Open-Meteo's free weather API is for non-commercial use only.
 
 ## Licence
 

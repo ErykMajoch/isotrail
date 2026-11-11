@@ -1,0 +1,24 @@
+# Third-party notices
+
+The `isotrail` binary and its web runtime include the Rust crates listed below, under these licences:
+
+{{#each overview}}
+- {{{name}}}
+{{/each}}
+
+Each licence text follows once, with the crates it covers. The font and palettes built into isotrail are credited in `assets/README.md`.
+
+{{#each licenses}}
+## {{{name}}}
+
+{{#each used_by}}
+{{#unless (eq crate.repository "https://github.com/ErykMajoch/isotrail")}}
+- [{{crate.name}} {{crate.version}}]({{#if crate.repository}}{{crate.repository}}{{else}}https://crates.io/crates/{{crate.name}}{{/if}})
+{{/unless}}
+{{/each}}
+
+```text
+{{{text}}}
+```
+
+{{/each}}

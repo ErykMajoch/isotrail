@@ -22,7 +22,7 @@ web-sys = { workspace = true, features = ["HtmlCanvasElement", "console"] }
 wgpu = { workspace = true, features = ["webgl"] }
 
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = ["-Oz"]
+wasm-opt = ["-Oz", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
 
 [lints]
 workspace = true

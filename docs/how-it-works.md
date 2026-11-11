@@ -76,3 +76,23 @@ The meshers and palettes can be mixed freely. `isotrail style-lab` renders every
     <td align="center"><code>voxel</code> · <code>aap-64</code></td>
   </tr>
 </table>
+
+## Data sources and fair use
+
+isotrail downloads its data from three free services that others run for everyone to share. It only contacts them while it prepares a scene from a GPX file (`render`, `bundle` and `embed`, and `stats --weather`). A scene bundle renders without the network.
+
+| Data | Service | Requests for one hike |
+| --- | --- | --- |
+| Elevation | [Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) on AWS Open Data (`s3.amazonaws.com/elevation-tiles-prod`) | The tiles that cover the slab, usually a handful |
+| Map data | The public [Overpass API](https://overpass-api.de/) (`overpass-api.de`) | One query for the whole slab, or two when it crosses the 180° meridian |
+| Weather | [Open-Meteo](https://open-meteo.com/) (`archive-api.open-meteo.com`, or `api.open-meteo.com` for recent hikes) | Two: the hours of the hike, and the daily lows and highs of the fortnight before it. A long route asks for up to eight places in each |
+
+Every answer is kept in the [cache](usage.md#cache), and nothing in it expires. Rendering a hike again, in any look or shape, sends no requests, and neither does a bundle. `--offline` makes sure of it. Each request names isotrail and this repository in its `User-Agent`, so the services' operators can tell where it came from.
+
+**Overpass.** The public server is shared by everyone who works with OpenStreetMap data. Its [usage policy](https://dev.overpass-api.de/overpass-doc/en/preface/commons.html) asks each user to stay below about 10,000 queries and 1 GB of downloads a day. Rendering your own hikes stays far below that, and when the server is busy, isotrail waits as it asks (see [data options](usage.md#data)). For many hikes in one go, such as a script over a whole archive of recordings, use another public instance or [run your own](https://dev.overpass-api.de/overpass-doc/en/more_info/setup.html), and point isotrail at it with `--overpass-url` or `ISOTRAIL_OVERPASS_URL`. `--no-map-data` leaves Overpass out altogether.
+
+**Open-Meteo.** The free API is for [non-commercial use only](https://open-meteo.com/en/terms), with fewer than 10,000 calls a day. Renders for a business, a client or a site with ads or subscriptions are commercial use and need one of [Open-Meteo's paid plans](https://open-meteo.com/en/pricing). isotrail can't use an API key yet, so for commercial work, leave the weather out with `--no-weather`.
+
+**Terrain Tiles.** The tiles are free on AWS Open Data. Their sources ask to be credited, which the "Terrain Tiles (AWS)" in the credit line does; the full list is in the [README](../README.md#credits).
+
+**Credit.** All three services ask to be credited. Every render and embed carries a small credit line by default. If you leave it off with `--no-attribution`, isotrail prints the text, so you can put it in your post's caption or next to the image on your page instead.

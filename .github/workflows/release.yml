@@ -11,8 +11,45 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  web:
-    name: build web runtime
+  # The same checks as CI, so a tag on a broken commit publishes nothing
+  checks:
+    name: checks
+    runs-on: ubuntu-latest
+    env:
+      ISOTRAIL_GPU: software
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Install software Vulkan driver and ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers ffmpeg
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Check wasm32 build of the wasm-safe and web crates
+        run: cargo clippy --target wasm32-unknown-unknown -p isotrail-track -p isotrail-bundle -p isotrail-render -p isotrail-web -- -D warnings
+
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-deny@0.20.2
+
+      - name: cargo deny
+        run: cargo deny check
+
+  notices:
+    name: third-party notices
+    needs: checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -20,7 +57,30 @@ jobs:
       - name: Install Rust toolchain
         run: rustup toolchain install
 
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-about@0.9.3
+
+      - name: Generate
+        run: cargo about generate --locked --fail about.hbs -o THIRD-PARTY-NOTICES.md
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: notices
+          path: THIRD-PARTY-NOTICES.md
+          if-no-files-found: error
+
+  web:
+    name: build web runtime
+    needs: checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install
+
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: wasm-pack@0.15.0
 
@@ -39,7 +99,7 @@ jobs:
 
   build:
     name: build (${{ matrix.target }})
-    needs: web
+    needs: [web, notices]
     strategy:
       fail-fast: false
       matrix:
@@ -72,11 +132,17 @@ jobs:
           name: web-runtime
           path: runtime
 
+      - uses: actions/download-artifact@v8
+        with:
+          name: notices
+
       - name: Package
         run: |
           name="isotrail-${GITHUB_REF_NAME}-${{ matrix.target }}"
-          mkdir -p "dist/$name"
-          cp README.md LICENSE CHANGELOG.md "dist/$name/"
+          mkdir -p "dist/$name/assets"
+          cp README.md LICENSE CHANGELOG.md THIRD-PARTY-NOTICES.md "dist/$name/"
+          # Credits for the font and palettes built into the binary
+          cp assets/README.md "dist/$name/assets/"
           # Next to the executable, where `isotrail embed --with-runtime` looks
           cp -r runtime "dist/$name/web"
           cd dist

@@ -1,0 +1,43 @@
+[graph]
+# The release targets and the web runtime
+targets = [
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "wasm32-unknown-unknown",
+]
+all-features = true
+
+[advisories]
+unmaintained = "workspace"
+ignore = []
+
+[licenses]
+allow = [
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.9
+exceptions = [
+    # Mozilla's CA certificates, as data
+    { crate = "webpki-root-certs", allow = ["CDLA-Permissive-2.0"] },
+    # Time zone boundaries from OpenStreetMap, credited in the README
+    { crate = "tzf-dist", allow = ["ODbL-1.0"] },
+    # File-level copyleft on an unmodified dependency of `directories`
+    { crate = "option-ext", allow = ["MPL-2.0"] },
+]
+
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
