@@ -3,17 +3,19 @@ mod props;
 mod season;
 mod smooth;
 mod strata;
+mod style;
 mod surface;
 mod voxel;
 
 use glam::{Vec2, Vec3};
-use isotrail_bundle::{GridInfo, Landcover, SceneBundle, line_mask};
+use isotrail_bundle::{GridInfo, SceneBundle, line_mask};
 use season::Seasonal;
 
 use crate::RenderError;
 
 pub use season::foliage;
 pub use smooth::SmoothMesher;
+pub use style::{PathStyle, PropStyle, SeasonStyle, SlabStyle, StrataStyle, WaterStyle};
 pub use surface::Surface;
 pub use voxel::VoxelMesher;
 
@@ -34,6 +36,7 @@ pub struct Terrain {
     pub base_blocks: u32,
     /// Props as a share of the usual number; 0 for none
     pub prop_density: f32,
+    pub style: SlabStyle,
 }
 
 impl Default for Terrain {
@@ -44,6 +47,7 @@ impl Default for Terrain {
             strata: true,
             base_blocks: BASE_BLOCKS,
             prop_density: 1.0,
+            style: SlabStyle::default(),
         }
     }
 }
@@ -272,10 +276,12 @@ struct Columns {
     sea: Vec<bool>,
     /// Layers on the cut faces, or plain stone under any water
     strata: bool,
+    style: SlabStyle,
 }
 
 impl Columns {
     fn new(grid: &GridInfo, landcover: Vec<u8>) -> Columns {
+        let style = SlabStyle::default();
         Columns {
             cols: grid.cols as usize,
             rows: grid.rows as usize,
@@ -287,17 +293,19 @@ impl Columns {
                 .collect(),
             ground: landcover
                 .iter()
-                .map(|&class| landcover_rgba(class))
+                .map(|&class| style.landcover(class))
                 .collect(),
             frozen: vec![false; landcover.len()],
             sea: vec![false; landcover.len()],
             landcover,
             strata: true,
+            style,
         }
     }
 
     fn shaped(mut self, terrain: &Terrain) -> Columns {
         self.strata = terrain.strata;
+        self.style = terrain.style;
         self
     }
 
@@ -314,7 +322,7 @@ impl Columns {
     }
 
     fn side(&self, cell: usize) -> [u8; 4] {
-        shade(self.ground[cell])
+        shade(self.ground[cell], self.style.side_shade)
     }
 
     fn corner(&self, (col, row): (usize, usize)) -> Vec2 {
@@ -322,13 +330,13 @@ impl Columns {
     }
 }
 
-fn landcover_rgba(value: u8) -> [u8; 4] {
-    let [r, g, b] = Landcover::try_from(value).map_or([255, 0, 255], Landcover::legend_rgb);
-    [r, g, b, 255]
+#[cfg(test)]
+fn landcover_rgba(class: u8) -> [u8; 4] {
+    SlabStyle::default().landcover(class)
 }
 
-fn shade([r, g, b, a]: [u8; 4]) -> [u8; 4] {
-    let shade = |c: u8| (f32::from(c) * SIDE_SHADE).round() as u8;
+fn shade([r, g, b, a]: [u8; 4], share: f32) -> [u8; 4] {
+    let shade = |c: u8| (f32::from(c) * share).round() as u8;
     [shade(r), shade(g), shade(b), a]
 }
 
@@ -373,6 +381,29 @@ mod tests {
                 bound <= made + props::MAX_VERTICES * 2,
                 "{bound} for {made}"
             );
+        }
+    }
+
+    #[test]
+    fn bounds_hold_whatever_the_colours() {
+        let bundle = diorama_bundle();
+        let mut style = SlabStyle::default();
+        let grey = [128, 128, 128, 255];
+        style.landcover = [grey; 13];
+        style.side_shade = 1.0;
+        let s = &mut style.strata;
+        (s.dirt, s.pebble, s.stone, s.deep_stone) = (grey, grey, grey, grey);
+        (s.copper, s.gold, s.crystal, s.water) = (grey, grey, grey, grey);
+        let terrain = Terrain {
+            style,
+            ..Terrain::default()
+        };
+        for mesher in [&VoxelMesher::default() as &dyn Mesher, &SmoothMesher] {
+            let mut mesh = mesher.mesh_with(&bundle, &terrain);
+            mesh.add_props(&bundle, 2.0);
+            let bound = mesher.vertex_bound_with(&bundle, &terrain, u64::MAX);
+            let made = mesh.vertices.len() as u64;
+            assert!(made <= bound, "{made} > {bound}");
         }
     }
 

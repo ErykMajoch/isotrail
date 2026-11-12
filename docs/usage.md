@@ -1,6 +1,6 @@
 # Usage
 
-isotrail has six commands. Each one prints its options with `--help`, for example `isotrail render --help`. The global flag `-v` (repeatable, up to `-vvv`) shows more log output, and `-q` (`--quiet`) shows only errors.
+isotrail has seven commands. Each one prints its options with `--help`, for example `isotrail render --help`. The global flag `-v` (repeatable, up to `-vvv`) shows more log output, and `-q` (`--quiet`) shows only errors.
 
 - [`render`](#render): render a hike as a PNG, an animated GIF or an MP4 video
 - [`bundle`](#bundle): save a hike's scene as a `.itb` file
@@ -8,6 +8,7 @@ isotrail has six commands. Each one prints its options with `--help`, for exampl
 - [`stats`](#stats): print a hike's statistics
 - [`style-lab`](#style-lab): compare every look on one contact sheet
 - [`cache`](#cache): manage downloaded data
+- [`theme`](#theme): write the built-in theme, to start your own from
 
 The rest of this page also covers [output for scripts](#output-for-scripts), [how outputs are written](#writing-files) and [exit codes](#exit-codes).
 
@@ -22,6 +23,7 @@ The commands that draw or prepare a hike share their options. They are described
 | `--palette` ([look](#terrain-and-look)) | yes | yes | – | several |
 | `--mesher`, `--block-height`, `--background`, `--time`, `--occlusion`, `--soft-shadows`, `--god-rays` ([look](#terrain-and-look)) | yes | yes | – | – |
 | `--exaggeration` ([look](#terrain-and-look)) | yes | yes | yes | yes |
+| `--theme FILE` ([theme files](configuration.md#theme-files)) | yes | yes | – | yes |
 | [Scene, light and route](#scene-light-and-route) | yes | yes | – | – |
 | [Text and overlays](#text-and-overlays) | yes | for the poster | `--title` only | – |
 | [Animation](#animation), [encoding](#encoding) | yes | – | – | – |
@@ -90,6 +92,7 @@ By default the camera looks along the direction of the hike, turned a little so 
 | `--occlusion X` | `1` | How much hollows, valley floors and the feet of slopes lose of the sky's light, from `0` (none) to `1` |
 | `--soft-shadows CELLS` | `1.5` | How wide shadow edges soften, in grid cells, up to `4`; `0` keeps them hard |
 | `--god-rays auto\|on\|off` | `auto` | Beams of sunlight through the scene: when the sun breaks through a partly cloudy sky (`auto`), whenever the sun is up (`on`), or never |
+| `--theme FILE` | none | Colours, words and fine-tuning from a [theme file](configuration.md#theme-files): the ground, rock layers, trees, water, sky and light, the route, the text and panels, and every word printed on the image. Options you type or set in a config file win over it |
 
 The scene is lit by the sun as it stood when the hike started: high and white at midday, low and golden in the evening, deep blue after dusk. The sky changes with it, and after dusk the stars come out and the moon shows in its phase for the date, where it stood in the sky. A bright moon lights the terrain. Tracks without times are lit by a late-morning sun.
 
@@ -116,8 +119,8 @@ These switch parts of the scene on and off, change the light and style the route
 | `--weather-effects LIST|none` | `clouds,shade,rain,snow,haze` | Which of the weather's effects to draw: `clouds` in the sky (with the dimmer, greyer light under them), `shade` from passing clouds on the ground, `rain`, `snow` and `haze` (with fog). Without `clouds`, `--god-rays auto` sees a clear sky |
 | `--weather SKY` | the recorded weather | Draw `clear`, `cloudy`, `overcast`, `rain`, `snow` or `fog` instead, with the recorded wind. It holds through a whole animation, and the data credit stays as the bundle has it |
 | `--sun AZIMUTH,ELEVATION` | from the hike's time | Set the sun by hand: its compass bearing (`0` to `360`) and its elevation above the horizon (`-90` to `90`), such as `250,8` for a low evening light from the west-south-west. It holds through a whole animation, and can't be typed with `--time` |
-| `--route-colour #RRGGBB` | `#d64834` | The route's colour; the profile's walked part and the web embed's progress line follow it. `--route-color` works too |
-| `--route-width PX` | `2` | The route's width in drawn pixels, from `1` to `4` |
+| `--route-colour #RRGGBB` | `#d64834`, or the theme's | The route's colour; the profile's walked part and the web embed's progress line follow it. `--route-color` works too |
+| `--route-width PX` | `2`, or the theme's | The route's width in drawn pixels, from `1` to `4` |
 | `--route-hidden dashed|dim|solid|off` | `dashed` | How the parts of the route behind ridges show: faded and dashed, faded, like the rest of the route, or not at all |
 | `--markers LIST|none` | `start,finish,head` | Which markers to draw: the `start` and `finish` flags and, in animations, the route's `head` |
 
@@ -317,6 +320,7 @@ Writes everything a web page needs to show the hike as an interactive diorama wi
 | `DIR/<name>.png` | The poster, shown until the diorama is ready and kept in browsers that can't draw it. It is the same image as `isotrail render --aspect <aspect>` with the same options, overlays included |
 | `DIR/snippet.html` | The two lines to paste into a page, also printed when the command finishes |
 | `DIR/<palette>.hex` | A copy of the palette file, with `--palette FILE` only |
+| `DIR/<theme>.toml` | A copy of the theme file, with `--theme FILE` only. The snippet names it in a `theme` attribute; for now the poster is themed and the live diorama keeps the built-in colours |
 | `DIR/isotrail-embed.js`, `DIR/pkg/` | The web runtime, with `--with-runtime` only |
 
 `<name>` is the input's file name without its extension. A GPX file is first prepared in the same way as [`bundle`](#bundle), with the same data options.
@@ -400,7 +404,7 @@ With `--json`, the bundle's hourly samples are under `weather.samples`, with key
 ## style-lab
 
 ```text
-isotrail style-lab <hike.gpx | hike.itb> -o DIR [--aspect SHAPE] [--scale LIST] [--palette LIST] [--exaggeration X] [--config FILE] [--json] [data options]
+isotrail style-lab <hike.gpx | hike.itb> -o DIR [--aspect SHAPE] [--scale LIST] [--palette LIST] [--exaggeration X] [--theme FILE] [--config FILE] [--json] [data options]
 ```
 
 Renders the hike once for every combination of mesher (`voxel`, `smooth`), pixel scale and palette, as `DIR/<mesher>-<scale>-<palette>.png`. It also writes `DIR/contact-sheet.png`, which lays them all out side by side with a label above each, so you can compare looks before choosing your `render` options.
@@ -412,8 +416,9 @@ Renders the hike once for every combination of mesher (`voxel`, `smooth`), pixel
 | `--scale LIST` | `3,5,6` | The pixel scales to compare, each from `1` to `16` and dividing both sides of the image |
 | `--palette LIST` | every built-in palette | The palettes to compare: built-in names, `.hex` files or `none`. A file is labelled with its name without `.hex` |
 | `--exaggeration X` | automatic | As for [`render`](#terrain-and-look) |
+| `--theme FILE` | none | A [theme file](configuration.md#theme-files) for every image, to compare palettes and meshers in your own colours |
 
-It also takes the [data options](#data). From config files it takes its own `[style-lab]` table, but only the data settings and `exaggeration` from `[render]`, so a palette or scale you render with doesn't narrow the comparison.
+It also takes the [data options](#data). From config files it takes its own `[style-lab]` table, but only the data settings, `exaggeration` and `theme` from `[render]`, so a palette or scale you render with doesn't narrow the comparison.
 
 ## cache
 
@@ -433,6 +438,16 @@ A cached download that turns out to be damaged is dropped and fetched once more.
 | macOS | `~/Library/Caches/isotrail` |
 
 Pass `--cache-dir DIR` to any command that downloads, or set `ISOTRAIL_CACHE_DIR`, to use another directory. The flag wins over the variable.
+
+## theme
+
+```text
+isotrail theme print [-o FILE]
+```
+
+Prints the built-in theme: every table and key of a [theme file](configuration.md#theme-files) at its built-in value, with a comment on each table. Save it, change what you like, delete the rest, and pass it to `render`, `embed` or `style-lab` with `--theme`. Reading the printed file back changes nothing.
+
+`-o FILE` writes it to a file instead. Use it in Windows PowerShell 5.1, whose `>` saves text as UTF-16, which isotrail doesn't read as a theme.
 
 ## Output for scripts
 

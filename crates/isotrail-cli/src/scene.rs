@@ -1,7 +1,7 @@
 use clap::{ArgAction, Args};
 use isotrail_render::{
     BASE_BLOCKS, BASE_BLOCKS_RANGE, Conditions, Edges, ForcedWeather, HiddenRoute, Look, Markers,
-    OUTLINES_RANGE, PROP_DENSITY_RANGE, ROUTE_COLOUR, ROUTE_WIDTH_RANGE, RouteStyle, Terrain,
+    OUTLINES_RANGE, PROP_DENSITY_RANGE, ROUTE_WIDTH_RANGE, RouteStyle, Terrain, Theme,
     WeatherEffects, colour_name, parse_colour, parse_count, parse_sun, parse_switch, parse_within,
     switch_name,
 };
@@ -65,16 +65,15 @@ pub struct SceneArgs {
           allow_negative_numbers = true, conflicts_with = "time")]
     sun: Option<[f64; 2]>,
 
-    /// The route's colour
+    /// The route's colour (default #d64834, or the theme's)
     #[arg(long, visible_alias = "route-color", value_name = "#RRGGBB",
-          default_value = "#d64834", value_parser = parse_colour)]
-    route_colour: [u8; 3],
+          value_parser = parse_colour)]
+    route_colour: Option<[u8; 3]>,
 
     /// The route's width in pixels of the image before it is enlarged, from 1
-    /// to 4
-    #[arg(long, value_name = "PX", default_value_t = RouteStyle::default().width_px,
-          value_parser = parse_route_width)]
-    route_width: u32,
+    /// to 4 (default 2, or the theme's)
+    #[arg(long, value_name = "PX", value_parser = parse_route_width)]
+    route_width: Option<u32>,
 
     /// How the parts of the route behind ridges show: faded and dashed,
     /// faded, like the rest, or not at all
@@ -90,31 +89,29 @@ pub struct SceneArgs {
 }
 
 impl SceneArgs {
-    pub fn terrain(&self) -> Terrain {
+    pub fn terrain(&self, theme: &Theme) -> Terrain {
         Terrain {
             paths: self.paths,
             streams: self.streams,
             strata: self.strata,
             base_blocks: self.base_blocks,
             prop_density: self.prop_density,
+            ..theme.terrain()
         }
     }
 
-    pub fn conditions(&self) -> Conditions {
+    pub fn conditions(&self, theme: &Theme) -> Conditions {
         Conditions {
             sun: self.sun,
             weather: self.weather,
             effects: self.weather_effects,
+            ..theme.conditions()
         }
     }
 
     /// Whether the sun is set by hand, so a clip holds it
     pub fn holds_sun(&self) -> bool {
         self.sun.is_some()
-    }
-
-    pub fn route_colour(&self) -> [u8; 3] {
-        self.route_colour
     }
 
     /// `look` with these lights, outlines and route
@@ -124,8 +121,8 @@ impl SceneArgs {
             shadows: self.shadows,
             night_sky: self.night_sky,
             route: RouteStyle {
-                colour: self.route_colour,
-                width_px: self.route_width,
+                colour: self.route_colour.unwrap_or(look.route.colour),
+                width_px: self.route_width.unwrap_or(look.route.width_px),
                 markers: self.markers,
                 ..look.route
             }
@@ -135,8 +132,9 @@ impl SceneArgs {
     }
 
     /// The choices that differ from the default, as the embed's attribute
-    /// names and values
-    pub fn attributes(&self) -> Vec<(&'static str, String)> {
+    /// names and values; a route colour or width given counts when it differs
+    /// from `theme`'s
+    pub fn attributes(&self, theme: &RouteStyle) -> Vec<(&'static str, String)> {
         let usual = Terrain::default();
         let mut attributes = Vec::new();
         let mut switch = |name, on: bool, usual: bool| {
@@ -176,22 +174,17 @@ impl SceneArgs {
         if let Some([azimuth, elevation]) = self.sun {
             attributes.push(("sun", format!("{azimuth},{elevation}")));
         }
-        let route = RouteStyle::default();
+        if let Some(colour) = self.route_colour.filter(|&colour| colour != theme.colour) {
+            attributes.push(("route-colour", colour_name(colour)));
+        }
+        if let Some(width) = self.route_width.filter(|&width| width != theme.width_px) {
+            attributes.push(("route-width", width.to_string()));
+        }
         let mut add = |name, differs: bool, value: String| {
             if differs {
                 attributes.push((name, value));
             }
         };
-        add(
-            "route-colour",
-            self.route_colour != ROUTE_COLOUR,
-            colour_name(self.route_colour),
-        );
-        add(
-            "route-width",
-            self.route_width != route.width_px,
-            self.route_width.to_string(),
-        );
         add(
             "route-hidden",
             self.route_hidden != HiddenRoute::default(),
@@ -259,10 +252,11 @@ mod tests {
     #[test]
     fn defaults_change_nothing() {
         let args = parse(&[]).unwrap();
-        assert_eq!(args.terrain(), Terrain::default());
-        assert_eq!(args.conditions(), Conditions::default());
+        let (theme, route) = (Theme::default(), RouteStyle::default());
+        assert_eq!(args.terrain(&theme), Terrain::default());
+        assert_eq!(args.conditions(&theme), Conditions::default());
         assert_eq!(args.apply(Look::default()), Look::default());
-        assert!(args.attributes().is_empty());
+        assert!(args.attributes(&route).is_empty());
         let spelled_out = parse(&[
             "--prop-density",
             "1",
@@ -284,7 +278,7 @@ mod tests {
             "head,finish,start",
         ])
         .unwrap();
-        assert!(spelled_out.attributes().is_empty());
+        assert!(spelled_out.attributes(&route).is_empty());
         assert_eq!(spelled_out.apply(Look::default()), Look::default());
     }
 
@@ -324,7 +318,7 @@ mod tests {
         ])
         .unwrap();
         let names: Vec<String> = args
-            .attributes()
+            .attributes(&RouteStyle::default())
             .into_iter()
             .map(|(name, value)| format!("{name}={value}"))
             .collect();
@@ -352,7 +346,22 @@ mod tests {
         assert_eq!(look.edges.silhouette, 0.0);
         assert_eq!((look.route.hidden_opacity, look.route.width_px), (0.0, 4));
         assert!(!look.shadows && !look.night_sky);
-        assert_eq!(args.terrain().base_blocks, 12);
+        assert_eq!(args.terrain(&Theme::default()).base_blocks, 12);
+    }
+
+    #[test]
+    fn route_flags_win_over_the_theme_and_the_theme_over_the_built_in_route() {
+        let theme = Theme::parse("[route]\ncolour = \"#00ff00\"\nwidth = 3\n").unwrap();
+        let themed = |line: &[&str]| {
+            let args = parse(line).unwrap();
+            let route = args.apply(theme.look()).route;
+            let attributes = args.attributes(&theme.route);
+            ((route.colour, route.width_px), attributes)
+        };
+        assert_eq!(themed(&[]), (([0, 255, 0], 3), Vec::new()));
+        let (route, attributes) = themed(&["--route-colour", "#d64834", "--route-width", "3"]);
+        assert_eq!(route, ([214, 72, 52], 3));
+        assert_eq!(attributes, [("route-colour", "#d64834".to_owned())]);
     }
 
     #[test]

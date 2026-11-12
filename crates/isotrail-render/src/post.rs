@@ -101,13 +101,17 @@ impl Default for RouteStyle {
 }
 
 pub const ROUTE_COLOUR: [u8; 3] = [214, 72, 52];
+/// How far ordered dithering moves the sky's colours, as a share of full
+/// brightness
+pub const SKY_DITHER: f32 = 0.08;
 
 impl RouteStyle {
+    /// Draws the hidden parts as `hidden` says, faded and dashed as this
+    /// style has them
     pub fn hiding(self, hidden: HiddenRoute) -> RouteStyle {
-        let default = RouteStyle::default();
         let (hidden_opacity, hidden_dash_px) = match hidden {
-            HiddenRoute::Dashed => (default.hidden_opacity, default.hidden_dash_px),
-            HiddenRoute::Dim => (default.hidden_opacity, 0.0),
+            HiddenRoute::Dashed => (self.hidden_opacity, self.hidden_dash_px),
+            HiddenRoute::Dim => (self.hidden_opacity, 0.0),
             HiddenRoute::Solid => (1.0, 0.0),
             HiddenRoute::Off => (0.0, 0.0),
         };
@@ -229,7 +233,7 @@ impl Default for Look {
             palette: Palette::builtin(DEFAULT_PALETTE),
             background: Background::Sky,
             edges: Edges::default(),
-            sky_dither: 0.08,
+            sky_dither: SKY_DITHER,
             route: RouteStyle::default(),
             occlusion: DEFAULT_OCCLUSION,
             soft_shadows: DEFAULT_SOFT_SHADOWS,
@@ -874,5 +878,22 @@ mod tests {
         let moved = before.moon.unwrap().centre - after.moon.unwrap().centre;
         assert_eq!(moved, Vec2::new(30.0, 0.0));
         assert_eq!((before.stars, before.star_seed), (1.0, 7));
+    }
+
+    #[test]
+    fn hidden_parts_keep_the_style_s_own_fade_and_dashes() {
+        let faint = RouteStyle {
+            hidden_opacity: 0.3,
+            hidden_dash_px: 4.0,
+            ..RouteStyle::default()
+        };
+        let hidden = |how| {
+            let style = faint.hiding(how);
+            (style.hidden_opacity, style.hidden_dash_px)
+        };
+        assert_eq!(hidden(HiddenRoute::Dashed), (0.3, 4.0));
+        assert_eq!(hidden(HiddenRoute::Dim), (0.3, 0.0));
+        assert_eq!(hidden(HiddenRoute::Solid), (1.0, 0.0));
+        assert_eq!(hidden(HiddenRoute::Off), (0.0, 0.0));
     }
 }

@@ -17,15 +17,36 @@ pub const DEFAULT_DURATION_S: f32 = 10.0;
 pub const DEFAULT_FPS: u32 = 30;
 pub const DEFAULT_ORBIT_DEG: f32 = 30.0;
 /// Time pacing keeps at most this much of a stop
-const PAUSE_S: f64 = 60.0;
+pub const PAUSE_S: f64 = 60.0;
 /// Slower than this between two points counts as stopping
 const CRAWL_M_PER_S: f64 = 0.25;
 /// A stop at least this long is a night: the route waits while the clock
 /// runs through it
 const NIGHT_S: f64 = 6.0 * 3600.0;
 /// Share of the drawing each night takes, and all of them together at most
-const NIGHT_SHARE: f32 = 0.06;
-const MAX_NIGHTS_SHARE: f32 = 0.3;
+pub const NIGHT_SHARE: f32 = 0.06;
+pub const MAX_NIGHTS_SHARE: f32 = 0.3;
+
+/// How the drawing spends its time on stops and nights
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Pacing {
+    /// Share of the drawing each night takes
+    pub night_share: f32,
+    /// Share of the drawing all nights together take at most
+    pub max_nights_share: f32,
+    /// Time pacing keeps at most this much of a stop, in seconds
+    pub pause_s: f64,
+}
+
+impl Default for Pacing {
+    fn default() -> Pacing {
+        Pacing {
+            night_share: NIGHT_SHARE,
+            max_nights_share: MAX_NIGHTS_SHARE,
+            pause_s: PAUSE_S,
+        }
+    }
+}
 
 /// How long a clip runs and how often it changes
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -230,6 +251,7 @@ pub struct Motion {
     pub conditions: Conditions,
     /// The view the orbit settles on
     pub aim: Aim,
+    pub pacing: Pacing,
 }
 
 /// What one frame of a clip shows
@@ -291,6 +313,7 @@ pub struct Walk {
     profile: Vec<ProfileSample>,
     /// Over the whole profile
     totals: Climb,
+    pacing: Pacing,
 }
 
 /// The recorded times along the route, and the same with stops cut short
@@ -316,6 +339,10 @@ struct Climb {
 
 impl Walk {
     pub fn new(bundle: &SceneBundle) -> Walk {
+        Walk::paced(bundle, Pacing::default())
+    }
+
+    pub fn paced(bundle: &SceneBundle, pacing: Pacing) -> Walk {
         let points = &bundle.route.points;
         let (start_m, end_m) = match (points.first(), points.last()) {
             (Some(first), Some(last)) if points.len() >= 2 => (first.distance_m, last.distance_m),
@@ -330,8 +357,9 @@ impl Walk {
             stats: bundle.meta.stats.clone(),
             start_m,
             end_m,
-            clock: Clock::new(&bundle.route),
+            clock: Clock::new(&bundle.route, pacing.pause_s),
             profile,
+            pacing,
             totals: Climb::default(),
         };
         walk.totals = walk.climb_to(f32::INFINITY);
@@ -379,7 +407,10 @@ impl Walk {
         let night_share = if nights.is_empty() {
             0.0
         } else {
-            NIGHT_SHARE.min(MAX_NIGHTS_SHARE / nights.len() as f32)
+            let pacing = &self.pacing;
+            pacing
+                .night_share
+                .min(pacing.max_nights_share / nights.len() as f32)
         };
         let walking = 1.0 - night_share * nights.len() as f32;
         let (mut cursor, mut from, mut dawn) = (0.0, 0.0, None);
@@ -534,7 +565,7 @@ impl Walk {
 
 impl Clock {
     /// `None` unless every point has a time
-    fn new(route: &Route) -> Option<Clock> {
+    fn new(route: &Route, pause_s: f64) -> Option<Clock> {
         let points = &route.points;
         let first = points.first()?.time?;
         if points.len() < 2 {
@@ -560,9 +591,9 @@ impl Clock {
                 clock.nights.push(i);
                 0.0
             } else if gap {
-                dt.min(PAUSE_S)
+                dt.min(pause_s)
             } else {
-                dt.min(PAUSE_S + walk_s)
+                dt.min(pause_s + walk_s)
             };
             clock.distance_m.push(b.distance_m);
             clock.paced_s.push(paced);

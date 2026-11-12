@@ -19,6 +19,7 @@ use crate::overlay::OverlayArgs;
 use crate::render::Source;
 use crate::report::{Report, ReportArgs, Written, say};
 use crate::scene::SceneArgs;
+use crate::theme::ThemeFileArg;
 use crate::usage;
 
 /// The element's script and the WebAssembly renderer it loads, at the paths
@@ -86,6 +87,9 @@ pub struct EmbedArgs {
     look: LookArgs,
 
     #[command(flatten)]
+    theme: ThemeFileArg,
+
+    #[command(flatten)]
     scene: SceneArgs,
 
     #[command(flatten)]
@@ -141,27 +145,29 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
             RUNTIME_FILES.map(|file| (runtime_file(runtime, file), runtime_file(dir, file)))
         })
         .collect();
-    // A palette file goes beside the bundle, for the live embed to fetch
-    let palette_url = match args.look.palette_file() {
-        Some(file) => {
-            let mut copy = file
-                .file_stem()
-                .with_context(|| format!("{} has no file name", file.display()))?
-                .to_owned();
-            copy.push(".hex");
-            let url = format!(
-                "{}{}",
-                base_path(args.base_url.as_deref()),
-                url_segment(&copy.to_string_lossy())
-            );
-            let copy = dir.join(copy);
-            if !output::same_file(file, &copy) {
-                copies.push((file.to_owned(), copy));
-            }
-            Some(url)
+    // Palette and theme files go beside the bundle, for the live embed to fetch
+    let mut beside = |file: Option<&Path>, extension: &str| -> anyhow::Result<Option<String>> {
+        let Some(file) = file else {
+            return Ok(None);
+        };
+        let mut copy = file
+            .file_stem()
+            .with_context(|| format!("{} has no file name", file.display()))?
+            .to_owned();
+        copy.push(extension);
+        let url = format!(
+            "{}{}",
+            base_path(args.base_url.as_deref()),
+            url_segment(&copy.to_string_lossy())
+        );
+        let copy = dir.join(copy);
+        if !output::same_file(file, &copy) {
+            copies.push((file.to_owned(), copy));
         }
-        None => None,
+        Ok(Some(url))
     };
+    let palette_url = beside(args.look.palette_file(), ".hex")?;
+    let theme_url = beside(args.theme.path(), ".toml")?;
     // The bundle being embedded may already sit where it would be written
     let in_place = output::same_file(&args.file, &bundle_path);
     output::folder(dir)?;
@@ -173,11 +179,13 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
         .into_iter()
         .flatten()
         .chain(args.look.palette_file().filter(|path| path.is_file()))
+        .chain(args.theme.path().filter(|path| path.is_file()))
         .collect();
     output::plan(outputs.map(PathBuf::as_path), &inputs)?;
     args.overlay.check()?;
-    let mesher = args.look.mesher(typed, args.scene.terrain());
-    let look = args.scene.apply(args.look.look()?);
+    let theme = args.theme.read()?;
+    let mesher = args.look.mesher(typed, args.scene.terrain(&theme));
+    let look = args.scene.apply(args.look.look(&theme)?);
 
     let source = Source::open(&args.file)?;
     if source.is_bundle() {
@@ -206,16 +214,14 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
             bundle_path.display()
         )));
     }
-    let text = args.overlay.text(&bundle)?;
-    let fitted = args.overlay.fit(
-        &text,
-        &shape.label(),
-        &framing,
-        args.scale,
-        args.scene.route_colour(),
-    )?;
+    let text = args.overlay.text(&bundle, &theme.labels)?;
+    let style = args.overlay.style(&theme, look.route.colour);
+    let fitted = args
+        .overlay
+        .fit(&text, &shape.label(), &framing, args.scale, &style)?;
     let aim = args.frame.aim();
-    let sun = crate::sun::hike_sun(&bundle, args.look.time, &args.scene.conditions())?;
+    let conditions = args.scene.conditions(&theme);
+    let sun = crate::sun::hike_sun(&bundle, args.look.time, &conditions)?;
 
     if in_place {
         report.kept(Written::file(&bundle_path));
@@ -257,7 +263,8 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
     }
 
     let mut attributes = args.look.attributes(palette_url.as_deref());
-    attributes.extend(args.scene.attributes());
+    attributes.extend(theme_url.map(|url| ("theme", url)));
+    attributes.extend(args.scene.attributes(&theme.route));
     attributes.extend(view_attributes(&aim, &bundle));
     attributes.extend(args.overlay.attributes());
     let html = snippet(&Snippet {

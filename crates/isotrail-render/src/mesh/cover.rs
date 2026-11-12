@@ -1,23 +1,22 @@
 use isotrail_bundle::{Landcover, SceneBundle, line_mask};
 
 use super::season::Seasonal;
-use super::{Terrain, blend, hash, landcover_rgba};
+use super::{Terrain, blend, hash};
 
 const GLINT_KEY: u64 = 1 << 32;
-const GLINT_PER_MILLE: u64 = 30;
+pub(super) const GLINT_PER_MILLE: u32 = 30;
 const FOAM_KEY: u64 = 2 << 32;
-/// Foam on the sea's cells against the land, and on the ring beyond them
-const FOAM_PERCENT: [u64; 2] = [80, 30];
-const PATH_BLEND: f32 = 0.45;
-const ROAD_BLEND: f32 = 0.6;
+pub(super) const FOAM_PERCENT: [u32; 2] = [80, 30];
+pub(super) const PATH_BLEND: f32 = 0.45;
+pub(super) const ROAD_BLEND: f32 = 0.6;
 
-const SHORE: [u8; 4] = [104, 166, 226, 255];
+pub(super) const SHORE: [u8; 4] = [104, 166, 226, 255];
 /// Darker than lakes, with surf of foam and shallow lake blue along its shore
-const SEA: [u8; 4] = [38, 84, 158, 255];
-const FOAM: [u8; 4] = [236, 240, 236, 255];
-const GLINT: [u8; 4] = [214, 236, 250, 255];
-const TRODDEN: [u8; 4] = [226, 204, 160, 255];
-const PAVED: [u8; 4] = [196, 194, 190, 255];
+pub(super) const SEA: [u8; 4] = [38, 84, 158, 255];
+pub(super) const FOAM: [u8; 4] = [236, 240, 236, 255];
+pub(super) const GLINT: [u8; 4] = [214, 236, 250, 255];
+pub(super) const TRODDEN: [u8; 4] = [226, 204, 160, 255];
+pub(super) const PAVED: [u8; 4] = [196, 194, 190, 255];
 
 /// Each cell's top colour: its ground in the season's colours, with lighter
 /// lake shores, a darker sea with surf along its shore, rare glints on open
@@ -28,6 +27,8 @@ pub(super) fn top_colours(
     shown: &Terrain,
 ) -> Vec<[u8; 4]> {
     let (grid, terrain) = (&bundle.grid, &bundle.terrain);
+    let style = &shown.style;
+    let (water_style, paths) = (&style.water, &style.paths);
     let ground = seasonal.ground(bundle);
     let (cols, rows) = (grid.cols as usize, grid.rows as usize);
     let water = u8::from(Landcover::Water);
@@ -52,7 +53,7 @@ pub(super) fn top_colours(
             let (col, row) = (cell % cols, cell / cols);
             if class == water {
                 if !lake[cell] {
-                    return landcover_rgba(class);
+                    return style.landcover(class);
                 }
                 let around = |offsets: [(isize, isize); 4]| {
                     offsets.iter().all(|&(dc, dr)| wet(col, row, dc, dr))
@@ -71,32 +72,36 @@ pub(super) fn top_colours(
                     };
                     let roll = hash(bundle.prop_seed, [FOAM_KEY, cell as u64]) % 100;
                     if let Some(ring) = (1..=2).find(|&reach| land_within(reach)) {
-                        return if roll < FOAM_PERCENT[ring as usize - 1] {
-                            FOAM
+                        return if roll < u64::from(water_style.foam_percent[ring as usize - 1]) {
+                            water_style.foam
                         } else {
-                            landcover_rgba(class)
+                            style.landcover(class)
                         };
                     }
                 }
                 let sea = seasonal.sea(cell);
                 if shore {
-                    return SHORE;
+                    return water_style.shore;
                 }
                 let open = around([(1, 1), (1, -1), (-1, 1), (-1, -1)]);
-                if open && hash(bundle.prop_seed, [GLINT_KEY, cell as u64]) % 1000 < GLINT_PER_MILLE
-                {
-                    return GLINT;
+                let glint = hash(bundle.prop_seed, [GLINT_KEY, cell as u64]) % 1000;
+                if open && glint < u64::from(water_style.glint_per_mille) {
+                    return water_style.glint;
                 }
-                return if sea { SEA } else { landcover_rgba(class) };
+                return if sea {
+                    water_style.sea
+                } else {
+                    style.landcover(class)
+                };
             }
             let ground = ground[cell];
             let lines = shown.lines(terrain.lines.get(cell).copied().unwrap_or(0));
             if lines & line_mask::PATH != 0 {
-                blend(ground, TRODDEN, PATH_BLEND)
+                blend(ground, paths.trodden, paths.path_blend)
             } else if lines & line_mask::ROAD != 0 {
-                blend(ground, PAVED, ROAD_BLEND)
+                blend(ground, paths.paved, paths.road_blend)
             } else if lines & line_mask::STREAM != 0 {
-                landcover_rgba(water)
+                style.landcover(water)
             } else {
                 ground
             }
@@ -110,13 +115,14 @@ mod tests {
     use isotrail_testkit::{bundle, grid};
 
     use super::*;
+    use crate::mesh::landcover_rgba;
 
     fn rgba(class: Landcover) -> [u8; 4] {
         landcover_rgba(u8::from(class))
     }
 
     fn tops(bundle: &SceneBundle) -> Vec<[u8; 4]> {
-        top_colours(bundle, &Seasonal::new(bundle), &Terrain::default())
+        top_colours(bundle, &Seasonal::plain(bundle), &Terrain::default())
     }
 
     /// A 12 × 12 lake with a 2-cell dry rim
@@ -251,7 +257,7 @@ mod tests {
                 streams,
                 ..Terrain::default()
             };
-            top_colours(&bundle, &Seasonal::new(&bundle), &terrain)
+            top_colours(&bundle, &Seasonal::plain(&bundle), &terrain)
         };
         let water = rgba(Landcover::Water);
         assert_eq!(
@@ -263,6 +269,14 @@ mod tests {
             [heath, trodden, paved, heath, trodden, paved]
         );
         assert_eq!(shown(false, false), [heath; 6]);
+
+        let mut themed = Terrain::default();
+        themed.style.paths.trodden = [0, 0, 0, 255];
+        themed.style.paths.path_blend = 1.0;
+        themed.style.landcover[usize::from(u8::from(Landcover::Water))] = [1, 2, 3, 255];
+        let colours = top_colours(&bundle, &Seasonal::plain(&bundle), &themed);
+        assert_eq!(colours[1], [0, 0, 0, 255]);
+        assert_eq!(colours[3], [1, 2, 3, 255]);
     }
 
     #[test]

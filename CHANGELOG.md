@@ -22,6 +22,10 @@ All notable changes to `isotrail` are documented here.
 - **Output for scripts.** `--json` on `render`, `embed`, `bundle` and `style-lab` prints one JSON object with the files written, their sizes and the credit for the caption. `-q` (`--quiet`) prints only errors.
 - **Other servers.** `--terrain-url` takes elevation tiles from a mirror, `--weather-url` the weather from another server with Open-Meteo's API, and an Open-Meteo API key in `ISOTRAIL_OPEN_METEO_KEY` uses their servers for customers; the key never reaches the cache, the bundle or a message. `--cache-dir` sets the cache folder for one run, like `ISOTRAIL_CACHE_DIR`.
 
+- **Theme files.** One TOML file sets isotrail's own colours, words and fine-tuning: the ground, rock layers, trees, water, seasons, sky and light, the route, the text and panels. `--theme FILE` works on `render`, `embed` and `style-lab`, and as the `theme` key in a config file; options you type still win over it. `isotrail theme print` writes the built-in theme to start from.
+- **Overlays in your language.** A theme's `[labels]` table translates every word printed on the image, with patterns for times and dates and the decimal separator, so a story can read `sobota, 14 czerwca 2025` and `7,4 km`.
+- `embed --theme` copies the theme beside the bundle and names it in the snippet's `theme` attribute.
+
 ### Changed
 
 - A `--scale` that doesn't divide the image size is refused before any download, with exit code 2.

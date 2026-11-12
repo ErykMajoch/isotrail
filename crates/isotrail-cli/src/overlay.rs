@@ -1,8 +1,8 @@
 use clap::{Args, ValueEnum};
 use isotrail_bundle::{HikeStats, SceneBundle, WEATHER_ATTRIBUTION};
 use isotrail_render::{
-    DateFormat, FitStep, Fitted, Framing, Layout, OverlayStyle, OverlayText, Overlays, PanelStyle,
-    PixelFont, Stat, StatKind, Subtitle, TitleSize,
+    DateFormat, FitStep, Fitted, Framing, Labels, Layout, OverlayStyle, OverlayText, Overlays,
+    PanelStyle, PixelFont, Stat, StatKind, Subtitle, Theme, TitleSize,
 };
 use tracing::warn;
 
@@ -144,8 +144,9 @@ impl From<StatArg> for StatKind {
 }
 
 impl OverlayArgs {
-    /// The overlays' look, with the profile walked in `route_colour`
-    pub fn style(&self, route_colour: [u8; 3]) -> OverlayStyle {
+    /// The overlays' look in `theme`'s colours, with the profile walked in
+    /// `route_colour`
+    pub fn style(&self, theme: &Theme, route_colour: [u8; 3]) -> OverlayStyle {
         OverlayStyle {
             panel: match self.panel {
                 PanelArg::Frosted => PanelStyle::Frosted,
@@ -157,6 +158,7 @@ impl OverlayArgs {
             },
             layout: self.layout,
             route_colour,
+            theme: theme.overlay.clone(),
         }
     }
 
@@ -189,9 +191,9 @@ impl OverlayArgs {
         Ok(())
     }
 
-    /// The bundle's text with the flags applied, leaving out the parts that
-    /// weren't asked for
-    pub fn text(&self, bundle: &SceneBundle) -> anyhow::Result<OverlayText> {
+    /// The bundle's text in the words of `labels` with the flags applied,
+    /// leaving out the parts that weren't asked for
+    pub fn text(&self, bundle: &SceneBundle, labels: &Labels) -> anyhow::Result<OverlayText> {
         self.check()?;
         let show = |part| self.overlay.contains(&part);
         let kinds: Vec<StatKind> = self.stats.iter().map(|&stat| stat.into()).collect();
@@ -201,7 +203,7 @@ impl OverlayArgs {
             DateFormatArg::Iso => DateFormat::Iso,
         };
         let units = self.units.into();
-        let mut text = OverlayText::from_bundle(bundle, units, &kinds, date_format);
+        let mut text = OverlayText::from_bundle_with(bundle, units, &kinds, date_format, labels);
 
         if let Some(title) = &self.title {
             text.title.clone_from(title);
@@ -247,11 +249,17 @@ impl OverlayArgs {
             Subtitle::Text(subtitle) => subtitle.as_str(),
             _ => "",
         };
+        let stats: String = text
+            .stats
+            .iter()
+            .map(|stat| format!("{} {} ", stat.value, stat.label))
+            .collect();
         let font = PixelFont::monogram();
         for (field, words) in [
             ("title", text.title.as_str()),
             ("subtitle", subtitle),
             ("date", text.date.as_deref().unwrap_or_default()),
+            ("stats", stats.as_str()),
             (
                 "credit line",
                 text.credit_extra.as_deref().unwrap_or_default(),
@@ -274,10 +282,10 @@ impl OverlayArgs {
         shape: &str,
         framing: &Framing,
         scale: u32,
-        route_colour: [u8; 3],
+        style: &OverlayStyle,
     ) -> anyhow::Result<Fitted> {
         let frame = format!("the {shape} frame at --scale {scale}");
-        let fit = Overlays::fit(text, &self.style(route_colour), framing).map_err(|_| {
+        let fit = Overlays::fit(text, style, framing).map_err(|_| {
             usage(format!(
                 "the overlays don't fit {frame}, even with a small title, no subtitle, \
                  no profile, no credit and one stat; use a lower --scale, a larger --size or \
@@ -296,14 +304,21 @@ impl OverlayArgs {
 
     /// The stats of [`OverlayArgs::text`] part-way along the hike, with
     /// `walked` holding the figures so far
-    pub fn walked_stats(&self, bundle: &SceneBundle, walked: &HikeStats) -> Vec<Stat> {
+    pub fn walked_stats(
+        &self,
+        bundle: &SceneBundle,
+        walked: &HikeStats,
+        labels: &Labels,
+    ) -> Vec<Stat> {
         if !self.overlay.contains(&Part::Stats) {
             return Vec::new();
         }
         let units = self.units.into();
         self.stats
             .iter()
-            .filter_map(|&stat| StatKind::from(stat).stat_walked(&bundle.meta.stats, walked, units))
+            .filter_map(|&stat| {
+                StatKind::from(stat).stat_walked_with(&bundle.meta.stats, walked, units, labels)
+            })
             .collect()
     }
 
@@ -403,7 +418,7 @@ mod tests {
     #[test]
     fn defaults_print_everything() {
         let args = parse(&[]).unwrap();
-        let text = args.text(&bundle()).unwrap();
+        let text = args.text(&bundle(), Labels::built_in()).unwrap();
         assert_eq!(text.title, "Ridge | Valley");
         assert_eq!(text.subtitle, Subtitle::Auto);
         assert_eq!(text.date.as_deref(), Some("Saturday 14 June 2025"));
@@ -412,21 +427,34 @@ mod tests {
         assert_eq!(text.profile, [400.0, 401.0, 402.0, 403.0]);
         assert_eq!(text.attribution.as_deref(), Some("© Mappers · Tiles"));
         assert_eq!(args.caption_credit(&bundle(), false), None);
-        assert_eq!(args.style(ROUTE_COLOUR), OverlayStyle::default());
+        assert_eq!(
+            args.style(&Theme::default(), ROUTE_COLOUR),
+            OverlayStyle::default()
+        );
     }
 
     #[test]
     fn the_credit_moves_to_the_caption_when_left_off() {
         for flags in [&["--no-attribution"][..], &["--overlay", "none"][..]] {
             let args = parse(flags).unwrap();
-            assert_eq!(args.text(&bundle()).unwrap().attribution, None);
+            assert_eq!(
+                args.text(&bundle(), Labels::built_in())
+                    .unwrap()
+                    .attribution,
+                None
+            );
             assert_eq!(
                 args.caption_credit(&bundle(), false).as_deref(),
                 Some("© Mappers · Tiles")
             );
         }
         let args = parse(&["--overlay", "title"]).unwrap();
-        assert!(args.text(&bundle()).unwrap().attribution.is_some());
+        assert!(
+            args.text(&bundle(), Labels::built_in())
+                .unwrap()
+                .attribution
+                .is_some()
+        );
         let mut bare = bundle();
         bare.meta.attribution.clear();
         let args = parse(&["--no-attribution"]).unwrap();
@@ -437,7 +465,11 @@ mod tests {
             args.caption_credit(&with_weather, false).as_deref(),
             Some("© Mappers · Tiles · Weather data by Open-Meteo.com")
         );
-        let drawn = parse(&[]).unwrap().text(&with_weather).unwrap().attribution;
+        let drawn = parse(&[])
+            .unwrap()
+            .text(&with_weather, Labels::built_in())
+            .unwrap()
+            .attribution;
         assert_eq!(drawn.as_deref(), Some("© Mappers · Tiles · Open-Meteo.com"));
         // Or when the frame had no room for it
         assert_eq!(
@@ -454,7 +486,7 @@ mod tests {
         let args = parse(&["--stats", "distance,gain,time,high,low,speed"]).unwrap();
         let mut bundle = bundle();
         bundle.meta.stats.min_ele_m = Some(300.0);
-        let text = args.text(&bundle).unwrap();
+        let text = args.text(&bundle, Labels::built_in()).unwrap();
         assert_eq!(text.short_date.as_deref(), Some("14 Jun 2025"));
         let fit = |aspect: Aspect, scale| {
             args.fit(
@@ -462,7 +494,7 @@ mod tests {
                 aspect.name(),
                 &aspect.framing(scale).unwrap(),
                 scale,
-                ROUTE_COLOUR,
+                &OverlayStyle::default(),
             )
         };
         assert_eq!(fit(Aspect::Story, 3).unwrap().steps, []);
@@ -477,7 +509,7 @@ mod tests {
         long.stats[0] = Stat::new("123456789012345 km", "distance");
         let framing = Aspect::Square.framing(10).unwrap();
         let refused = args
-            .fit(&long, "square", &framing, 10, ROUTE_COLOUR)
+            .fit(&long, "square", &framing, 10, &OverlayStyle::default())
             .unwrap_err();
         assert!(refused.is::<crate::UsageError>());
         let message = refused.to_string();
@@ -488,7 +520,10 @@ mod tests {
         assert!(message.contains("--stats"), "{message}");
         // A date given as text has no shorter form
         let given = parse(&["--date", "Summer 2025"]).unwrap();
-        assert_eq!(given.text(&bundle).unwrap().short_date, None);
+        assert_eq!(
+            given.text(&bundle, Labels::built_in()).unwrap().short_date,
+            None
+        );
     }
 
     #[test]
@@ -512,24 +547,24 @@ mod tests {
     fn overlay_picks_the_parts() {
         let text = parse(&["--overlay", "stats"])
             .unwrap()
-            .text(&bundle())
+            .text(&bundle(), Labels::built_in())
             .unwrap();
         assert!(text.title.is_empty() && text.date.is_none());
         assert_eq!(text.stats.len(), 4);
         let text = parse(&["--overlay", "title,date"])
             .unwrap()
-            .text(&bundle())
+            .text(&bundle(), Labels::built_in())
             .unwrap();
         assert!(!text.title.is_empty() && text.date.is_some() && text.stats.is_empty());
         assert!(text.profile.is_empty());
         let text = parse(&["--overlay", "profile"])
             .unwrap()
-            .text(&bundle())
+            .text(&bundle(), Labels::built_in())
             .unwrap();
         assert!(text.stats.is_empty() && text.profile.len() == 4);
         let text = parse(&["--overlay", "none"])
             .unwrap()
-            .text(&bundle())
+            .text(&bundle(), Labels::built_in())
             .unwrap();
         assert!(text.title.is_empty() && text.date.is_none() && text.stats.is_empty());
         assert!(text.profile.is_empty());
@@ -539,7 +574,7 @@ mod tests {
     fn none_stands_alone() {
         let message = parse(&["--overlay", "none,title"])
             .unwrap()
-            .text(&bundle())
+            .text(&bundle(), Labels::built_in())
             .unwrap_err()
             .to_string();
         assert!(message.contains("--overlay none"), "{message}");
@@ -549,14 +584,14 @@ mod tests {
     fn stats_are_chosen_in_order_once_each() {
         let text = parse(&["--stats", "pace,low,distance"])
             .unwrap()
-            .text(&bundle())
+            .text(&bundle(), Labels::built_in())
             .unwrap();
         // The bundle has no low point, so it's left out
         let labels: Vec<&str> = text.stats.iter().map(|s| s.label.as_str()).collect();
         assert_eq!(labels, ["pace", "distance"]);
         let message = parse(&["--stats", "gain,time,gain"])
             .unwrap()
-            .text(&bundle())
+            .text(&bundle(), Labels::built_in())
             .unwrap_err()
             .to_string();
         assert!(message.contains("gain twice"), "{message}");
@@ -574,18 +609,18 @@ mod tests {
             "Summer 2025",
         ])
         .unwrap();
-        let text = args.text(&bundle()).unwrap();
+        let text = args.text(&bundle(), Labels::built_in()).unwrap();
         assert_eq!(text.title, "Łańcuch");
         assert_eq!(text.subtitle, Subtitle::Text("Tatry".into()));
         assert_eq!(text.date.as_deref(), Some("Summer 2025"));
         let text = parse(&["--subtitle", "None"])
             .unwrap()
-            .text(&bundle())
+            .text(&bundle(), Labels::built_in())
             .unwrap();
         assert_eq!(text.subtitle, Subtitle::None);
         let text = parse(&["--date-format", "iso"])
             .unwrap()
-            .text(&bundle())
+            .text(&bundle(), Labels::built_in())
             .unwrap();
         assert_eq!(text.date.as_deref(), Some("2025-06-14"));
         assert!(parse(&["--date", "May", "--date-format", "short"]).is_err());
@@ -595,7 +630,7 @@ mod tests {
     fn style_flags_map_to_the_style() {
         let args = parse(&["--panel", "none", "--title-size", "small"]).unwrap();
         assert_eq!(
-            args.style(ROUTE_COLOUR),
+            args.style(&Theme::default(), ROUTE_COLOUR),
             OverlayStyle {
                 panel: PanelStyle::None,
                 title_size: TitleSize::Small,

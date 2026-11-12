@@ -1231,6 +1231,7 @@ dependencies = [
  "png",
  "pollster",
  "thiserror",
+ "toml",
  "tracing",
  "unicode-normalization",
  "web-sys",

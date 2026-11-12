@@ -1,7 +1,6 @@
 use glam::{IVec2, Vec3};
 use wgpu::util::DeviceExt;
 
-use crate::lighting::{BANDS, FILL};
 use crate::occlusion::sky_view;
 use crate::post::{DEPTH_FORMAT, ID_FORMAT, NORMAL_FORMAT, PostPass, Sky, TERRAIN_ID};
 use crate::route::{RoutePass, to_pixel};
@@ -426,9 +425,11 @@ impl TerrainRenderer {
             view_proj: camera.view_proj.to_cols_array(),
             light_view_proj: light_view_proj.to_cols_array(),
             sun: sun.direction.normalize().extend(sun.ambient).to_array(),
-            sun_colour: (sun.colour * sun.intensity).extend(BANDS as f32).to_array(),
+            sun_colour: (sun.colour * sun.intensity)
+                .extend(sun.bands as f32)
+                .to_array(),
             ambient_colour: sun.ambient_colour.extend(1.0).to_array(),
-            fill: towards_camera.extend(FILL).to_array(),
+            fill: towards_camera.extend(sun.fill).to_array(),
             shadow: [texel_m, 0.0, 0.0, 0.0],
             clouds,
             cloud_origin,

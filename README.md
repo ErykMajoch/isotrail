@@ -141,6 +141,7 @@ isotrail render hike.gpx --no-map-data
 | [`stats`](docs/usage.md#stats) | Print distance, elevation gain and loss, moving and elapsed time, and the weather during the hike |
 | [`style-lab`](docs/usage.md#style-lab) | Render every mesher, pixel scale and palette on one contact sheet |
 | [`cache`](docs/usage.md#cache) | Show or clear the cache of downloaded data |
+| [`theme`](docs/usage.md#theme) | Write the built-in theme file, to start your own colours and words from |
 
 Run `isotrail <command> --help` for every option, or see the [usage guide](docs/usage.md).
 
@@ -157,6 +158,8 @@ units = "imperial"
 ```
 
 `embed`, `bundle` and `style-lab` read the same files, and can have tables of their own. See [Configuration](docs/configuration.md) for file locations, precedence and environment variables.
+
+A [theme file](docs/configuration.md#theme-files) (`--theme FILE`) changes isotrail's own colours and the words printed on the image, so a story can be in your language.
 
 ## Contributing
 

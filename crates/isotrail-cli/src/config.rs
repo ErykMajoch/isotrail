@@ -20,9 +20,9 @@ const CONFIG_ENV: &str = "ISOTRAIL_CONFIG";
 const RENDER: &str = "render";
 /// The commands that read config files, each from the table of its name
 const COMMANDS: [&str; 4] = [RENDER, "embed", "bundle", "style-lab"];
-/// What style-lab takes from [render]: the data settings, not the looks it
-/// lays side by side
-const STYLE_LAB_FROM_RENDER: [&str; 12] = [
+/// What style-lab takes from [render]: the data settings and the theme, not
+/// the looks it lays side by side
+const STYLE_LAB_FROM_RENDER: [&str; 13] = [
     "detail",
     "offline",
     "overpass-url",
@@ -35,6 +35,7 @@ const STYLE_LAB_FROM_RENDER: [&str; 12] = [
     "no-weather",
     "season",
     "exaggeration",
+    "theme",
 ];
 /// Flags that only make sense for one run
 const NOT_SETTINGS: [&str; 8] = [

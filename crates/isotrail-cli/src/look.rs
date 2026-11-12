@@ -6,7 +6,7 @@ use clap::{Args, ValueEnum};
 use isotrail_render::{
     BLOCK_HEIGHT_RANGE, Background, DEFAULT_OCCLUSION, DEFAULT_PALETTE, DEFAULT_SOFT_SHADOWS,
     GodRays, Look, Mesher, MesherKind, OCCLUSION_RANGE, Palette, SOFT_SHADOWS_RANGE, Terrain,
-    VoxelMesher, parse_within,
+    Theme, VoxelMesher, parse_within,
 };
 use tracing::warn;
 
@@ -89,14 +89,15 @@ impl From<MesherArg> for MesherKind {
 }
 
 impl LookArgs {
-    pub fn look(&self) -> anyhow::Result<Look> {
+    /// The look these flags ask for, over `theme`'s
+    pub fn look(&self, theme: &Theme) -> anyhow::Result<Look> {
         Ok(Look {
             palette: read_palette(&self.palette)?,
             background: self.background,
             occlusion: self.occlusion,
             soft_shadows: self.soft_shadows,
             god_rays: self.god_rays.into(),
-            ..Look::default()
+            ..theme.look()
         })
     }
 

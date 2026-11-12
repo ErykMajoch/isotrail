@@ -73,12 +73,14 @@ impl Options {
                 parse_within(text, &PROP_DENSITY_RANGE)
             })
             .unwrap_or(usual.prop_density),
+            ..usual
         };
         let conditions = Conditions {
             sun: read(options, "sun", parse_sun),
             weather: read(options, "weather", str::parse::<ForcedWeather>),
             effects: read(options, "weatherEffects", str::parse::<WeatherEffects>)
                 .unwrap_or_default(),
+            ..Conditions::default()
         };
         let held_sun = match conditions.sun {
             Some(_) => Some(SunState::seen(bundle, When::Start, &conditions)),

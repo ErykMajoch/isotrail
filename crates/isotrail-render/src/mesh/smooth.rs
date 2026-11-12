@@ -14,7 +14,7 @@ impl Mesher for SmoothMesher {
         let grid = &bundle.grid;
         let (cols, rows) = (grid.cols as usize, grid.rows as usize);
         let corners = corner_heights(bundle);
-        let seasonal = Seasonal::new(bundle);
+        let seasonal = Seasonal::new(bundle, &terrain.style);
         let colours = cover::top_colours(bundle, &seasonal, terrain);
         let corner = |col: usize, row: usize| {
             slab_position(grid, col as f64, row as f64).extend(corners[row * (cols + 1) + col])
@@ -58,7 +58,7 @@ impl Mesher for SmoothMesher {
         }
         let cols = grid.cols as usize;
         let corners = corner_heights(bundle);
-        let seasonal = Seasonal::new(bundle);
+        let seasonal = Seasonal::new(bundle, &terrain.style);
         let columns = Columns::new(grid, bundle.terrain.landcover.clone())
             .in_season(bundle, &seasonal)
             .shaped(terrain);
@@ -210,7 +210,7 @@ mod tests {
         classes[6] = Landcover::Water;
         let bundle = bundle(grid(4, 3, 10.0), &heights, &classes);
         let mesh = SmoothMesher.mesh(&bundle);
-        let water = cover::top_colours(&bundle, &Seasonal::new(&bundle), &Terrain::default())[5];
+        let water = cover::top_colours(&bundle, &Seasonal::plain(&bundle), &Terrain::default())[5];
         let lake: Vec<_> = surface(&mesh).filter(|t| t[0].colour == water).collect();
         assert_eq!(lake.len(), 4);
         for vertex in lake.into_iter().flatten() {

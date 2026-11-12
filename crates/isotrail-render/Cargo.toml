@@ -15,6 +15,7 @@ isotrail-bundle = { path = "../isotrail-bundle" }
 isotrail-track = { path = "../isotrail-track" }
 png.workspace = true
 thiserror.workspace = true
+toml.workspace = true
 tracing.workspace = true
 unicode-normalization.workspace = true
 wgpu.workspace = true

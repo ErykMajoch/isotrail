@@ -22,56 +22,55 @@ pub const BANDS: u32 = 4;
 pub const MIN_LIGHT_ELEVATION_DEG: f64 = 10.0;
 /// Direct light from a full moon high in a dark sky
 pub const MOONLIGHT: f32 = 0.4;
-const MOON_COLOUR: Vec3 = Vec3::new(0.72, 0.82, 1.0);
+pub const MOON_COLOUR: Vec3 = Vec3::new(0.72, 0.82, 1.0);
 
 /// The light and sky at one sun elevation
-#[derive(Clone, Copy)]
-struct Key {
-    elevation_deg: f32,
-    colour: Vec3,
-    intensity: f32,
-    ambient: f32,
-    ambient_colour: Vec3,
-    sky: [[u8; 3]; 2],
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LightKey {
+    pub colour: Vec3,
+    pub intensity: f32,
+    pub ambient: f32,
+    /// Tints the ambient light
+    pub ambient_colour: Vec3,
+    /// The sky's colour at the top and bottom of the frame
+    pub sky: [[u8; 3]; 2],
 }
 
-/// Night, blue hour, sunset, golden hour and day; between two keys the light
-/// blends linearly with the sun's elevation
-const RAMP: [Key; 5] = [
-    Key {
-        elevation_deg: -18.0,
+/// Where the keys of [`Light::ramp`] stand: night, blue hour, sunset, golden
+/// hour and day; between two keys the light blends linearly with the sun's
+/// elevation
+pub const RAMP_ELEVATIONS_DEG: [f32; 5] = [-18.0, -6.0, 0.0, 6.0, 20.0];
+
+const RAMP: [LightKey; 5] = [
+    LightKey {
         colour: Vec3::new(0.55, 0.65, 1.0),
         intensity: 0.1,
         ambient: 0.3,
         ambient_colour: Vec3::new(0.45, 0.55, 0.95),
         sky: [[14, 18, 40], [30, 40, 74]],
     },
-    Key {
-        elevation_deg: -6.0,
+    LightKey {
         colour: Vec3::new(0.6, 0.68, 1.0),
         intensity: 0.35,
         ambient: 0.28,
         ambient_colour: Vec3::new(0.6, 0.66, 1.0),
         sky: [[32, 44, 92], [112, 110, 160]],
     },
-    Key {
-        elevation_deg: 0.0,
+    LightKey {
         colour: Vec3::new(1.0, 0.55, 0.32),
         intensity: 0.75,
         ambient: 0.32,
         ambient_colour: Vec3::new(0.8, 0.74, 0.92),
         sky: [[70, 90, 150], [240, 150, 100]],
     },
-    Key {
-        elevation_deg: 6.0,
+    LightKey {
         colour: Vec3::new(1.0, 0.78, 0.52),
         intensity: 0.95,
         ambient: 0.36,
         ambient_colour: Vec3::new(1.0, 0.9, 0.82),
         sky: [[110, 150, 200], [244, 200, 150]],
     },
-    Key {
-        elevation_deg: 20.0,
+    LightKey {
         colour: SUN_COLOUR,
         intensity: 1.0,
         ambient: AMBIENT,
@@ -79,6 +78,111 @@ const RAMP: [Key; 5] = [
         sky: [SKY_TOP, SKY_BOTTOM],
     },
 ];
+
+/// The light of the sun and moon by the sun's height, and how surfaces take it
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Light {
+    /// One key per elevation in [`RAMP_ELEVATIONS_DEG`]
+    pub ramp: [LightKey; 5],
+    pub fill: f32,
+    pub bands: u32,
+    pub moonlight: f32,
+    pub moon_colour: Vec3,
+    /// The sun of tracks without times: compass bearing and elevation
+    pub untimed_sun: [f64; 2],
+}
+
+impl Default for Light {
+    fn default() -> Light {
+        Light {
+            ramp: RAMP,
+            fill: FILL,
+            bands: BANDS,
+            moonlight: MOONLIGHT,
+            moon_colour: MOON_COLOUR,
+            untimed_sun: [SUN_AZIMUTH_DEG, SUN_ELEVATION_DEG],
+        }
+    }
+}
+
+impl Light {
+    /// The light of the sun and, once the sky is dark, the moon
+    pub fn sun(
+        &self,
+        grid: &GridInfo,
+        azimuth_deg: f64,
+        elevation_deg: f64,
+        moon: Option<Moon>,
+    ) -> SunState {
+        let key = self.blend(elevation_deg as f32);
+        let mut sun = SunState {
+            direction: light_direction(grid, azimuth_deg, elevation_deg),
+            colour: key.colour,
+            intensity: key.intensity,
+            ambient: key.ambient,
+            ambient_colour: key.ambient_colour,
+            sky: key.sky,
+            stars: smoothstep(-6.0, -14.0, elevation_deg as f32),
+            moon: None,
+            weather: None,
+            fill: self.fill,
+            bands: self.bands,
+        };
+        let Some(moon) = moon.filter(|moon| moon.elevation_deg > -2.0) else {
+            return sun;
+        };
+        let opacity = smoothstep(6.0, -4.0, elevation_deg as f32);
+        if opacity > 0.0 {
+            sun.moon = Some(MoonDisc {
+                direction: towards(grid, moon.azimuth_deg, moon.elevation_deg),
+                sun_direction: towards(grid, azimuth_deg, elevation_deg),
+                illuminated: moon.illuminated as f32,
+                opacity,
+            });
+        }
+        // A half moon gives about a tenth of a full one's light
+        let moonlight = self.moonlight
+            * (moon.illuminated as f32).powi(2)
+            * smoothstep(-1.0, 8.0, moon.elevation_deg as f32)
+            * smoothstep(-4.0, -12.0, elevation_deg as f32);
+        if moonlight > 0.0 {
+            let (from_sun, from_moon) = (key.colour * key.intensity, self.moon_colour * moonlight);
+            let total = from_sun + from_moon;
+            sun.intensity = total.max_element();
+            sun.colour = total / sun.intensity;
+            let towards_moon = light_direction(grid, moon.azimuth_deg, moon.elevation_deg);
+            sun.direction = (sun.direction * luminance(from_sun)
+                + towards_moon * luminance(from_moon))
+            .normalize_or(sun.direction);
+        }
+        sun
+    }
+
+    fn blend(&self, elevation_deg: f32) -> LightKey {
+        let (ramp, at) = (&self.ramp, &RAMP_ELEVATIONS_DEG);
+        let above = at.partition_point(|&key| key <= elevation_deg);
+        let (low, high) = match (above.checked_sub(1), ramp.get(above)) {
+            (Some(below), Some(_)) => (below, above),
+            (Some(_), None) => return ramp[ramp.len() - 1],
+            (None, _) => return ramp[0],
+        };
+        let t = (elevation_deg - at[low]) / (at[high] - at[low]);
+        let (low, high) = (&ramp[low], &ramp[high]);
+        let lerp = |a: f32, b: f32| a + (b - a) * t;
+        let sky = |i: usize| {
+            std::array::from_fn(|c| {
+                lerp(f32::from(low.sky[i][c]), f32::from(high.sky[i][c])).round() as u8
+            })
+        };
+        LightKey {
+            colour: low.colour.lerp(high.colour, t),
+            intensity: lerp(low.intensity, high.intensity),
+            ambient: lerp(low.ambient, high.ambient),
+            ambient_colour: low.ambient_colour.lerp(high.ambient_colour, t),
+            sky: [sky(0), sky(1)],
+        }
+    }
+}
 
 /// The one directional light, and the sky it shines from
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -98,6 +202,10 @@ pub struct SunState {
     pub moon: Option<MoonDisc>,
     /// `None` under a clear sky with nothing falling
     pub weather: Option<Atmosphere>,
+    /// Extra ambient, as a share of it, for faces turned towards the camera
+    pub fill: f32,
+    /// Steps the direct light is quantised to
+    pub bands: u32,
 }
 
 /// Where the moon stands, as the sky shows it
@@ -150,46 +258,7 @@ impl SunState {
         elevation_deg: f64,
         moon: Option<Moon>,
     ) -> SunState {
-        let key = blend(elevation_deg as f32);
-        let mut sun = SunState {
-            direction: light_direction(grid, azimuth_deg, elevation_deg),
-            colour: key.colour,
-            intensity: key.intensity,
-            ambient: key.ambient,
-            ambient_colour: key.ambient_colour,
-            sky: key.sky,
-            stars: smoothstep(-6.0, -14.0, elevation_deg as f32),
-            moon: None,
-            weather: None,
-        };
-        let Some(moon) = moon.filter(|moon| moon.elevation_deg > -2.0) else {
-            return sun;
-        };
-        let opacity = smoothstep(6.0, -4.0, elevation_deg as f32);
-        if opacity > 0.0 {
-            sun.moon = Some(MoonDisc {
-                direction: towards(grid, moon.azimuth_deg, moon.elevation_deg),
-                sun_direction: towards(grid, azimuth_deg, elevation_deg),
-                illuminated: moon.illuminated as f32,
-                opacity,
-            });
-        }
-        // A half moon gives about a tenth of a full one's light
-        let moonlight = MOONLIGHT
-            * (moon.illuminated as f32).powi(2)
-            * smoothstep(-1.0, 8.0, moon.elevation_deg as f32)
-            * smoothstep(-4.0, -12.0, elevation_deg as f32);
-        if moonlight > 0.0 {
-            let (from_sun, from_moon) = (key.colour * key.intensity, MOON_COLOUR * moonlight);
-            let total = from_sun + from_moon;
-            sun.intensity = total.max_element();
-            sun.colour = total / sun.intensity;
-            let towards_moon = light_direction(grid, moon.azimuth_deg, moon.elevation_deg);
-            sun.direction = (sun.direction * luminance(from_sun)
-                + towards_moon * luminance(from_moon))
-            .normalize_or(sun.direction);
-        }
-        sun
+        Light::default().sun(grid, azimuth_deg, elevation_deg, moon)
     }
 
     /// The sun, moon and weather over the slab at `unix_s`, which need not
@@ -206,9 +275,11 @@ impl SunState {
 
     /// The light over the slab at `when`, changed as `conditions` say
     pub fn seen(bundle: &SceneBundle, when: When, conditions: &Conditions) -> SunState {
-        let (azimuth_deg, elevation_deg, moon, weather_time) = position(bundle, when);
+        let light = &conditions.light;
+        let (azimuth_deg, elevation_deg, moon, weather_time) =
+            position(bundle, when, light.untimed_sun);
         let [azimuth_deg, elevation_deg] = conditions.sun.unwrap_or([azimuth_deg, elevation_deg]);
-        let sun = SunState::with_moon(&bundle.grid, azimuth_deg, elevation_deg, moon);
+        let sun = light.sun(&bundle.grid, azimuth_deg, elevation_deg, moon);
         let recorded = weather_time.and_then(|time_s| {
             bundle
                 .weather
@@ -327,11 +398,16 @@ pub struct Conditions {
     /// A sky in place of the recorded weather
     pub weather: Option<ForcedWeather>,
     pub effects: WeatherEffects,
+    pub light: Light,
 }
 
 /// The sun's bearing and elevation, the moon, and the time the weather is
 /// read at, if the track has times
-fn position(bundle: &SceneBundle, when: When) -> (f64, f64, Option<Moon>, Option<f64>) {
+fn position(
+    bundle: &SceneBundle,
+    when: When,
+    [untimed_azimuth, untimed_elevation]: [f64; 2],
+) -> (f64, f64, Option<Moon>, Option<f64>) {
     let grid = &bundle.grid;
     let track = &bundle.sun;
     let sample = |i: usize| match track.get(i) {
@@ -344,7 +420,7 @@ fn position(bundle: &SceneBundle, when: When) -> (f64, f64, Option<Moon>, Option
             elevation_deg.into(),
             bundle.moon.get(i).map(Moon::from),
         ),
-        None => (SUN_AZIMUTH_DEG, SUN_ELEVATION_DEG, None),
+        None => (untimed_azimuth, untimed_elevation, None),
     };
     let start = |(azimuth, elevation, moon): (f64, f64, Option<Moon>)| {
         (
@@ -433,30 +509,6 @@ fn luminance(rgb: Vec3) -> f32 {
 pub(crate) fn smoothstep(from: f32, to: f32, x: f32) -> f32 {
     let t = ((x - from) / (to - from)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
-}
-
-fn blend(elevation_deg: f32) -> Key {
-    let above = RAMP.partition_point(|key| key.elevation_deg <= elevation_deg);
-    let (low, high) = match (above.checked_sub(1), RAMP.get(above)) {
-        (Some(below), Some(high)) => (&RAMP[below], high),
-        (Some(_), None) => return RAMP[RAMP.len() - 1],
-        (None, _) => return RAMP[0],
-    };
-    let t = (elevation_deg - low.elevation_deg) / (high.elevation_deg - low.elevation_deg);
-    let lerp = |a: f32, b: f32| a + (b - a) * t;
-    let sky = |i: usize| {
-        std::array::from_fn(|c| {
-            lerp(f32::from(low.sky[i][c]), f32::from(high.sky[i][c])).round() as u8
-        })
-    };
-    Key {
-        elevation_deg,
-        colour: low.colour.lerp(high.colour, t),
-        intensity: lerp(low.intensity, high.intensity),
-        ambient: lerp(low.ambient, high.ambient),
-        ambient_colour: low.ambient_colour.lerp(high.ambient_colour, t),
-        sky: [sky(0), sky(1)],
-    }
 }
 
 #[cfg(test)]
@@ -824,5 +876,26 @@ mod tests {
                 assert!(clip.z > 0.0 && clip.z < 1.0, "{clip}");
             }
         }
+    }
+
+    #[test]
+    fn a_theme_s_light_reaches_the_sun() {
+        let mut bundle = isotrail_testkit::hike_bundle();
+        bundle.sun.clear();
+        let mut light = Light {
+            untimed_sun: [90.0, 30.0],
+            bands: 6,
+            ..Light::default()
+        };
+        light.ramp[4].sky[0] = [1, 2, 3];
+        let conditions = Conditions {
+            light,
+            ..Conditions::default()
+        };
+        let sun = SunState::seen(&bundle, When::Start, &conditions);
+        let usual = SunState::at(&bundle.grid, 90.0, 30.0);
+        assert!(sun.direction.distance(usual.direction) < 1e-6);
+        assert_eq!((sun.bands, sun.sky[0]), (6, [1, 2, 3]));
+        assert_eq!(SunState::for_hike(&bundle).bands, BANDS);
     }
 }

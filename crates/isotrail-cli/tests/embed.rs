@@ -400,6 +400,40 @@ fn a_palette_file_is_copied_beside_the_bundle() {
 }
 
 #[test]
+fn a_theme_file_is_copied_beside_the_bundle_and_themes_the_poster() {
+    let temp = with_hike("ridge.itb");
+    let loud = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/themes/loud.toml");
+    fs::copy(&loud, temp.path().join("loud.toml")).unwrap();
+    let embed = |out: &str, extra: &[&str]| {
+        let mut args = vec!["embed", "ridge.itb", "-o", out, "--scale", "10"];
+        args.extend(extra);
+        let output = isotrail(temp.path(), &args);
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        let site = temp.path().join(out);
+        let html = fs::read_to_string(site.join("snippet.html")).unwrap();
+        (html, fs::read(site.join("ridge.png")).unwrap())
+    };
+    let (plain_html, plain) = embed("plain", &[]);
+    assert!(!plain_html.contains("theme="), "{plain_html}");
+    let (html, poster) = embed("site", &["--theme", "loud.toml", "--base-url", "/hikes/"]);
+    assert!(html.contains(r#"theme="/hikes/loud.toml""#), "{html}");
+    assert!(!html.contains("route-colour"), "{html}");
+    assert_ne!(poster, plain);
+    assert_eq!(
+        fs::read(temp.path().join("site/loud.toml")).unwrap(),
+        fs::read(&loud).unwrap()
+    );
+
+    // From the copy, with the route's colour given over the theme's
+    let (html, _) = embed(
+        "site",
+        &["--theme", "site/loud.toml", "--route-colour", "#d64834"],
+    );
+    assert!(html.contains(r#"theme="loud.toml""#), "{html}");
+    assert!(html.contains(r##"route-colour="#d64834""##), "{html}");
+}
+
+#[test]
 fn embed_reads_config_files() {
     let temp = with_hike("ridge.itb");
     let config = temp.path().join("config.toml");

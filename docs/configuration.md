@@ -41,7 +41,7 @@ A `size` typed on the command line replaces the `aspect` from a file, as the two
 | --- | --- |
 | `embed` | Everything that is also an `embed` option: the look, camera, text and overlays, data, `scale`, `size` and `safe-area` (for the poster) and `aspect` when it names one shape |
 | `bundle` | `title`, `exaggeration` and the data settings |
-| `style-lab` | `exaggeration` and the data settings (including `padding`, `footprint` and the server and cache settings) only, so the palette and scale you render with don't narrow its comparison |
+| `style-lab` | `exaggeration`, `theme` and the data settings (including `padding`, `footprint` and the server and cache settings) only, so the palette and scale you render with don't narrow its comparison |
 
 A command's own table, `[embed]`, `[bundle]` or `[style-lab]`, holds its own options and wins over `[render]` for that command:
 
@@ -96,6 +96,91 @@ An option you type also wins over settings it can't be combined with: with `date
 - `time` can be a string (`"07:30"`) or a TOML time (`07:30:00`).
 - Options that take `on` or `off`, such as `paths` or `shadows`, take `true` or `false` too.
 - Mistakes in a config file stop the command with exit code 2, like mistakes on the command line.
+
+## Theme files
+
+A theme file changes isotrail's own colours, words and fine-tuning: the ground and its layers, trees, water, the seasons, the sky and the light, the route, the text and panels, and every word printed on an image, so a story can be labelled in your language. It is a TOML file, passed with `--theme FILE` to `render`, `embed` or `style-lab`, or named in a config file:
+
+```toml
+[render]
+theme = "themes/autumn.toml"   # relative to the folder you run isotrail in
+```
+
+Start from the built-in theme, which lists every key with its built-in value:
+
+```sh
+isotrail theme print -o my-theme.toml
+```
+
+Keep the keys you change and delete the rest: a key that isn't there keeps its built-in value. A small theme might be:
+
+```toml
+[landcover]
+grassland = "#8fbf5a"
+heath = "#7a5c6e"
+
+[route]
+colour = "#ffcc00"
+width = 3
+
+[overlay]
+panel-tint = "#2b1d3a"
+subtext = "#f2c879"
+
+[light]
+ambient = 0.5
+```
+
+| Table | What it holds |
+| --- | --- |
+| `[landcover]` | One colour per kind of ground: `water`, `snow`, `rock`, `scree`, `grassland`, `heath`, `scrub`, `coniferous`, `broadleaf`, `mixed-forest`, `wetland`, `farmland`, `built-up` |
+| `[terrain]` | `side-shade`: how bright the walls of steps and slopes are, as a share of the ground on top |
+| `[strata]` | The layers on the slab's cut faces, the water at its edges, and how many blocks per thousand show a pebble or ore |
+| `[props]` | Trees, bushes and boulders, and how far apart they stand |
+| `[water]` | Lake shores, the sea and its surf, glints and ice |
+| `[paths]` | Paths and roads from the map, and how strongly they show |
+| `[season]` | Snow, spring leaves and blossom, autumn leaves, meadow flowers, crops, bracken and winter grass |
+| `[sky]` | The daytime sky at the top and bottom of the image, and its dithering |
+| `[light]` | The daylight, ambient light and its tint, how many steps the light is cut into, moonlight, and the sun for tracks without times. `[light.golden]`, `[light.sunrise]`, `[light.twilight]` and `[light.night]` hold the light and sky as the sun sinks to 6° up, the horizon, 6° down and 18° down; in between, they blend |
+| `[route]` | The route's colour and width, its dark border, and how the parts behind ridges fade |
+| `[overlay]` | The text, label and shadow colours, the panels' tint, blur and top edge, the unwalked part of the profile, the profile's height, the width of the side column in landscape images, and where long titles split |
+| `[labels]` | Every word and format the overlays print |
+| `[animation]` | How long nights take in clips of multi-day hikes, and the longest stop that `--pace time` keeps |
+
+Colours are `"#rrggbb"`, and like everything drawn they are moved to the nearest colour of the palette, so pick a palette that has them, or `--palette none`. The light's colours are strengths of red, green and blue, such as `[1.0, 0.96, 0.88]`, where `1.0` is full strength; `"#rrggbb"` works there too.
+
+### Labels in your language
+
+`[labels]` holds the stat labels, the units, and patterns for times and dates, where names in braces are filled in:
+
+```toml
+[labels]
+distance = "dystans"
+gain = "podejścia"
+time = "czas"
+high-point = "najwyżej"
+decimal = ","                                   # 7,4 km
+hours = "{h} godz. {mm} min"                    # {h}, {m}, or {mm} with two digits
+minutes = "{m} min"
+date-long = "{weekday}, {day} {month} {year}"   # sobota, 14 czerwca 2025
+months = ["stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca", "lipca", "sierpnia", "września", "października", "listopada", "grudnia"]
+months-short = ["sty", "lut", "mar", "kwi", "maj", "cze", "lip", "sie", "wrz", "paź", "lis", "gru"]
+weekdays = ["poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota", "niedziela"]
+```
+
+Weekdays start on Monday. Date patterns take `{weekday}`, `{weekday-short}`, `{day}`, `{dd}`, `{month}`, `{month-short}`, `{mm}`, `{year}` and `{yyyy}`, so `months` can hold the form your language uses inside a date. The font draws Latin letters with their accents, including Polish, Czech and the other languages of central Europe; anything else is left out with a warning.
+
+### How a theme combines with options
+
+Options you type, and settings in a config file, win over the theme: the two that overlap are `--route-colour` and `--route-width`. The theme wins over the built-in values. `--outlines` still scales the edges, and a forced `--weather` still greys the theme's sky.
+
+`embed --theme` draws the poster in the theme, copies the file beside the bundle and names it in the snippet's `theme` attribute.
+
+### Rules
+
+- Unknown tables and keys are errors, as are values out of range and lists of the wrong length. The message names the file and the key, for example `the theme autumn.toml: labels.months: expected a list of 12, found 11 items`, and the command stops with exit code 2 before any work.
+- The file must be UTF-8. Windows PowerShell 5.1 saves `>` output as UTF-16, so use `isotrail theme print -o FILE` there.
+- The font, the start and finish markers, and the data credit can't be changed: the credit must name the data actually used, and `--credit-extra` adds a line of your own under it.
 
 ## Environment variables
 

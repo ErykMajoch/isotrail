@@ -1,6 +1,6 @@
 use isotrail_bundle::{Landcover, SceneBundle};
 
-use super::{blend, hash, landcover_rgba};
+use super::{SeasonStyle, SlabStyle, blend, hash};
 
 const SNOW_KEY: u64 = 3 << 32;
 const CELL_KEY: u64 = 4 << 32;
@@ -14,29 +14,29 @@ const DAYS_PER_M: f32 = 0.02;
 
 pub(super) const SNOW: [u8; 4] = [236, 242, 248, 255];
 pub(super) const ICE: [u8; 4] = [202, 224, 238, 255];
-const CRACK: [u8; 4] = [150, 186, 214, 255];
-const CRACK_PER_MILLE: u64 = 60;
+pub(super) const CRACK: [u8; 4] = [150, 186, 214, 255];
+pub(super) const CRACK_PER_MILLE: u32 = 60;
 pub(super) const FRESH: [u8; 4] = [168, 212, 90, 255];
-const BLOSSOM: [[u8; 4]; 2] = [[240, 236, 228, 255], [232, 166, 190, 255]];
-const AUTUMN: [[u8; 4]; 4] = [
+pub(super) const BLOSSOM: [[u8; 4]; 2] = [[240, 236, 228, 255], [232, 166, 190, 255]];
+pub(super) const AUTUMN: [[u8; 4]; 4] = [
     [226, 178, 48, 255],
     [218, 120, 36, 255],
     [156, 84, 40, 255],
     [150, 98, 50, 255],
 ];
-const LITTER: [u8; 4] = [128, 98, 62, 255];
-const FLOWERS: [[u8; 4]; 3] = [
+pub(super) const LITTER: [u8; 4] = [128, 98, 62, 255];
+pub(super) const FLOWERS: [[u8; 4]; 3] = [
     [236, 206, 82, 255],
     [240, 236, 224, 255],
     [226, 150, 180, 255],
 ];
-const FLOWER_PER_MILLE: u64 = 70;
-const YOUNG_CROP: [u8; 4] = [146, 196, 84, 255];
-const GOLDEN: [u8; 4] = [200, 150, 60, 255];
-const PLOUGHED: [u8; 4] = [168, 124, 80, 255];
-const BRACKEN: [u8; 4] = [200, 176, 120, 255];
-const DULL: [u8; 4] = [168, 124, 80, 255];
-const DARK_HEATH: [u8; 4] = [92, 80, 66, 255];
+pub(super) const FLOWER_PER_MILLE: u32 = 70;
+pub(super) const YOUNG_CROP: [u8; 4] = [146, 196, 84, 255];
+pub(super) const GOLDEN: [u8; 4] = [200, 150, 60, 255];
+pub(super) const PLOUGHED: [u8; 4] = [168, 124, 80, 255];
+pub(super) const BRACKEN: [u8; 4] = [200, 176, 120, 255];
+pub(super) const DULL: [u8; 4] = [168, 124, 80, 255];
+pub(super) const DARK_HEATH: [u8; 4] = [92, 80, 66, 255];
 /// Each cell takes between these shares of its ground's seasonal tint, so
 /// the change mottles in rather than flipping the whole slab at once
 const SPREAD: (f32, f32) = (0.8, 1.2);
@@ -62,6 +62,7 @@ pub(crate) struct Seasonal {
     snowy: Vec<bool>,
     frozen: Vec<bool>,
     sea: Vec<bool>,
+    style: SlabStyle,
 }
 
 /// How far through the year one plant is
@@ -83,7 +84,12 @@ impl Leaves {
 }
 
 impl Seasonal {
-    pub(crate) fn new(bundle: &SceneBundle) -> Seasonal {
+    #[cfg(test)]
+    pub(super) fn plain(bundle: &SceneBundle) -> Seasonal {
+        Seasonal::new(bundle, &SlabStyle::default())
+    }
+
+    pub(crate) fn new(bundle: &SceneBundle, style: &SlabStyle) -> Seasonal {
         let (grid, terrain, season) = (&bundle.grid, &bundle.terrain, &bundle.season);
         let cells = grid.cells();
         let metres: Vec<f32> = (0..cells).map(|cell| terrain.height_m(cell)).collect();
@@ -136,6 +142,7 @@ impl Seasonal {
             snowy,
             frozen,
             sea,
+            style: *style,
         }
     }
 
@@ -164,8 +171,9 @@ impl Seasonal {
 
     /// One deciduous plant's leaves, from three rolls in [0, 1)
     pub(super) fn leaves(&self, cell: usize, rolls: [f32; 3]) -> Leaves {
+        let season = &self.style.season;
         let Some(day) = self.day(cell) else {
-            return Leaves::Tinted(FRESH, 0.0);
+            return Leaves::Tinted(season.fresh, 0.0);
         };
         let span = |(from, to): (f32, f32), roll: f32| from + (to - from) * roll;
         let out = span(LEAF_OUT, rolls[0]);
@@ -174,12 +182,16 @@ impl Seasonal {
         if day < out || day >= drop {
             Leaves::Bare
         } else if rolls[1] < BLOSSOMING && day < out + BLOSSOM_DAYS {
-            Leaves::Tinted(BLOSSOM[usize::from(rolls[0] >= 0.5)], 1.0)
+            Leaves::Tinted(season.blossom[usize::from(rolls[0] >= 0.5)], 1.0)
         } else if day >= turn {
-            let colour = AUTUMN[(rolls[2] * AUTUMN.len() as f32) as usize % AUTUMN.len()];
+            let autumn = &season.autumn;
+            let colour = autumn[(rolls[2] * autumn.len() as f32) as usize % autumn.len()];
             Leaves::Tinted(colour, ((day - turn) / TURN_DAYS).min(1.0))
         } else {
-            Leaves::Tinted(FRESH, 1.0 - ((day - out) / FRESH_DAYS).clamp(0.0, 1.0))
+            Leaves::Tinted(
+                season.fresh,
+                1.0 - ((day - out) / FRESH_DAYS).clamp(0.0, 1.0),
+            )
         }
     }
 
@@ -202,12 +214,12 @@ impl Seasonal {
     }
 
     fn cell(&self, cell: usize, class: u8) -> [u8; 4] {
-        let summer = landcover_rgba(class);
+        let (summer, season) = (self.style.landcover(class), &self.style.season);
         if self.snowy(cell) {
-            return SNOW;
+            return season.snow;
         }
         if self.frozen(cell) {
-            return ICE;
+            return self.style.water.ice;
         }
         let Some(day) = self.day(cell) else {
             return summer;
@@ -216,7 +228,7 @@ impl Seasonal {
         let rolls = [1, 2, 3].map(roll);
         let weights = Weights::on(day);
         let litter = |strength: f32| {
-            let fallen = self.leaves(cell, rolls).on(summer, LITTER);
+            let fallen = self.leaves(cell, rolls).on(summer, season.litter);
             blend(summer, fallen, strength)
         };
         let Ok(class) = Landcover::try_from(class) else {
@@ -229,7 +241,7 @@ impl Seasonal {
             _ => {
                 let (least, most) = SPREAD;
                 let spread = least + (most - least) * rolls[0];
-                tints(class)
+                tints(class, season)
                     .into_iter()
                     .zip([weights.spring, weights.autumn, weights.winter])
                     .fold(summer, |colour, ((target, strength), weight)| {
@@ -239,8 +251,9 @@ impl Seasonal {
         };
         let flowering = class == Landcover::Grassland && weights.spring >= 0.5;
         let speck = hash(self.seed, [CELL_KEY, cell as u64, 4]);
-        if flowering && speck % 1000 < FLOWER_PER_MILLE {
-            FLOWERS[(speck / 1000 % FLOWERS.len() as u64) as usize]
+        let flowers = &season.flowers;
+        if flowering && speck % 1000 < u64::from(season.flowers_per_mille) {
+            flowers[(speck / 1000 % flowers.len() as u64) as usize]
         } else {
             ground
         }
@@ -248,12 +261,15 @@ impl Seasonal {
 
     /// The ground colour of a frozen lake cell away from its shore
     pub(super) fn ice(&self, cell: usize) -> [u8; 4] {
+        let water = &self.style.water;
         if self.snowy(cell) {
-            SNOW
-        } else if hash(self.seed, [CELL_KEY, cell as u64, 0]) % 1000 < CRACK_PER_MILLE {
-            CRACK
+            self.style.season.snow
+        } else if hash(self.seed, [CELL_KEY, cell as u64, 0]) % 1000
+            < u64::from(water.crack_per_mille)
+        {
+            water.ice_crack
         } else {
-            ICE
+            water.ice
         }
     }
 }
@@ -294,13 +310,13 @@ impl Weights {
 }
 
 /// What open ground turns towards in spring, autumn and winter, and how far
-fn tints(class: Landcover) -> [([u8; 4], f32); 3] {
+fn tints(class: Landcover, s: &SeasonStyle) -> [([u8; 4], f32); 3] {
     match class {
-        Landcover::Grassland => [(FRESH, 0.5), (GOLDEN, 0.62), (DULL, 0.65)],
-        Landcover::Farmland => [(YOUNG_CROP, 0.6), (PLOUGHED, 0.55), (DULL, 0.6)],
-        Landcover::Heath => [(FRESH, 0.0), (BRACKEN, 0.5), (DARK_HEATH, 0.3)],
-        Landcover::Wetland => [(FRESH, 0.2), (GOLDEN, 0.3), (DULL, 0.4)],
-        _ => [(FRESH, 0.0); 3],
+        Landcover::Grassland => [(s.fresh, 0.5), (s.golden, 0.62), (s.dull, 0.65)],
+        Landcover::Farmland => [(s.young_crop, 0.6), (s.ploughed, 0.55), (s.dull, 0.6)],
+        Landcover::Heath => [(s.fresh, 0.0), (s.bracken, 0.5), (s.dark_heath, 0.3)],
+        Landcover::Wetland => [(s.fresh, 0.2), (s.golden, 0.3), (s.dull, 0.4)],
+        _ => [(s.fresh, 0.0); 3],
     }
 }
 
@@ -314,12 +330,13 @@ mod tests {
     use isotrail_testkit::{bundle, grid};
 
     use super::*;
+    use crate::mesh::landcover_rgba;
 
     fn slope(classes: &[Landcover], season: Season) -> (SceneBundle, Seasonal) {
         let heights: Vec<f32> = (0..classes.len()).map(|i| i as f32 * 10.0).collect();
         let mut bundle = bundle(grid(classes.len() as u32, 1, 100.0), &heights, classes);
         bundle.season = season;
-        let seasonal = Seasonal::new(&bundle);
+        let seasonal = Seasonal::plain(&bundle);
         (bundle, seasonal)
     }
 
@@ -380,7 +397,7 @@ mod tests {
         let at = |heights: [f32; 2], leaf_day: u16| {
             let mut bundle = bundle(grid(2, 1, 100.0), &heights, &[Landcover::Broadleaf; 2]);
             bundle.season = day(leaf_day);
-            let seasonal = Seasonal::new(&bundle);
+            let seasonal = Seasonal::plain(&bundle);
             [0, 1].map(|cell| seasonal.leaves(cell, [0.5; 3]))
         };
         assert!(matches!(
@@ -478,13 +495,13 @@ mod tests {
         let heights: Vec<f32> = (0..40).map(|i| 300.0 + i as f32 * 150.0).collect();
         let mut cliff = bundle(grid(40, 1, 100.0), &heights, &classes);
         cliff.season = season;
-        assert!(Seasonal::new(&cliff).snowy.iter().all(|s| !s));
+        assert!(Seasonal::plain(&cliff).snowy.iter().all(|s| !s));
 
         let mut lake = bundle(grid(3, 1, 100.0), &[500.0; 3], &[Landcover::Water; 3]);
         lake.season = season;
-        assert!(Seasonal::new(&lake).snowy.iter().all(|s| !s));
+        assert!(Seasonal::plain(&lake).snowy.iter().all(|s| !s));
         lake.season.ice_line_m = Some(400.0);
-        assert!(Seasonal::new(&lake).snowy.iter().all(|&s| s));
+        assert!(Seasonal::plain(&lake).snowy.iter().all(|&s| s));
     }
 
     #[test]
@@ -507,13 +524,13 @@ mod tests {
             },
         ];
         bundle.season.ice_line_m = Some(200.0);
-        let seasonal = Seasonal::new(&bundle);
+        let seasonal = Seasonal::plain(&bundle);
         assert_eq!(seasonal.frozen, [false, false, false, false, true, false]);
         assert!([ICE, CRACK].contains(&seasonal.ice(4)));
         let cracked = (0..2000)
             .filter(|&seed| {
                 bundle.prop_seed = seed;
-                Seasonal::new(&bundle).ice(4) == CRACK
+                Seasonal::plain(&bundle).ice(4) == CRACK
             })
             .count();
         assert!((60..200).contains(&cracked), "{cracked}");
@@ -541,7 +558,7 @@ mod tests {
         ];
         bundle.season.ice_line_m = Some(-1.0);
         bundle.season.snow_line_m = Some(-1.0);
-        let seasonal = Seasonal::new(&bundle);
+        let seasonal = Seasonal::plain(&bundle);
         assert_eq!(seasonal.frozen, [false, false, false, false, true, false]);
         assert_eq!(seasonal.snowy, [false, false, true, true, true, true]);
         assert_eq!(seasonal.sea, [true, true, false, false, false, false]);

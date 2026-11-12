@@ -1,0 +1,83 @@
+# A deliberately loud theme in Polish, for the theme golden image
+
+[landcover]
+grassland = "#e040fb"
+heath = "#ffeb3b"
+coniferous = "#00e5ff"
+broadleaf = "#ff6d00"
+mixed-forest = "#76ff03"
+rock = "#f50057"
+scree = "#ffd180"
+water = "#1a237e"
+farmland = "#00c853"
+
+[terrain]
+side-shade = 0.5
+
+[strata]
+dirt = "#4a148c"
+stone = "#004d40"
+deep-stone = "#b71c1c"
+water = "#00b8d4"
+stone-specks-per-mille = 300
+
+[props]
+needles = "#ff1744"
+leaves = "#ffff00"
+trunk = "#ffffff"
+spacing = 6.0
+
+[water]
+shore = "#ff80ab"
+
+[paths]
+trodden = "#000000"
+path-blend = 1.0
+
+[sky]
+top = "#ff4081"
+bottom = "#ffe57f"
+dither = 0.0
+
+[light]
+colour = [1.0, 0.8, 1.0]
+ambient = 0.6
+bands = 3
+
+[light.night]
+sky-top = "#000000"
+
+[route]
+colour = "#00ff00"
+width = 3
+outline = 0.0
+
+[overlay]
+text = "#ffff00"
+subtext = "#ff9100"
+panel-tint = "#311b92"
+panel-tint-share = 0.8
+panel-edge = "#00e5ff"
+profile-ahead = "#ffffff"
+profile-rows = 16
+
+[labels]
+distance = "dystans"
+gain = "podejścia"
+loss = "zejścia"
+time = "czas"
+high-point = "najwyżej"
+low-point = "najniżej"
+speed = "prędkość"
+pace = "tempo"
+hours = "{h} godz. {mm} min"
+minutes = "{m} min"
+decimal = ","
+months = ["stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca", "lipca", "sierpnia", "września", "października", "listopada", "grudnia"]
+months-short = ["sty", "lut", "mar", "kwi", "maj", "cze", "lip", "sie", "wrz", "paź", "lis", "gru"]
+weekdays = ["poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota", "niedziela"]
+weekdays-short = ["pon", "wt", "śr", "czw", "pt", "sob", "niedz"]
+date-long = "{weekday}, {day} {month} {year}"
+
+[animation]
+night-share = 0.1

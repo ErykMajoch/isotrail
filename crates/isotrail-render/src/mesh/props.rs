@@ -4,15 +4,13 @@ use glam::{Vec2, Vec3};
 use isotrail_bundle::{Landcover, SceneBundle};
 use tracing::debug;
 
-use super::season::{FRESH, Leaves, SNOW, Seasonal};
-use super::{TerrainMesh, blend, hash, slab_position};
+use super::season::{Leaves, Seasonal};
+use super::{SlabStyle, TerrainMesh, blend, hash, slab_position};
 
-/// Internal pixels between neighbouring spots where a prop may stand
-const SPACING_PX: f32 = 4.0;
+pub(super) const SPACING_PX: f32 = 4.0;
 /// The most spots a slab gets, whatever the pixel size
 const MAX_SPOTS: usize = 10_000;
-/// How far a prop may stray from its spot, as a share of the spacing
-const JITTER: f32 = 0.35;
+pub(super) const JITTER: f32 = 0.35;
 /// Internal pixels kept free of props on either side of the route
 const CLEARING_PX: f32 = 2.0;
 /// How much props vary in height either way
@@ -23,13 +21,13 @@ const MAX_BLOCKS: u64 = 4;
 /// blocks on every spot, each block a box of five quads
 pub(super) const MAX_VERTICES: u64 = MAX_SPOTS as u64 * MAX_BLOCKS * 30;
 
-const NEEDLES: [u8; 4] = [40, 94, 58, 255];
-const LEAVES: [u8; 4] = [84, 148, 62, 255];
-const BUSH: [u8; 4] = [108, 138, 58, 255];
-const TRUNK: [u8; 4] = [98, 68, 46, 255];
-const BOULDER: [u8; 4] = [152, 148, 140, 255];
-const TWIGS: [u8; 4] = [112, 96, 84, 255];
-const BARE_BUSH: [u8; 4] = [120, 104, 80, 255];
+pub(super) const NEEDLES: [u8; 4] = [40, 94, 58, 255];
+pub(super) const LEAVES: [u8; 4] = [84, 148, 62, 255];
+pub(super) const BUSH: [u8; 4] = [108, 138, 58, 255];
+pub(super) const TRUNK: [u8; 4] = [98, 68, 46, 255];
+pub(super) const BOULDER: [u8; 4] = [152, 148, 140, 255];
+pub(super) const TWIGS: [u8; 4] = [112, 96, 84, 255];
+pub(super) const BARE_BUSH: [u8; 4] = [120, 104, 80, 255];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Prop {
@@ -39,10 +37,19 @@ enum Prop {
     Boulder,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Part {
+    Trunk,
+    Needles,
+    Leaves,
+    Bush,
+    Boulder,
+}
+
 /// A box of a prop in internal pixels: its half-width and its bottom and
 /// top above the ground
 #[derive(Clone, Copy)]
-struct Block(f32, f32, f32, [u8; 4]);
+struct Block<T>(f32, f32, f32, T);
 
 impl Prop {
     /// What stands on a spot of `class` ground, from two seeded rolls in [0, 1)
@@ -59,43 +66,53 @@ impl Prop {
         (roll < share).then_some(prop)
     }
 
-    fn blocks(self) -> &'static [Block] {
+    fn blocks(self) -> &'static [Block<Part>] {
         match self {
             Prop::Conifer => &[
-                Block(0.5, 0.0, 1.0, TRUNK),
-                Block(1.5, 1.0, 2.5, NEEDLES),
-                Block(1.0, 2.5, 4.0, NEEDLES),
-                Block(0.5, 4.0, 5.0, NEEDLES),
+                Block(0.5, 0.0, 1.0, Part::Trunk),
+                Block(1.5, 1.0, 2.5, Part::Needles),
+                Block(1.0, 2.5, 4.0, Part::Needles),
+                Block(0.5, 4.0, 5.0, Part::Needles),
             ],
-            Prop::Broadleaf => &[Block(0.5, 0.0, 1.5, TRUNK), Block(1.5, 1.5, 4.0, LEAVES)],
-            Prop::Bush => &[Block(1.0, 0.0, 1.5, BUSH)],
-            Prop::Boulder => &[Block(0.75, 0.0, 1.0, BOULDER)],
+            Prop::Broadleaf => &[
+                Block(0.5, 0.0, 1.5, Part::Trunk),
+                Block(1.5, 1.5, 4.0, Part::Leaves),
+            ],
+            Prop::Bush => &[Block(1.0, 0.0, 1.5, Part::Bush)],
+            Prop::Boulder => &[Block(0.75, 0.0, 1.0, Part::Boulder)],
         }
     }
 
     /// The blocks as the season has them: leaves in its colours or bare
     /// twigs, fresh growth on conifers in spring, and snow on whatever
     /// stands in it
-    fn dressed(self, leaves: Leaves, spring: f32, snowy: bool) -> impl Iterator<Item = Block> {
+    fn dressed(
+        self,
+        style: &SlabStyle,
+        leaves: Leaves,
+        spring: f32,
+        snowy: bool,
+    ) -> impl Iterator<Item = Block<[u8; 4]>> {
+        let (p, snow, fresh) = (style.props, style.season.snow, style.season.fresh);
         let frost = move |colour, share| {
             if snowy {
-                blend(colour, SNOW, share)
+                blend(colour, snow, share)
             } else {
                 colour
             }
         };
         self.blocks()
             .iter()
-            .map(move |&Block(half, bottom, top, colour)| {
-                let colour = match colour {
-                    LEAVES if leaves == Leaves::Bare => {
-                        return Block(half - 0.5, bottom, top - 0.5, TWIGS);
+            .map(move |&Block(half, bottom, top, part)| {
+                let colour = match part {
+                    Part::Leaves if leaves == Leaves::Bare => {
+                        return Block(half - 0.5, bottom, top - 0.5, p.twigs);
                     }
-                    LEAVES => frost(leaves.on(LEAVES, TWIGS), 0.35),
-                    BUSH => frost(blend(BUSH, leaves.on(BUSH, BARE_BUSH), 0.8), 0.6),
-                    NEEDLES => frost(blend(NEEDLES, FRESH, 0.3 * spring), 0.5),
-                    BOULDER => frost(BOULDER, 0.5),
-                    other => other,
+                    Part::Leaves => frost(leaves.on(p.leaves, p.twigs), 0.35),
+                    Part::Bush => frost(blend(p.bush, leaves.on(p.bush, p.bare_bush), 0.8), 0.6),
+                    Part::Needles => frost(blend(p.needles, fresh, 0.3 * spring), 0.5),
+                    Part::Boulder => frost(p.boulder, 0.5),
+                    Part::Trunk => p.trunk,
                 };
                 Block(half, bottom, top, colour)
             })
@@ -121,7 +138,9 @@ impl TerrainMesh {
             return 0;
         }
         let px = metres_per_px / cell_m;
-        let mut spacing = (SPACING_PX * px / density.sqrt())
+        let style = self.terrain.style;
+        let jitter = style.props.jitter;
+        let mut spacing = (style.props.spacing_px * px / density.sqrt())
             .max((cols as f32 * rows as f32 / MAX_SPOTS as f32).sqrt());
         let spots = |spacing: f32| {
             let along = |n: usize| (n as f32 / spacing).ceil() as usize;
@@ -134,7 +153,7 @@ impl TerrainMesh {
         let widest = Prop::Conifer.half_width();
         let route = RouteClearance::new(bundle, (CLEARING_PX + widest) * px);
 
-        let seasonal = Seasonal::new(bundle);
+        let seasonal = Seasonal::new(bundle, &style);
         let seed = bundle.prop_seed;
         let unit = |i: usize, j: usize, k: u64| {
             (hash(seed, [PROP_KEY, i as u64, j as u64, k]) >> 40) as f32 / (1u64 << 24) as f32
@@ -143,8 +162,8 @@ impl TerrainMesh {
         for j in 0..down {
             for i in 0..across {
                 let centre = Vec2::new(
-                    (i as f32 + 0.5 + (unit(i, j, 0) * 2.0 - 1.0) * JITTER) * spacing,
-                    (j as f32 + 0.5 + (unit(i, j, 1) * 2.0 - 1.0) * JITTER) * spacing,
+                    (i as f32 + 0.5 + (unit(i, j, 0) * 2.0 - 1.0) * jitter) * spacing,
+                    (j as f32 + 0.5 + (unit(i, j, 1) * 2.0 - 1.0) * jitter) * spacing,
                 );
                 let (col, row) = (centre.x as usize, centre.y as usize);
                 if col >= cols || row >= rows {
@@ -188,7 +207,7 @@ impl TerrainMesh {
                 let height = metres_per_px * (1.0 + (unit(i, j, 4) * 2.0 - 1.0) * HEIGHT_JITTER);
                 let leaves = seasonal.leaves(cell, [5, 6, 7].map(|k| unit(i, j, k)));
                 for Block(half, bottom, top, colour) in
-                    prop.dressed(leaves, seasonal.spring(cell), seasonal.snowy(cell))
+                    prop.dressed(&style, leaves, seasonal.spring(cell), seasonal.snowy(cell))
                 {
                     let half = Vec2::splat(half * metres_per_px);
                     let foot = if bottom == 0.0 {
@@ -294,6 +313,7 @@ mod tests {
     use isotrail_testkit::{bundle, grid};
 
     use super::*;
+    use crate::mesh::season::SNOW;
     use crate::mesh::{Shaped, Terrain};
     use crate::{Mesher, SmoothMesher, VoxelMesher};
 
@@ -388,6 +408,22 @@ mod tests {
         assert_eq!(colours(Landcover::Scrub), [BUSH]);
         assert_eq!(colours(Landcover::Scree), [BOULDER]);
         assert_eq!(colours(Landcover::MixedForest).len(), 3);
+
+        let mut terrain = Terrain::default();
+        (terrain.style.props.leaves, terrain.style.props.trunk) = ([1; 4], [2; 4]);
+        let bundle = forest(40, 20, Landcover::Broadleaf);
+        let shaped = Shaped {
+            mesher: VoxelMesher::default(),
+            terrain,
+        };
+        let mut colours: Vec<[u8; 4]> = props(&bundle, &shaped, 5.0)
+            .vertices
+            .iter()
+            .map(|v| v.colour)
+            .collect();
+        colours.sort_unstable();
+        colours.dedup();
+        assert_eq!(colours, [[1; 4], [2; 4]]);
     }
 
     #[test]

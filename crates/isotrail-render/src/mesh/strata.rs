@@ -3,23 +3,24 @@ use std::ops::ControlFlow;
 use glam::Vec2;
 use isotrail_bundle::Landcover;
 
-use super::season::ICE;
-use super::{Columns, Side, Terrain, TerrainMesh, hash};
+use super::{Columns, Side, StrataStyle, Terrain, TerrainMesh, hash};
 
 /// Block rows above the base that are deep stone
 const DEEP_BLOCKS: u32 = 2;
 const MAX_WATER_BLOCKS: u32 = 4;
 const EPSILON: f32 = 1e-3;
 
-const WATER: [u8; 4] = [44, 96, 176, 255];
-const SEA_WATER: [u8; 4] = [30, 62, 122, 255];
-const DIRT: [u8; 4] = [122, 86, 58, 255];
-const PEBBLE: [u8; 4] = [166, 142, 112, 255];
-const STONE: [u8; 4] = [124, 122, 128, 255];
-const DEEP_STONE: [u8; 4] = [74, 76, 92, 255];
-const COPPER: [u8; 4] = [178, 110, 72, 255];
-const GOLD: [u8; 4] = [206, 182, 92, 255];
-const CRYSTAL: [u8; 4] = [112, 168, 196, 255];
+pub(super) const WATER: [u8; 4] = [44, 96, 176, 255];
+pub(super) const SEA_WATER: [u8; 4] = [30, 62, 122, 255];
+pub(super) const DIRT: [u8; 4] = [122, 86, 58, 255];
+pub(super) const PEBBLE: [u8; 4] = [166, 142, 112, 255];
+pub(super) const STONE: [u8; 4] = [124, 122, 128, 255];
+pub(super) const DEEP_STONE: [u8; 4] = [74, 76, 92, 255];
+pub(super) const COPPER: [u8; 4] = [178, 110, 72, 255];
+pub(super) const GOLD: [u8; 4] = [206, 182, 92, 255];
+pub(super) const CRYSTAL: [u8; 4] = [112, 168, 196, 255];
+/// Specks per thousand blocks of dirt, stone and deep stone
+pub(super) const SPECKS_PER_MILLE: [u32; 3] = [60, 50, 80];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Stratum {
@@ -130,6 +131,7 @@ fn walls(
                 frozen: columns.frozen[cell],
                 sea: columns.sea[cell],
                 topsoil: columns.side(cell),
+                ice: columns.style.water.ice,
             };
             let corners = side.wall(col, row);
             let heights = corners.map(|corner| surface(cell, corner));
@@ -141,10 +143,11 @@ fn walls(
                 let depth = (depth - EPSILON).ceil().max(0.0) as u32;
                 let stratum = column.stratum(depth, block_row);
                 let noise = hash(seed, [key[0], key[1], u64::from(block_row)]);
+                let style = &columns.style.strata;
                 let colour = if columns.strata || stratum == Stratum::Water {
-                    column.colour(stratum, depth, noise)
+                    column.colour(stratum, depth, noise, style)
                 } else {
-                    STONE
+                    style.stone
                 };
                 match runs.last_mut() {
                     Some(Run {
@@ -176,6 +179,7 @@ struct Column {
     frozen: bool,
     sea: bool,
     topsoil: [u8; 4],
+    ice: [u8; 4],
 }
 
 impl Column {
@@ -201,15 +205,16 @@ impl Column {
         }
     }
 
-    fn colour(&self, stratum: Stratum, depth: u32, noise: u64) -> [u8; 4] {
+    fn colour(&self, stratum: Stratum, depth: u32, noise: u64, s: &StrataStyle) -> [u8; 4] {
+        let [dirt, stone, deep] = s.specks_per_mille.map(u64::from);
         match stratum {
-            Stratum::Water if self.frozen && depth == 0 => ICE,
-            Stratum::Water if self.sea => SEA_WATER,
-            Stratum::Water => WATER,
+            Stratum::Water if self.frozen && depth == 0 => self.ice,
+            Stratum::Water if self.sea => s.sea_water,
+            Stratum::Water => s.water,
             Stratum::Topsoil => self.topsoil,
-            Stratum::Dirt => speckle(noise, 60, DIRT, &[PEBBLE]),
-            Stratum::Stone => speckle(noise, 50, STONE, &[COPPER, GOLD]),
-            Stratum::DeepStone => speckle(noise, 80, DEEP_STONE, &[CRYSTAL, COPPER]),
+            Stratum::Dirt => speckle(noise, dirt, s.dirt, &[s.pebble]),
+            Stratum::Stone => speckle(noise, stone, s.stone, &[s.copper, s.gold]),
+            Stratum::DeepStone => speckle(noise, deep, s.deep_stone, &[s.crystal, s.copper]),
         }
     }
 }
@@ -310,7 +315,14 @@ mod tests {
             frozen: false,
             sea: false,
             topsoil: [0; 4],
+            ice: ICE,
         }
+    }
+
+    const ICE: [u8; 4] = crate::mesh::season::ICE;
+
+    fn colour(column: &Column, stratum: Stratum, depth: u32, noise: u64) -> [u8; 4] {
+        column.colour(stratum, depth, noise, &StrataStyle::default())
     }
 
     fn area(triangle: &[Vec3; 3]) -> f32 {
@@ -553,9 +565,9 @@ mod tests {
             frozen: true,
             ..column(2, 3)
         };
-        let colours = (0..3).map(|depth| frozen.colour(frozen.stratum(depth, 5), depth, 0));
+        let colours = (0..3).map(|depth| colour(&frozen, frozen.stratum(depth, 5), depth, 0));
         assert_eq!(colours.collect::<Vec<_>>(), [ICE, WATER, WATER]);
-        assert_eq!(column(2, 3).colour(Stratum::Water, 0, 0), WATER);
+        assert_eq!(colour(&column(2, 3), Stratum::Water, 0, 0), WATER);
     }
 
     #[test]
@@ -567,7 +579,7 @@ mod tests {
         };
         let layers = (0..4).map(|depth| sea.stratum(depth, 5));
         assert_eq!(layers.collect::<Vec<_>>(), [Water, Water, Water, Dirt]);
-        assert_eq!(sea.colour(Water, 0, 0), SEA_WATER);
+        assert_eq!(colour(&sea, Water, 0, 0), SEA_WATER);
     }
 
     #[test]
@@ -599,17 +611,17 @@ mod tests {
     #[test]
     fn rare_specks_are_seeded() {
         let stone: Vec<_> = (0..20_000)
-            .map(|i| column(2, 0).colour(Stratum::Stone, 3, hash(7, [0, i, 3])))
+            .map(|i| colour(&column(2, 0), Stratum::Stone, 3, hash(7, [0, i, 3])))
             .collect();
         let specks = stone.iter().filter(|&&c| c != STONE).count() as f32 / 20_000.0;
         assert!((0.04..0.06).contains(&specks), "{specks}");
         assert!(stone.contains(&COPPER) && stone.contains(&GOLD));
 
         let again: Vec<_> = (0..20_000)
-            .map(|i| column(2, 0).colour(Stratum::Stone, 3, hash(7, [0, i, 3])))
+            .map(|i| colour(&column(2, 0), Stratum::Stone, 3, hash(7, [0, i, 3])))
             .collect();
         let other: Vec<_> = (0..20_000)
-            .map(|i| column(2, 0).colour(Stratum::Stone, 3, hash(8, [0, i, 3])))
+            .map(|i| colour(&column(2, 0), Stratum::Stone, 3, hash(8, [0, i, 3])))
             .collect();
         assert_eq!(stone, again);
         assert_ne!(stone, other);

@@ -7,9 +7,9 @@ use isotrail_export::{
 use isotrail_render::{
     Aim, Aspect, Background, Conditions, DEFAULT_PALETTE, DEFAULT_STATS, DateFormat, Diorama,
     Edges, Frame, GodRays, Gpu, HiddenRoute, Look, Markers, Mesher, Motion, OffscreenTarget, Orbit,
-    OverlayStyle, OverlayText, Overlays, Pace, Palette, RouteStyle, Shaped, SmoothMesher, SunState,
-    Terrain, TerrainRenderer, Timeline, View, Viewpoints, VoxelMesher, Walk, WeatherEffects, When,
-    draw_test_scene,
+    OverlayStyle, OverlayText, Overlays, Pace, Palette, RouteStyle, Shaped, SmoothMesher, StatKind,
+    SunState, Terrain, TerrainRenderer, Theme, Timeline, View, Viewpoints, VoxelMesher, Walk,
+    WeatherEffects, When, draw_test_scene,
 };
 use isotrail_testkit::{
     Tolerance, assert_golden, decode_gif, differing_share, diorama_bundle, hike_bundle,
@@ -60,6 +60,7 @@ fn the_bare_scene_matches_golden() {
         strata: false,
         base_blocks: 2,
         prop_density: 0.0,
+        ..Terrain::default()
     };
     let look = Look {
         edges: Edges::default().scaled(0.0),
@@ -551,6 +552,75 @@ fn overlays_on_the_diorama_match_golden() {
         frame.height(),
         frame.rgba(),
     );
+}
+
+/// Every colour group, the light, the route and the overlays themed loudly,
+/// with the overlays in Polish
+#[test]
+fn a_loud_theme_matches_golden() {
+    let gpu = isotrail_testkit::gpu();
+    let theme = Theme::parse(include_str!("../../../fixtures/themes/loud.toml")).unwrap();
+    let mut bundle = diorama_bundle();
+    bundle.meta.title = "Wąwóz Ślężny | Ścieżka nad Łąkami".into();
+    bundle.meta.local_date = Some("2025-06-14".into());
+    let stats = &mut bundle.meta.stats;
+    (stats.distance_m, stats.gain_m) = (7_420.0, Some(612.0));
+    (stats.moving_s, stats.max_ele_m) = (Some(9_000), Some(842.0));
+    let framing = Aspect::Story.framing(6).unwrap();
+    let kinds = [
+        StatKind::Distance,
+        StatKind::Gain,
+        StatKind::Time,
+        StatKind::Speed,
+    ];
+    let draw = |theme: &Theme| {
+        let text = OverlayText::from_bundle_with(
+            &bundle,
+            Units::Metric,
+            &kinds,
+            DateFormat::Long,
+            &theme.labels,
+        );
+        let overlays = Overlays::fit(&text, &theme.overlay_style(), &framing)
+            .unwrap()
+            .overlays;
+        let look = theme.look();
+        let mut frame = render_still(
+            &gpu,
+            &bundle,
+            &Shaped {
+                mesher: VoxelMesher::default(),
+                terrain: theme.terrain(),
+            },
+            &overlays.diorama_framing(),
+            &Aim::default(),
+            &SunState::seen(&bundle, When::Start, &theme.conditions()),
+            &look,
+        )
+        .unwrap();
+        overlays.draw(&mut frame, look.palette.as_ref(), 1.0);
+        (text, frame)
+    };
+    let (text, frame) = draw(&theme);
+    assert_eq!(text.date.as_deref(), Some("sobota, 14 czerwca 2025"));
+    let words: Vec<(&str, &str)> = text
+        .stats
+        .iter()
+        .map(|stat| (stat.value.as_str(), stat.label.as_str()))
+        .collect();
+    assert_eq!(
+        words,
+        [
+            ("7,4 km", "dystans"),
+            ("612 m", "podejścia"),
+            ("2 godz. 30 min", "czas"),
+            ("3,0 km/h", "prędkość"),
+        ]
+    );
+    let (_, plain) = draw(&Theme::default());
+    let changed = differing_share(frame.rgba(), plain.rgba(), Tolerance::default());
+    assert!(changed > 0.3, "{changed}");
+    assert_golden("theme-loud", frame.width(), frame.height(), frame.rgba());
 }
 
 fn render_hike(gpu: &Gpu, aspect: Aspect, look: &Look) -> Frame {

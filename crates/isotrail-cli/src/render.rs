@@ -10,8 +10,8 @@ use isotrail_export::{
     render_clip, render_still, upscale,
 };
 use isotrail_render::{
-    Aim, Aspect, Background, Fitted, Frame, Gpu, Look, Mesher, Motion, Overlays, Pace, SunState,
-    Walk,
+    Aim, Aspect, Background, Fitted, Frame, Gpu, Labels, Look, Mesher, Motion, Overlays, Pace,
+    SunState, Walk,
 };
 use isotrail_track::Track;
 use tracing::{info, warn};
@@ -26,6 +26,7 @@ use crate::output::{self, Pending};
 use crate::overlay::OverlayArgs;
 use crate::report::{Report, ReportArgs, Written, say};
 use crate::scene::SceneArgs;
+use crate::theme::ThemeFileArg;
 use crate::usage;
 
 #[derive(Debug, Args)]
@@ -71,6 +72,9 @@ pub struct RenderArgs {
 
     #[command(flatten)]
     look: LookArgs,
+
+    #[command(flatten)]
+    theme: ThemeFileArg,
 
     #[command(flatten)]
     scene: SceneArgs,
@@ -119,6 +123,7 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
         .into_iter()
         .flatten()
         .chain(args.look.palette_file().filter(|path| path.is_file()))
+        .chain(args.theme.path().filter(|path| path.is_file()))
         .collect();
     output::plan(outputs.iter().map(PathBuf::as_path), &inputs)?;
     let mut motion = match format {
@@ -132,8 +137,9 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
     };
     args.encoding.check(clip_kind, args.scale, typed)?;
     args.overlay.check()?;
-    let mesher = args.look.mesher(typed, args.scene.terrain());
-    let look = args.scene.apply(args.look.look()?);
+    let theme = args.theme.read()?;
+    let mesher = args.look.mesher(typed, args.scene.terrain(&theme));
+    let look = args.scene.apply(args.look.look(&theme)?);
     if format == Format::Gif {
         check_gif_look(&look).map_err(|error| usage(error.to_string()))?;
     }
@@ -165,7 +171,7 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
         bundle.grid.exaggeration = exaggeration;
     }
     info!(exaggeration = bundle.grid.exaggeration, "terrain");
-    let conditions = args.scene.conditions();
+    let conditions = args.scene.conditions(&theme);
     let sun = crate::sun::hike_sun(&bundle, args.look.time, &conditions)?;
     let aim = args.frame.aim();
     if let Some(motion) = &mut motion {
@@ -173,18 +179,21 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
         motion.sun = held.then_some(sun);
         motion.conditions = conditions;
         motion.aim = aim;
+        motion.pacing = theme.pacing;
     }
-    let text = args.overlay.text(&bundle)?;
+    let text = args.overlay.text(&bundle, &theme.labels)?;
+    let style = args.overlay.style(&theme, look.route.colour);
     let fitted = shapes
         .iter()
         .zip(&framings)
         .map(|(shape, framing)| {
-            let route_colour = args.scene.route_colour();
             args.overlay
-                .fit(&text, &shape.label(), framing, args.scale, route_colour)
+                .fit(&text, &shape.label(), framing, args.scale, &style)
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
-    if motion.is_some_and(|motion| motion.pace == Pace::Time) && !Walk::new(&bundle).is_timed() {
+    if motion.is_some_and(|motion| motion.pace == Pace::Time)
+        && !Walk::paced(&bundle, theme.pacing).is_timed()
+    {
         warn!("the track has no times to pace the route by, so it draws at an even speed");
     }
 
@@ -204,6 +213,7 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
                 overlays,
                 look: &look,
                 motion,
+                labels: &theme.labels,
             };
             let frames = write_clip(args, &clip, output, ffmpeg.as_ref())?;
             let scale = clip_scale(args, motion, ffmpeg.is_some());
@@ -267,6 +277,7 @@ struct Clip<'a> {
     overlays: &'a Overlays,
     look: &'a Look,
     motion: &'a Motion,
+    labels: &'a Labels,
 }
 
 enum ClipWriter {
@@ -348,7 +359,7 @@ fn draw_clip(
     mut push: impl FnMut(&Frame) -> anyhow::Result<()>,
 ) -> anyhow::Result<u32> {
     let framing = clip.overlays.diorama_framing();
-    let walk = Walk::new(clip.bundle);
+    let walk = Walk::paced(clip.bundle, clip.motion.pacing);
     let palette = clip.look.palette.as_ref();
     let mut frames = 0;
     render_clip(
@@ -362,7 +373,7 @@ fn draw_clip(
             output::check_interrupted()?;
             let mut frame = frame.clone();
             let walked = walk.stats_at(moment);
-            let stats = args.overlay.walked_stats(clip.bundle, &walked);
+            let stats = args.overlay.walked_stats(clip.bundle, &walked, clip.labels);
             clip.overlays
                 .with_stats(&stats)
                 .draw(&mut frame, palette, moment.progress);
@@ -477,6 +488,7 @@ mod tests {
 
     use anyhow::bail;
     use clap::Parser;
+    use isotrail_render::Theme;
     use isotrail_testkit::hike_bundle;
 
     use super::*;
@@ -494,10 +506,11 @@ mod tests {
             .render;
         let bundle = hike_bundle();
         let framing = Aspect::Square.framing(10).unwrap();
-        let text = args.overlay.text(&bundle).unwrap();
+        let theme = Theme::default();
+        let text = args.overlay.text(&bundle, &theme.labels).unwrap();
         let overlays = Overlays::layout(
             &text,
-            &args.overlay.style(args.scene.route_colour()),
+            &args.overlay.style(&theme, theme.route.colour),
             &framing,
         );
         let motion = args.animation.motion(true).unwrap();
@@ -509,6 +522,7 @@ mod tests {
             overlays: &overlays,
             look: &Look::default(),
             motion: &motion,
+            labels: &theme.labels,
         };
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("clip.gif");

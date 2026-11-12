@@ -19,6 +19,7 @@ mod servers;
 mod stats;
 mod style_lab;
 mod sun;
+mod theme;
 mod weather;
 
 use std::fmt;
@@ -68,6 +69,8 @@ enum Command {
     StyleLab(style_lab::StyleLabArgs),
     /// Show or clear the cache of downloaded elevation and map data
     Cache(cache::CacheArgs),
+    /// Write the built-in theme file, to start a theme of your own from
+    Theme(theme::ThemeArgs),
 }
 
 fn main() -> ExitCode {
@@ -85,6 +88,7 @@ fn main() -> ExitCode {
         Command::Embed(args) => embed::run(&args, &typed),
         Command::StyleLab(args) => style_lab::run(&args, &typed),
         Command::Cache(args) => cache::run(&args),
+        Command::Theme(args) => theme::run(&args),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

@@ -20,7 +20,7 @@ pub fn render_clip<E: From<ExportError>>(
     motion: &Motion,
     mut each: impl FnMut(&Moment, &Frame) -> Result<(), E>,
 ) -> Result<(), E> {
-    let walk = Walk::new(bundle);
+    let walk = Walk::paced(bundle, motion.pacing);
     let moments: Vec<Moment> = (0..motion.timeline.frame_count())
         .map(|i| motion.moment(&walk, i))
         .collect();

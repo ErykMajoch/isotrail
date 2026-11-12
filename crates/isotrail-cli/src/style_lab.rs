@@ -4,7 +4,8 @@ use anyhow::Context;
 use clap::Args;
 use isotrail_export::{encode_png, render_still, upscale};
 use isotrail_render::{
-    Aim, Aspect, Frame, Gpu, Look, Mesher, Palette, SmoothMesher, SunState, VoxelMesher,
+    Aim, Aspect, Frame, Gpu, Look, Mesher, Palette, Shaped, SmoothMesher, SunState, VoxelMesher,
+    When,
 };
 use tracing::info;
 
@@ -15,6 +16,7 @@ use crate::look::{palette_file, read_palette};
 use crate::output;
 use crate::render::Source;
 use crate::report::{Report, ReportArgs, Written};
+use crate::theme::ThemeFileArg;
 use crate::usage;
 
 const SCALES: [u32; 3] = [3, 5, 6];
@@ -67,6 +69,9 @@ pub struct StyleLabArgs {
     /// over it, and it over the user config file
     #[arg(long, value_name = "FILE")]
     config: Option<PathBuf>,
+
+    #[command(flatten)]
+    theme: ThemeFileArg,
 
     #[command(flatten)]
     data: DataArgs,
@@ -127,9 +132,24 @@ impl StyleLabArgs {
 pub fn run(args: &StyleLabArgs, typed: &Typed) -> anyhow::Result<()> {
     let mut report = Report::new(&args.report);
     let dir = &args.output;
+    let theme_file = args.theme.path().filter(|path| path.is_file());
+    let theme = args.theme.read()?;
+    let terrain = theme.terrain();
     let meshers: [(&str, Box<dyn Mesher>); 2] = [
-        ("voxel", Box::new(VoxelMesher::default())),
-        ("smooth", Box::new(SmoothMesher)),
+        (
+            "voxel",
+            Box::new(Shaped {
+                mesher: VoxelMesher::default(),
+                terrain,
+            }),
+        ),
+        (
+            "smooth",
+            Box::new(Shaped {
+                mesher: SmoothMesher,
+                terrain,
+            }),
+        ),
     ];
     let palettes = args.palettes()?;
     let scales = args.scales()?;
@@ -156,6 +176,7 @@ pub fn run(args: &StyleLabArgs, typed: &Typed) -> anyhow::Result<()> {
                 .filter_map(|palette| palette_file(&palette.value))
                 .filter(|path| path.is_file()),
         )
+        .chain(theme_file)
         .collect();
     output::folder(dir)?;
     output::plan(outputs.iter().map(PathBuf::as_path), &inputs)?;
@@ -164,7 +185,7 @@ pub fn run(args: &StyleLabArgs, typed: &Typed) -> anyhow::Result<()> {
         .map(|palette| {
             Ok(Look {
                 palette: read_palette(&palette.value)?,
-                ..Look::default()
+                ..theme.look()
             })
         })
         .collect::<anyhow::Result<Vec<Look>>>()?;
@@ -183,7 +204,7 @@ pub fn run(args: &StyleLabArgs, typed: &Typed) -> anyhow::Result<()> {
     let mut sheet = Sheet::new(columns, palettes.len(), width, height);
 
     let gpu = Gpu::headless()?;
-    let sun = SunState::for_hike(&bundle);
+    let sun = SunState::seen(&bundle, When::Start, &theme.conditions());
     let mut index = 0;
     for (palette, look) in palettes.iter().zip(&looks) {
         let palette = palette.label.as_str();

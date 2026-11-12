@@ -20,7 +20,7 @@ impl Mesher for VoxelMesher {
     fn mesh_with(&self, bundle: &SceneBundle, terrain: &Terrain) -> TerrainMesh {
         let step = bundle.grid.cell_size_m as f32 * self.block_height;
         let tops = column_tops(bundle, step);
-        let seasonal = Seasonal::new(bundle);
+        let seasonal = Seasonal::new(bundle, &terrain.style);
         let colours = cover::top_colours(bundle, &seasonal, terrain);
         let columns = Columns::new(&bundle.grid, bundle.terrain.landcover.clone())
             .in_season(bundle, &seasonal)
@@ -89,7 +89,7 @@ impl Mesher for VoxelMesher {
         if vertices > limit {
             return vertices;
         }
-        let seasonal = Seasonal::new(bundle);
+        let seasonal = Seasonal::new(bundle, &terrain.style);
         let columns = Columns::new(&bundle.grid, bundle.terrain.landcover.clone())
             .in_season(bundle, &seasonal)
             .shaped(terrain);
@@ -126,7 +126,7 @@ mod tests {
 
     use super::*;
     use crate::mesh::strata::base;
-    use crate::mesh::{landcover_rgba, shade};
+    use crate::mesh::{SIDE_SHADE, landcover_rgba, shade};
 
     fn mesh(grid: GridInfo, heights: &[f32], classes: &[Landcover]) -> TerrainMesh {
         VoxelMesher::default().mesh(&bundle(grid, heights, classes))
@@ -194,7 +194,7 @@ mod tests {
             assert_eq!(triangle[0].normal, [-1.0, 0.0, 0.0]);
             assert_eq!(
                 triangle[0].colour,
-                shade(landcover_rgba(u8::from(Landcover::Coniferous)))
+                shade(landcover_rgba(u8::from(Landcover::Coniferous)), SIDE_SHADE)
             );
             for vertex in triangle {
                 let z = vertex.position[2];
@@ -223,7 +223,7 @@ mod tests {
         classes[6] = Landcover::Water;
         let bundle = bundle(grid(4, 3, 10.0), &heights, &classes);
         let mesh = VoxelMesher::default().mesh(&bundle);
-        let water = cover::top_colours(&bundle, &Seasonal::new(&bundle), &Terrain::default())[5];
+        let water = cover::top_colours(&bundle, &Seasonal::plain(&bundle), &Terrain::default())[5];
         let lake: Vec<_> = mesh.triangles().filter(|t| t[0].colour == water).collect();
         assert_eq!(lake.len(), 4);
         for vertex in lake.into_iter().flatten() {
