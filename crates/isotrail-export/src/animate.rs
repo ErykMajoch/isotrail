@@ -1,7 +1,7 @@
 use isotrail_bundle::SceneBundle;
 use isotrail_render::{
     Diorama, Frame, Framing, Gpu, Look, Mesher, Moment, Motion, OffscreenTarget, SunState,
-    TerrainRenderer, View, Viewpoints, Walk, mesh_within,
+    TerrainRenderer, View, Viewpoints, Walk, When, mesh_within,
 };
 
 use crate::ExportError;
@@ -26,7 +26,7 @@ pub fn render_clip<E: From<ExportError>>(
         .collect();
     let offsets: Vec<f32> = moments.iter().map(|m| m.yaw_offset_deg).collect();
     let renderer = TerrainRenderer::new(gpu);
-    let start = SunState::for_hike(bundle);
+    let start = SunState::seen(bundle, When::Start, &motion.conditions);
     let mut diorama = Diorama::new(
         gpu,
         &renderer,
@@ -48,11 +48,9 @@ pub fn render_clip<E: From<ExportError>>(
             Some((time_s, ref frame)) if time_s == moment.time_s => frame,
             _ => {
                 if motion.sun.is_none() {
-                    diorama.set_sun(
-                        moment
-                            .hike_time_s
-                            .map_or(start, |time_s| SunState::during(bundle, time_s)),
-                    );
+                    diorama.set_sun(moment.hike_time_s.map_or(start, |time_s| {
+                        SunState::seen(bundle, When::During(time_s), &motion.conditions)
+                    }));
                 }
                 diorama.set_time(moment.time_s);
                 diorama.draw(

@@ -28,7 +28,23 @@ const LOOK = {
   turn: 'turn',
   pitch: 'pitch',
   zoom: 'zoom',
+  'prop-density': 'propDensity',
+  paths: 'paths',
+  streams: 'streams',
+  strata: 'strata',
+  'base-blocks': 'baseBlocks',
+  outlines: 'outlines',
+  shadows: 'shadows',
+  'night-sky': 'nightSky',
+  'weather-effects': 'weatherEffects',
+  weather: 'weather',
+  sun: 'sun',
+  'route-colour': 'routeColour',
+  'route-width': 'routeWidth',
+  'route-hidden': 'routeHidden',
+  markers: 'markers',
 };
+const ROUTE_COLOUR = /^#[0-9a-f]{6}$/i;
 const INTRO_S = 0.5;
 const DRAW_S = 8;
 const ORBIT_DEG = 30;
@@ -126,7 +142,6 @@ const CSS = `
     --isotrail-edge: #819796;
     --isotrail-text: #ebede9;
     --isotrail-accent: #a4dddb;
-    --isotrail-progress: #d64834;
     --isotrail-track: rgb(32 46 55 / 0.45);
     --isotrail-background: transparent;
     display: block;
@@ -254,6 +269,7 @@ const CSS = `
     max-width: 100%;
   }
   .credit a { color: inherit; }
+  .credit .extra { display: block; }
   :host([credit="none"]) .credit { visibility: hidden; }
   /* The route drawn so far, as a line along the bottom edge with a light
      tick at its head; the input is taller than the line, to be easy to grab */
@@ -268,7 +284,7 @@ const CSS = `
     -webkit-appearance: none;
     --walked: 100%;
     background: linear-gradient(to right,
-        var(--isotrail-progress) var(--walked),
+        var(--isotrail-progress, var(--route, #d64834)) var(--walked),
         var(--isotrail-text) var(--walked) calc(var(--walked) + 2px),
         var(--isotrail-track) calc(var(--walked) + 2px))
       bottom / 100% 4px no-repeat;
@@ -360,12 +376,13 @@ template.innerHTML = `
 `;
 
 class IsotrailHike extends HTMLElement {
-  static observedAttributes = ['src', 'poster', 'aspect', ...Object.keys(LOOK)];
+  static observedAttributes = ['src', 'poster', 'aspect', 'credit-extra', ...Object.keys(LOOK)];
 
   #frameBox;
   #poster;
   #message;
   #credit;
+  #creditText = '';
   #canvas = null;
   #controls;
   #playButton;
@@ -456,8 +473,16 @@ class IsotrailHike extends HTMLElement {
       this.#teardown();
       this.#setState('poster');
       if (this.#near) this.#start();
-    } else if (name in LOOK && this.#viewer) {
-      this.#changeLook();
+    } else if (name === 'credit-extra') {
+      if (this.#viewer) this.#showCredit(this.#creditText);
+    } else if (name in LOOK) {
+      if (name === 'route-colour') {
+        // The progress line follows the route unless the page sets its own
+        const colour = ROUTE_COLOUR.test(value ?? '') ? value : null;
+        if (colour) this.#scrubber.style.setProperty('--route', colour);
+        else this.#scrubber.style.removeProperty('--route');
+      }
+      if (this.#viewer) this.#changeLook();
     }
   }
 
@@ -680,8 +705,9 @@ class IsotrailHike extends HTMLElement {
   }
 
   // The data credits, each kept on one line, with links where the licences
-  // ask for them
+  // ask for them, and the page's own line under them
   #showCredit(text) {
+    this.#creditText = text;
     const names = Object.keys(CREDIT_LINKS).map((name) => name.replace(/[.]/g, '\\.'));
     const linked = new RegExp(`(${names.join('|')})`);
     const sources = text ? text.split(' · ') : [];
@@ -702,6 +728,13 @@ class IsotrailHike extends HTMLElement {
         return i === 0 ? [span] : [' · ', span];
       }),
     );
+    const extra = this.getAttribute('credit-extra')?.trim();
+    if (extra) {
+      const line = document.createElement('span');
+      line.className = 'extra';
+      line.textContent = extra;
+      this.#credit.append(line);
+    }
   }
 
   #setState(state) {

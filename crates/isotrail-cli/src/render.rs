@@ -23,6 +23,7 @@ use crate::frame::{AspectArg, FrameArgs, Shape, parse_scale};
 use crate::look::LookArgs;
 use crate::output::{self, Pending};
 use crate::overlay::OverlayArgs;
+use crate::scene::SceneArgs;
 use crate::usage;
 
 #[derive(Debug, Args)]
@@ -70,6 +71,9 @@ pub struct RenderArgs {
     look: LookArgs,
 
     #[command(flatten)]
+    scene: SceneArgs,
+
+    #[command(flatten)]
     overlay: OverlayArgs,
 
     #[command(flatten)]
@@ -113,8 +117,8 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
         Format::Gif | Format::Mp4 => Some(args.animation.motion()?),
     };
     args.overlay.check()?;
-    let mesher = args.look.mesher(typed);
-    let look = args.look.look()?;
+    let mesher = args.look.mesher(typed, args.scene.terrain());
+    let look = args.scene.apply(args.look.look()?);
     if format == Format::Gif {
         check_gif_look(&look).map_err(|error| usage(error.to_string()))?;
     }
@@ -146,17 +150,24 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
         bundle.grid.exaggeration = exaggeration;
     }
     info!(exaggeration = bundle.grid.exaggeration, "terrain");
-    let sun = crate::sun::hike_sun(&bundle, args.look.time)?;
+    let conditions = args.scene.conditions();
+    let sun = crate::sun::hike_sun(&bundle, args.look.time, &conditions)?;
     let aim = args.frame.aim();
     if let Some(motion) = &mut motion {
-        motion.sun = args.look.time.is_some().then_some(sun);
+        let held = args.look.time.is_some() || args.scene.holds_sun();
+        motion.sun = held.then_some(sun);
+        motion.conditions = conditions;
         motion.aim = aim;
     }
     let text = args.overlay.text(&bundle)?;
     let fitted = shapes
         .iter()
         .zip(&framings)
-        .map(|(shape, framing)| args.overlay.fit(&text, &shape.label(), framing, args.scale))
+        .map(|(shape, framing)| {
+            let route_colour = args.scene.route_colour();
+            args.overlay
+                .fit(&text, &shape.label(), framing, args.scale, route_colour)
+        })
         .collect::<anyhow::Result<Vec<_>>>()?;
     if motion.is_some_and(|motion| motion.pace == Pace::Time) && !Walk::new(&bundle).is_timed() {
         warn!("the track has no times to pace the route by, so it draws at an even speed");
@@ -455,7 +466,11 @@ mod tests {
         let bundle = hike_bundle();
         let framing = Aspect::Square.framing(10).unwrap();
         let text = args.overlay.text(&bundle).unwrap();
-        let overlays = Overlays::layout(&text, &args.overlay.style(), &framing);
+        let overlays = Overlays::layout(
+            &text,
+            &args.overlay.style(args.scene.route_colour()),
+            &framing,
+        );
         let motion = args.animation.motion().unwrap();
         let gpu = isotrail_testkit::gpu();
         let clip = Clip {

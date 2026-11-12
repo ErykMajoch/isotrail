@@ -4,7 +4,7 @@ use glam::Vec2;
 use isotrail_bundle::Landcover;
 
 use super::season::ICE;
-use super::{BASE_BLOCKS, Columns, Side, TerrainMesh, hash};
+use super::{Columns, Side, Terrain, TerrainMesh, hash};
 
 /// Block rows above the base that are deep stone
 const DEEP_BLOCKS: u32 = 2;
@@ -141,7 +141,11 @@ fn walls(
                 let depth = (depth - EPSILON).ceil().max(0.0) as u32;
                 let stratum = column.stratum(depth, block_row);
                 let noise = hash(seed, [key[0], key[1], u64::from(block_row)]);
-                let colour = column.colour(stratum, depth, noise);
+                let colour = if columns.strata || stratum == Stratum::Water {
+                    column.colour(stratum, depth, noise)
+                } else {
+                    STONE
+                };
                 match runs.last_mut() {
                     Some(Run {
                         rows, colour: last, ..
@@ -162,8 +166,8 @@ fn walls(
 }
 
 /// Height of the base of a slab whose lowest terrain is at zero
-pub(super) fn base(block: f32) -> f32 {
-    -(BASE_BLOCKS as f32) * block
+pub(super) fn base(block: f32, terrain: &Terrain) -> f32 {
+    -(terrain.base_blocks as f32) * block
 }
 
 struct Column {
@@ -351,7 +355,7 @@ mod tests {
         let columns = Columns::new(&grid(4, 3, 10.0), vec![4; 12]);
         // A tilted plane that doesn't line up with the blocks
         let surface = |(c, r): (usize, usize)| 7.3 * c as f32 + 13.1 * r as f32;
-        let base = base(10.0);
+        let base = base(10.0, &Terrain::default());
         let mut mesh = TerrainMesh::default();
         cut_faces(&columns, 1, 10.0, base, &mut mesh, |_, corner| {
             surface(corner)
@@ -400,7 +404,14 @@ mod tests {
         classes[1..6].fill(Water);
         let columns = Columns::new(&grid(7, 2, 10.0), classes.map(u8::from).to_vec());
         let mut mesh = TerrainMesh::default();
-        cut_faces(&columns, 1, 10.0, base(10.0), &mut mesh, |_, _| 200.0);
+        cut_faces(
+            &columns,
+            1,
+            10.0,
+            base(10.0, &Terrain::default()),
+            &mut mesh,
+            |_, _| 200.0,
+        );
         let water_blocks_at = |col: usize| {
             let x = (col as f32 - 3.0) * 10.0;
             let area: f32 = mesh
@@ -426,7 +437,7 @@ mod tests {
             columns,
             1,
             block,
-            base(block),
+            base(block, &Terrain::default()),
             surface,
             |wall, heights, runs| {
                 let width = wall[0].distance(wall[1]);
@@ -437,7 +448,10 @@ mod tests {
                             rows: 1,
                             ..*run
                         };
-                        let polygon = clip_below(&one.rectangle(block, base(block)), heights);
+                        let polygon = clip_below(
+                            &one.rectangle(block, base(block, &Terrain::default())),
+                            heights,
+                        );
                         let shoelace: f32 = (0..polygon.len())
                             .map(|i| polygon[i].perp_dot(polygon[(i + 1) % polygon.len()]))
                             .sum();
@@ -457,9 +471,14 @@ mod tests {
         let surface = |(c, r): (usize, usize)| 4_000.0 + 37.3 * c as f32 - 113.1 * r as f32;
         let block = 10.0;
         let mut mesh = TerrainMesh::default();
-        cut_faces(&columns, 1, block, base(block), &mut mesh, |_, corner| {
-            surface(corner)
-        });
+        cut_faces(
+            &columns,
+            1,
+            block,
+            base(block, &Terrain::default()),
+            &mut mesh,
+            |_, corner| surface(corner),
+        );
 
         let blocks: u64 = Side::ALL
             .into_iter()
@@ -467,14 +486,27 @@ mod tests {
                 let cells = side.edge_cells(8, 4);
                 cells.into_iter().map(move |(col, row)| side.wall(col, row))
             })
-            .map(|corners| u64::from(block_rows(corners.map(surface), block, base(block))))
+            .map(|corners| {
+                u64::from(block_rows(
+                    corners.map(surface),
+                    block,
+                    base(block, &Terrain::default()),
+                ))
+            })
             .sum();
         let vertices = mesh.vertices.len() as u64;
         assert!(
             vertices * 5 < blocks * 6,
             "{vertices} vertices for {blocks} blocks"
         );
-        let bound = vertex_bound(&columns, 1, block, base(block), |_, c| surface(c), u64::MAX);
+        let bound = vertex_bound(
+            &columns,
+            1,
+            block,
+            base(block, &Terrain::default()),
+            |_, c| surface(c),
+            u64::MAX,
+        );
         assert!(bound >= vertices, "{bound} < {vertices}");
         assert!(bound <= vertices * 2, "{bound} for {vertices}");
 
@@ -496,8 +528,22 @@ mod tests {
     #[test]
     fn counting_stops_past_the_limit() {
         let columns = Columns::new(&grid(8, 4, 10.0), vec![4; 32]);
-        let full = vertex_bound(&columns, 1, 1.0, base(1.0), |_, _| 50_000.0, u64::MAX);
-        let capped = vertex_bound(&columns, 1, 1.0, base(1.0), |_, _| 50_000.0, 1_000);
+        let full = vertex_bound(
+            &columns,
+            1,
+            1.0,
+            base(1.0, &Terrain::default()),
+            |_, _| 50_000.0,
+            u64::MAX,
+        );
+        let capped = vertex_bound(
+            &columns,
+            1,
+            1.0,
+            base(1.0, &Terrain::default()),
+            |_, _| 50_000.0,
+            1_000,
+        );
         assert!(capped > 1_000 && capped < full, "{capped} of {full}");
     }
 
@@ -522,6 +568,32 @@ mod tests {
         let layers = (0..4).map(|depth| sea.stratum(depth, 5));
         assert_eq!(layers.collect::<Vec<_>>(), [Water, Water, Water, Dirt]);
         assert_eq!(sea.colour(Water, 0, 0), SEA_WATER);
+    }
+
+    #[test]
+    fn without_strata_the_walls_are_plain_stone_under_any_water() {
+        use Landcover::{Grassland, Water};
+        let mut classes = [Grassland; 14];
+        classes[1..6].fill(Water);
+        let plain = Terrain {
+            strata: false,
+            ..Terrain::default()
+        };
+        let columns =
+            Columns::new(&grid(7, 2, 10.0), classes.map(u8::from).to_vec()).shaped(&plain);
+        let mut mesh = TerrainMesh::default();
+        cut_faces(&columns, 1, 10.0, base(10.0, &plain), &mut mesh, |_, _| {
+            200.0
+        });
+        let mut colours: Vec<[u8; 4]> = mesh.triangles().map(|t| t[0].colour).collect();
+        colours.sort_unstable();
+        colours.dedup();
+        assert_eq!(colours, [WATER, STONE]);
+        let deeper = Terrain {
+            base_blocks: 12,
+            ..plain
+        };
+        assert_eq!(base(10.0, &deeper), -120.0);
     }
 
     #[test]

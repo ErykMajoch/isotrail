@@ -1,7 +1,7 @@
 use clap::{Args, ValueEnum};
 use isotrail_bundle::{HikeStats, SceneBundle, WEATHER_ATTRIBUTION};
 use isotrail_render::{
-    DateFormat, FitStep, Fitted, Framing, OverlayStyle, OverlayText, Overlays, PanelStyle,
+    DateFormat, FitStep, Fitted, Framing, Layout, OverlayStyle, OverlayText, Overlays, PanelStyle,
     PixelFont, Stat, StatKind, Subtitle, TitleSize,
 };
 use tracing::warn;
@@ -69,6 +69,21 @@ pub struct OverlayArgs {
     /// Units for the stats
     #[arg(long, value_enum, default_value_t = UnitsArg::Metric)]
     units: UnitsArg,
+
+    /// Where the text goes: one column on the left for landscape images and
+    /// the title on top with the stats at the bottom otherwise (auto), or
+    /// either for every shape
+    #[arg(long, value_name = "auto|stacked|column", default_value = "auto",
+          value_parser = parse_layout)]
+    layout: Layout,
+
+    /// A line of your own under the data credit, such as your name or site
+    #[arg(long, value_name = "TEXT")]
+    credit_extra: Option<String>,
+}
+
+fn parse_layout(value: &str) -> Result<Layout, String> {
+    value.parse()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -129,7 +144,8 @@ impl From<StatArg> for StatKind {
 }
 
 impl OverlayArgs {
-    pub fn style(&self) -> OverlayStyle {
+    /// The overlays' look, with the profile walked in `route_colour`
+    pub fn style(&self, route_colour: [u8; 3]) -> OverlayStyle {
         OverlayStyle {
             panel: match self.panel {
                 PanelArg::Frosted => PanelStyle::Frosted,
@@ -139,7 +155,25 @@ impl OverlayArgs {
                 TitleSizeArg::Large => TitleSize::Large,
                 TitleSizeArg::Small => TitleSize::Small,
             },
+            layout: self.layout,
+            route_colour,
         }
+    }
+
+    /// `--credit-extra` as the embed's attribute, so its live view shows the
+    /// line too
+    pub fn attributes(&self) -> Vec<(&'static str, String)> {
+        self.credit_extra()
+            .map(|extra| ("credit-extra", extra.to_owned()))
+            .into_iter()
+            .collect()
+    }
+
+    fn credit_extra(&self) -> Option<&str> {
+        self.credit_extra
+            .as_deref()
+            .map(str::trim)
+            .filter(|extra| !extra.is_empty())
     }
 
     /// Checks the lists of parts and stats, before any work
@@ -206,6 +240,9 @@ impl OverlayArgs {
         if !self.shows_attribution() {
             text.attribution = None;
         }
+        if !self.overlay.contains(&Part::None) {
+            text.credit_extra = self.credit_extra().map(str::to_owned);
+        }
         let subtitle = match &text.subtitle {
             Subtitle::Text(subtitle) => subtitle.as_str(),
             _ => "",
@@ -215,6 +252,10 @@ impl OverlayArgs {
             ("title", text.title.as_str()),
             ("subtitle", subtitle),
             ("date", text.date.as_deref().unwrap_or_default()),
+            (
+                "credit line",
+                text.credit_extra.as_deref().unwrap_or_default(),
+            ),
         ] {
             let missing = font.missing(words);
             if !missing.is_empty() {
@@ -233,9 +274,10 @@ impl OverlayArgs {
         shape: &str,
         framing: &Framing,
         scale: u32,
+        route_colour: [u8; 3],
     ) -> anyhow::Result<Fitted> {
         let frame = format!("the {shape} frame at --scale {scale}");
-        let fit = Overlays::fit(text, &self.style(), framing).map_err(|_| {
+        let fit = Overlays::fit(text, &self.style(route_colour), framing).map_err(|_| {
             usage(format!(
                 "the overlays don't fit {frame}, even with a small title, no subtitle, \
                  no profile, no credit and one stat; use a lower --scale, a larger --size or \
@@ -326,7 +368,7 @@ mod tests {
     use isotrail_bundle::ProfileSample;
     use isotrail_testkit::{diorama_bundle, synthetic_weather};
 
-    use isotrail_render::Aspect;
+    use isotrail_render::{Aspect, ROUTE_COLOUR};
 
     use super::*;
 
@@ -370,7 +412,7 @@ mod tests {
         assert_eq!(text.profile, [400.0, 401.0, 402.0, 403.0]);
         assert_eq!(text.attribution.as_deref(), Some("© Mappers · Tiles"));
         assert_eq!(args.caption_credit(&bundle(), false), None);
-        assert_eq!(args.style(), OverlayStyle::default());
+        assert_eq!(args.style(ROUTE_COLOUR), OverlayStyle::default());
     }
 
     #[test]
@@ -415,7 +457,13 @@ mod tests {
         let text = args.text(&bundle).unwrap();
         assert_eq!(text.short_date.as_deref(), Some("14 Jun 2025"));
         let fit = |aspect: Aspect, scale| {
-            args.fit(&text, aspect.name(), &aspect.framing(scale).unwrap(), scale)
+            args.fit(
+                &text,
+                aspect.name(),
+                &aspect.framing(scale).unwrap(),
+                scale,
+                ROUTE_COLOUR,
+            )
         };
         assert_eq!(fit(Aspect::Story, 3).unwrap().steps, []);
         let coarse = fit(Aspect::Story, 10).unwrap();
@@ -428,7 +476,9 @@ mod tests {
         let mut long = text.clone();
         long.stats[0] = Stat::new("123456789012345 km", "distance");
         let framing = Aspect::Square.framing(10).unwrap();
-        let refused = args.fit(&long, "square", &framing, 10).unwrap_err();
+        let refused = args
+            .fit(&long, "square", &framing, 10, ROUTE_COLOUR)
+            .unwrap_err();
         assert!(refused.is::<crate::UsageError>());
         let message = refused.to_string();
         assert!(
@@ -545,10 +595,11 @@ mod tests {
     fn style_flags_map_to_the_style() {
         let args = parse(&["--panel", "none", "--title-size", "small"]).unwrap();
         assert_eq!(
-            args.style(),
+            args.style(ROUTE_COLOUR),
             OverlayStyle {
                 panel: PanelStyle::None,
                 title_size: TitleSize::Small,
+                ..OverlayStyle::default()
             }
         );
     }

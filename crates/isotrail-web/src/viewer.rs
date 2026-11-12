@@ -5,7 +5,7 @@ use glam::Vec2;
 use isotrail_bundle::{BundleError, SceneBundle};
 use isotrail_render::{
     Diorama, Framing, Gpu, Insets, OffscreenTarget, Pace, PixelGrid, Present, SunState,
-    TerrainMesh, TerrainRenderer, View, Viewpoints, Walk, credit_line, mesh_within,
+    TerrainMesh, TerrainRenderer, View, Viewpoints, Walk, When, credit_line, mesh_within,
 };
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
@@ -127,7 +127,7 @@ impl Viewer {
         let walk = Walk::new(&bundle);
         let sun = options
             .held_sun
-            .unwrap_or_else(|| SunState::for_hike(&bundle));
+            .unwrap_or_else(|| SunState::seen(&bundle, When::Start, &options.conditions));
         let view = options.start_view();
         Ok(Viewer {
             gpu,
@@ -204,12 +204,20 @@ impl Viewer {
     /// (`"voxel"` or `"smooth"`), `blockHeight`, `occlusion`, `softShadows`,
     /// `godRays` (`"auto"`, `"on"` or `"off"`), `background` (`"sky"`,
     /// `"transparent"` or `"#rrggbb"`) and `time` (`"HH:MM"`, local to the
-    /// hike, which then holds the sun through playback), and `turn`
-    /// (degrees, -360 to 360), `pitch` (degrees, 10 to 80) and `zoom` (0.5
-    /// to 2) for the view it starts from and resets to. Values may be
-    /// strings or numbers; one it can't use stays at its default with a
-    /// console warning. Fails with reason `"gpu"` when the GPU can't hold
-    /// the terrain the new options build
+    /// hike, which then holds the sun through playback); the scene's
+    /// `propDensity` (0 to 2), `paths`, `streams`, `strata`, `shadows` and
+    /// `nightSky` (`"on"` or `"off"`), `baseBlocks` (1 to 24), `outlines` (0
+    /// to 2), `weatherEffects` (`"clouds,shade,rain,snow,haze"` or fewer, or
+    /// `"none"`), `weather` (`"clear"`, `"cloudy"`, `"overcast"`, `"rain"`,
+    /// `"snow"` or `"fog"`) and `sun` (`"AZIMUTH,ELEVATION"` in degrees,
+    /// held like `time`); the route's `routeColour` (`"#rrggbb"`),
+    /// `routeWidth` (1 to 4), `routeHidden` (`"dashed"`, `"dim"`, `"solid"`
+    /// or `"off"`) and `markers` (`"start,finish,head"` or fewer, or
+    /// `"none"`); and `turn` (degrees, -360 to 360), `pitch` (degrees, 10 to
+    /// 80) and `zoom` (0.5 to 2) for the view it starts from and resets to.
+    /// Values may be strings or numbers; one it can't use stays at its
+    /// default with a console warning. Fails with reason `"gpu"` when the
+    /// GPU can't hold the terrain the new options build
     #[wasm_bindgen(js_name = setOptions)]
     pub fn set_options(&mut self, options: JsValue) -> Result<(), JsValue> {
         let options = Options::read(&options, &self.bundle);
@@ -404,10 +412,11 @@ impl Viewer {
         let step = self
             .share
             .map(|share| self.walk.step(Pace::Distance, share));
+        let conditions = &self.options.conditions;
         self.sun = match (self.options.held_sun, step.and_then(|step| step.time_s)) {
             (Some(held), _) => held,
-            (None, Some(time_s)) => SunState::during(&self.bundle, time_s),
-            (None, None) => SunState::for_hike(&self.bundle),
+            (None, Some(time_s)) => SunState::seen(&self.bundle, When::During(time_s), conditions),
+            (None, None) => SunState::seen(&self.bundle, When::Start, conditions),
         };
         if let Some(stage) = &mut self.stage {
             stage.diorama.set_sun(self.sun);

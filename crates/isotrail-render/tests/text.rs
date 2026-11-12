@@ -58,6 +58,7 @@ fn story_overlays_match_golden() {
         ],
         profile: Vec::new(),
         attribution: None,
+        credit_extra: None,
     };
     let overlays = Overlays::layout(&text, &OverlayStyle::default(), &framing);
     // The diorama keeps clear of the stats panel as well as the safe area
@@ -110,10 +111,12 @@ fn story_overlays_without_panels_match_golden() {
         ],
         profile: Vec::new(),
         attribution: None,
+        credit_extra: None,
     };
     let style = OverlayStyle {
         panel: PanelStyle::None,
         title_size: TitleSize::Small,
+        ..OverlayStyle::default()
     };
     let palette = Palette::builtin("apollo").unwrap();
     Overlays::layout(&text, &style, &framing).draw(&mut frame, Some(&palette), 1.0);

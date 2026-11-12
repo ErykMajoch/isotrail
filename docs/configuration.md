@@ -18,6 +18,11 @@ season = "autumn"
 god-rays = "on"
 pitch = 40
 safe-area = [14, 6, 35, 6]     # top, right, bottom, left
+strata = "off"                 # on and off, or true and false
+weather-effects = ["clouds", "haze"]
+route-colour = "#2a6fdb"
+sun = [250, 8]                 # azimuth, elevation
+credit-extra = "photos and walks: example.org"
 orbit = 0                      # animation settings only apply to .gif and .mp4 output
 ```
 
@@ -84,6 +89,7 @@ An option you type also wins over settings it can't be combined with: with `date
 - A bad value is reported with the name of the file it came from, for example `scale in hike.toml: must be a whole number from 1 to 16`.
 - `--background` in a config file keeps its exact colour, just as it does on the command line.
 - `time` can be a string (`"07:30"`) or a TOML time (`07:30:00`).
+- Options that take `on` or `off`, such as `paths` or `shadows`, take `true` or `false` too.
 - Mistakes in a config file stop the command with exit code 2, like mistakes on the command line.
 
 ## Environment variables

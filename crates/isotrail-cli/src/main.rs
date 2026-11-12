@@ -11,6 +11,7 @@ mod look;
 mod output;
 mod overlay;
 mod render;
+mod scene;
 mod season;
 mod stats;
 mod style_lab;

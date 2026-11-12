@@ -17,6 +17,7 @@ use crate::look::LookArgs;
 use crate::output;
 use crate::overlay::OverlayArgs;
 use crate::render::Source;
+use crate::scene::SceneArgs;
 use crate::usage;
 
 /// The element's script and the WebAssembly renderer it loads, at the paths
@@ -82,6 +83,9 @@ pub struct EmbedArgs {
 
     #[command(flatten)]
     look: LookArgs,
+
+    #[command(flatten)]
+    scene: SceneArgs,
 
     #[command(flatten)]
     overlay: OverlayArgs,
@@ -167,8 +171,8 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
         .collect();
     output::plan(outputs.map(PathBuf::as_path), &inputs)?;
     args.overlay.check()?;
-    let mesher = args.look.mesher(typed);
-    let look = args.look.look()?;
+    let mesher = args.look.mesher(typed, args.scene.terrain());
+    let look = args.scene.apply(args.look.look()?);
 
     let source = Source::open(&args.file)?;
     if source.is_bundle() {
@@ -198,11 +202,15 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
         )));
     }
     let text = args.overlay.text(&bundle)?;
-    let fitted = args
-        .overlay
-        .fit(&text, &shape.label(), &framing, args.scale)?;
+    let fitted = args.overlay.fit(
+        &text,
+        &shape.label(),
+        &framing,
+        args.scale,
+        args.scene.route_colour(),
+    )?;
     let aim = args.frame.aim();
-    let sun = crate::sun::hike_sun(&bundle, args.look.time)?;
+    let sun = crate::sun::hike_sun(&bundle, args.look.time, &args.scene.conditions())?;
 
     if in_place {
         println!("Kept {} as it is", bundle_path.display());
@@ -240,7 +248,9 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
     }
 
     let mut attributes = args.look.attributes(palette_url.as_deref());
+    attributes.extend(args.scene.attributes());
     attributes.extend(view_attributes(&aim, &bundle));
+    attributes.extend(args.overlay.attributes());
     let html = snippet(&Snippet {
         name: &name,
         title: args.overlay.title(&bundle),

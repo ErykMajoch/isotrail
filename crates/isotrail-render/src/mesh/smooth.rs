@@ -1,6 +1,8 @@
 use isotrail_bundle::{Landcover, SceneBundle};
 
-use super::{Columns, Mesher, Seasonal, Surface, TerrainMesh, cover, props, slab_position, strata};
+use super::{
+    Columns, Mesher, Seasonal, Surface, Terrain, TerrainMesh, cover, props, slab_position, strata,
+};
 
 /// A height at every cell corner and two flat-shaded triangles per cell,
 /// coloured by the cell's landcover, over layered slab sides
@@ -8,12 +10,12 @@ use super::{Columns, Mesher, Seasonal, Surface, TerrainMesh, cover, props, slab_
 pub struct SmoothMesher;
 
 impl Mesher for SmoothMesher {
-    fn mesh(&self, bundle: &SceneBundle) -> TerrainMesh {
+    fn mesh_with(&self, bundle: &SceneBundle, terrain: &Terrain) -> TerrainMesh {
         let grid = &bundle.grid;
         let (cols, rows) = (grid.cols as usize, grid.rows as usize);
         let corners = corner_heights(bundle);
         let seasonal = Seasonal::new(bundle);
-        let colours = cover::top_colours(bundle, &seasonal);
+        let colours = cover::top_colours(bundle, &seasonal, terrain);
         let corner = |col: usize, row: usize| {
             slab_position(grid, col as f64, row as f64).extend(corners[row * (cols + 1) + col])
         };
@@ -21,6 +23,7 @@ impl Mesher for SmoothMesher {
         let mut mesh = TerrainMesh {
             vertices: Vec::with_capacity(cols * rows * 6),
             surface: Surface::default(),
+            terrain: *terrain,
         };
         for row in 0..rows {
             for col in 0..cols {
@@ -32,13 +35,14 @@ impl Mesher for SmoothMesher {
             }
         }
         let block = grid.cell_size_m as f32;
-        let columns =
-            Columns::new(grid, bundle.terrain.landcover.clone()).in_season(bundle, &seasonal);
+        let columns = Columns::new(grid, bundle.terrain.landcover.clone())
+            .in_season(bundle, &seasonal)
+            .shaped(terrain);
         strata::cut_faces(
             &columns,
             bundle.prop_seed,
             block,
-            strata::base(block),
+            strata::base(block, terrain),
             &mut mesh,
             |_, (col, row)| corners[row * (cols + 1) + col],
         );
@@ -46,7 +50,7 @@ impl Mesher for SmoothMesher {
         mesh
     }
 
-    fn vertex_bound(&self, bundle: &SceneBundle, limit: u64) -> u64 {
+    fn vertex_bound_with(&self, bundle: &SceneBundle, terrain: &Terrain, limit: u64) -> u64 {
         let grid = &bundle.grid;
         let vertices = props::MAX_VERTICES + 6 * grid.cells() as u64;
         if vertices > limit {
@@ -55,15 +59,16 @@ impl Mesher for SmoothMesher {
         let cols = grid.cols as usize;
         let corners = corner_heights(bundle);
         let seasonal = Seasonal::new(bundle);
-        let columns =
-            Columns::new(grid, bundle.terrain.landcover.clone()).in_season(bundle, &seasonal);
+        let columns = Columns::new(grid, bundle.terrain.landcover.clone())
+            .in_season(bundle, &seasonal)
+            .shaped(terrain);
         let block = grid.cell_size_m as f32;
         vertices
             + strata::vertex_bound(
                 &columns,
                 bundle.prop_seed,
                 block,
-                strata::base(block),
+                strata::base(block, terrain),
                 |_, (col, row)| corners[row * (cols + 1) + col],
                 limit - vertices,
             )
@@ -133,7 +138,10 @@ mod tests {
             .fold((Vec3::INFINITY, Vec3::NEG_INFINITY), |(min, max), p| {
                 (min.min(p), max.max(p))
             });
-        assert_eq!(min, Vec3::new(-15.0, -10.0, base(10.0)));
+        assert_eq!(
+            min,
+            Vec3::new(-15.0, -10.0, base(10.0, &Terrain::default()))
+        );
         assert_eq!(max, Vec3::new(15.0, 10.0, 0.0));
     }
 
@@ -202,7 +210,7 @@ mod tests {
         classes[6] = Landcover::Water;
         let bundle = bundle(grid(4, 3, 10.0), &heights, &classes);
         let mesh = SmoothMesher.mesh(&bundle);
-        let water = cover::top_colours(&bundle, &Seasonal::new(&bundle))[5];
+        let water = cover::top_colours(&bundle, &Seasonal::new(&bundle), &Terrain::default())[5];
         let lake: Vec<_> = surface(&mesh).filter(|t| t[0].colour == water).collect();
         assert_eq!(lake.len(), 4);
         for vertex in lake.into_iter().flatten() {

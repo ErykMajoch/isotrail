@@ -174,6 +174,17 @@ Object.assign(pages, {
     ]),
     { head: '<style>.grid{grid-template-columns:repeat(3,288px)}</style>' },
   ),
+  '/scene.html': page(
+    grid([
+      embed('id="d" src="/data/hike.itb" aspect="wide"'),
+      embed('id="s" src="/data/hike.itb" aspect="wide" strata="off" prop-density="0" paths="off" base-blocks="2"'),
+      embed('id="w" src="/data/hike.itb" aspect="wide" weather="fog" outlines="0" shadows="off"'),
+      embed('id="r" src="/data/hike.itb" aspect="wide" route-colour="#2050e0" route-width="4" markers="none" credit-extra="Walked by A. Hiker"'),
+      embed('id="u" src="/data/hike.itb" aspect="wide" paths="maybe" weather="sunny" route-colour="red" markers="flag"'),
+      embed('id="n" src="/data/hike.itb" aspect="wide" sun="200,-20" weather-effects="none"'),
+    ]),
+    { head: '<style>.grid{grid-template-columns:repeat(3,288px)}</style>' },
+  ),
   '/many.html': page(
     Array.from({ length: 20 }, (_, i) =>
       `<isotrail-hike id="m${i}" src="/data/hike.itb" aspect="wide" backend="webgl"></isotrail-hike><p>gap</p>`,
@@ -430,6 +441,37 @@ try {
   check('aspect="3:2" sets that ratio', (await ratio('r')) === '3 / 2', await ratio('r'));
   check('aspect="portrait" is 3:4', (await ratio('q')) === '3 / 4', await ratio('q'));
   check('no uncaught errors on the view page', cdp.exceptions.length === 0, cdp.exceptions.join(' | '));
+
+  // Scene, light and route attributes, the extra credit line, bad values
+  // and a change on a live element
+  await go('/scene.html');
+  const scened = await cdp.waitFor(`['d', 's', 'w', 'r', 'u', 'n'].every((id) => document.getElementById(id).dataset.state === 'ready')`);
+  check('six scene embeds become ready', scened);
+  await sleep(300);
+  const sceneShot = await shot('d');
+  check('strata, props, paths and base-blocks change the terrain', (await shot('s')) !== sceneShot);
+  check('weather, outlines and shadows change the light', (await shot('w')) !== sceneShot);
+  check('route-colour, route-width and markers change the route', (await shot('r')) !== sceneShot);
+  check('a hand-set sun relights the diorama', (await shot('n')) !== sceneShot);
+  check('bad scene values draw the default', (await shot('u')) === sceneShot);
+  const sceneWarnings = await cdp.evaluate('__warnings');
+  check(
+    'and each warns on the console',
+    ['paths "maybe"', 'weather "sunny"', 'routeColour "red"', 'markers "flag"'].every((part) => sceneWarnings.some((w) => w.includes(part))),
+    sceneWarnings.join(' | '),
+  );
+  const extraOf = (id) => cdp.evaluate(`${el(id)}.shadowRoot.querySelector('[part="credit"] .extra')?.textContent ?? null`);
+  check('credit-extra adds a line under the credit', (await extraOf('r')) === 'Walked by A. Hiker', String(await extraOf('r')));
+  check('without it there is no extra line', (await extraOf('d')) === null);
+  const routeOf = (id) => cdp.evaluate(`getComputedStyle(${el(id)}.shadowRoot.querySelector('input')).getPropertyValue('--route').trim()`);
+  check('the progress line takes the route colour', (await routeOf('r')) === '#2050e0', await routeOf('r'));
+  check('a bad route colour leaves the progress line alone', (await routeOf('u')) === '', await routeOf('u'));
+  await cdp.evaluate(`${el('d')}.setAttribute('credit-extra', 'My site')`);
+  check('changing credit-extra updates the line', (await extraOf('d')) === 'My site', String(await extraOf('d')));
+  await cdp.evaluate(`${el('d')}.setAttribute('strata', 'off')`);
+  await sleep(1000);
+  check('changing a scene attribute builds the terrain again', (await shot('d')) !== sceneShot && (await stateOf('d')) === 'ready');
+  check('no uncaught errors on the scene page', cdp.exceptions.length === 0, cdp.exceptions.join(' | '));
 
   // The snippet's poster, with and without the script
   await go('/noscript.html');

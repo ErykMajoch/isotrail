@@ -108,19 +108,21 @@ impl Prop {
 
 impl TerrainMesh {
     /// Scatters trees over forest and scrub and boulders over scree, sized
-    /// in internal pixels of `metres_per_px` and seeded by the bundle, clear
-    /// of the route and the line mask; returns how many it placed
+    /// in internal pixels of `metres_per_px`, as densely as the mesh's
+    /// terrain has them and seeded by the bundle, clear of the route and the
+    /// lines shown; returns how many it placed
     pub fn add_props(&mut self, bundle: &SceneBundle, metres_per_px: f32) -> usize {
         let grid = &bundle.grid;
         let (cols, rows) = (grid.cols as usize, grid.rows as usize);
         let cell_m = grid.cell_size_m as f32;
         let sized = metres_per_px > 0.0 && cell_m > 0.0;
-        if cols == 0 || rows == 0 || !sized {
+        let density = self.terrain.prop_density;
+        if cols == 0 || rows == 0 || !sized || density.is_nan() || density <= 0.0 {
             return 0;
         }
         let px = metres_per_px / cell_m;
-        let mut spacing =
-            (SPACING_PX * px).max((cols as f32 * rows as f32 / MAX_SPOTS as f32).sqrt());
+        let mut spacing = (SPACING_PX * px / density.sqrt())
+            .max((cols as f32 * rows as f32 / MAX_SPOTS as f32).sqrt());
         let spots = |spacing: f32| {
             let along = |n: usize| (n as f32 / spacing).ceil() as usize;
             (along(cols), along(rows))
@@ -153,7 +155,7 @@ impl TerrainMesh {
                     .terrain
                     .lines
                     .get(cell)
-                    .is_some_and(|&bits| bits != 0)
+                    .is_some_and(|&bits| self.terrain.lines(bits) != 0)
                 {
                     continue;
                 }
@@ -292,6 +294,7 @@ mod tests {
     use isotrail_testkit::{bundle, grid};
 
     use super::*;
+    use crate::mesh::{Shaped, Terrain};
     use crate::{Mesher, SmoothMesher, VoxelMesher};
 
     fn forest(cols: u32, rows: u32, class: Landcover) -> SceneBundle {
@@ -466,6 +469,44 @@ mod tests {
             count(4.0),
             count(8.0)
         );
+    }
+
+    #[test]
+    fn density_scales_the_number_of_props_and_hidden_lines_free_their_cells() {
+        let mut bundle = forest(80, 40, Landcover::Coniferous);
+        let count = |bundle: &SceneBundle, terrain: Terrain| {
+            let mut mesh = Shaped {
+                mesher: VoxelMesher::default(),
+                terrain,
+            }
+            .mesh(bundle);
+            mesh.add_props(bundle, 5.0)
+        };
+        let dense = |prop_density| Terrain {
+            prop_density,
+            ..Terrain::default()
+        };
+        let usual = count(&bundle, Terrain::default());
+        assert_eq!(count(&bundle, dense(1.0)), usual);
+        assert_eq!(count(&bundle, dense(0.0)), 0);
+        let (half, double) = (count(&bundle, dense(0.5)), count(&bundle, dense(2.0)));
+        assert!(
+            (half as f32) < usual as f32 * 0.65 && double as f32 > usual as f32 * 1.6,
+            "{half} {usual} {double}"
+        );
+
+        bundle
+            .terrain
+            .lines
+            .fill(line_mask::PATH | line_mask::STREAM);
+        assert_eq!(count(&bundle, Terrain::default()), 0);
+        let hidden = |paths, streams| Terrain {
+            paths,
+            streams,
+            ..Terrain::default()
+        };
+        assert_eq!(count(&bundle, hidden(false, true)), 0);
+        assert_eq!(count(&bundle, hidden(false, false)), usual);
     }
 
     #[test]

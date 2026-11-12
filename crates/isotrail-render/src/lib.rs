@@ -34,25 +34,28 @@ pub use error::RenderError;
 pub use frame::Frame;
 pub use gpu::{ADAPTER_ENV, AdapterMode, Gpu};
 pub use lighting::{
-    AMBIENT, BANDS, FILL, MIN_LIGHT_ELEVATION_DEG, MOONLIGHT, Moon, MoonDisc, SUN_AZIMUTH_DEG,
-    SUN_COLOUR, SUN_ELEVATION_DEG, SunState,
+    AMBIENT, BANDS, Conditions, FILL, MIN_LIGHT_ELEVATION_DEG, MOONLIGHT, Moon, MoonDisc,
+    SUN_AZIMUTH_DEG, SUN_COLOUR, SUN_ELEVATION_DEG, SunState, When,
 };
 pub use mesh::{
-    Mesher, SmoothMesher, Surface, TerrainMesh, Vertex, VoxelMesher, foliage, mesh_within,
+    BASE_BLOCKS, Mesher, Shaped, SmoothMesher, Surface, Terrain, TerrainMesh, Vertex, VoxelMesher,
+    foliage, mesh_within,
 };
 pub use options::{
-    BLOCK_HEIGHT_RANGE, HEADING_RANGE, MesherKind, OCCLUSION_RANGE, PITCH_RANGE,
-    SOFT_SHADOWS_RANGE, TURN_RANGE, ZOOM_RANGE, parse_within,
+    BASE_BLOCKS_RANGE, BLOCK_HEIGHT_RANGE, HEADING_RANGE, MesherKind, OCCLUSION_RANGE,
+    OUTLINES_RANGE, PITCH_RANGE, PROP_DENSITY_RANGE, ROUTE_WIDTH_RANGE, SOFT_SHADOWS_RANGE,
+    SUN_AZIMUTH_RANGE, SUN_ELEVATION_RANGE, TURN_RANGE, ZOOM_RANGE, colour_name, parse_colour,
+    parse_count, parse_sun, parse_switch, parse_within, switch_name,
 };
 pub use overlay::{
-    DEFAULT_STATS, DateFormat, FitStep, Fitted, OverlayStyle, OverlayText, Overlays,
+    DEFAULT_STATS, DateFormat, FitStep, Fitted, Layout, OverlayStyle, OverlayText, Overlays,
     OverlaysDontFit, PANEL_TINT, PanelStyle, SUBTEXT, Stat, StatKind, Subtitle, TEXT, TEXT_SHADOW,
     TitleSize, WEATHER_CREDIT, credit_line, format_date,
 };
 pub use palette::{DEFAULT_PALETTE, MAX_COLOURS, Palette, PaletteError, srgb_to_oklab};
 pub use post::{
-    Background, DEFAULT_OCCLUSION, DEFAULT_SOFT_SHADOWS, Edges, GodRays, Look, RouteStyle,
-    SKY_BOTTOM, SKY_TOP,
+    Background, DEFAULT_OCCLUSION, DEFAULT_SOFT_SHADOWS, Edges, GodRays, HiddenRoute, Look,
+    Markers, ROUTE_COLOUR, RouteStyle, SKY_BOTTOM, SKY_TOP,
 };
 pub use present::{MAX_CANVAS_FRAME_PX, PixelGrid, Present};
 pub use route::{RouteLine, RouteVertex};
@@ -64,4 +67,4 @@ pub use timeline::{
     DEFAULT_DURATION_S, DEFAULT_FPS, DEFAULT_ORBIT_DEG, DRAW_SHARE, INTRO_SHARE, Moment, Motion,
     Orbit, Pace, Step, Timeline, Walk,
 };
-pub use weather::Atmosphere;
+pub use weather::{Atmosphere, ForcedWeather, WeatherEffects};

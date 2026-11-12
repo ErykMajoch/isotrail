@@ -111,6 +111,7 @@ import Hike from '../components/Hike.astro';
 | `autoplay` | Plays the route once as soon as the diorama is ready, unless the visitor prefers reduced motion |
 | `backend` | `webgl` forces the WebGL2 fallback, for testing it in a browser that has WebGPU |
 | `credit` | `none` hides the data credit line. Only use it when the page credits the data itself (see below) |
+| `credit-extra` | A line of the page's own, such as a name or site, shown under the data credit; `isotrail embed --credit-extra` writes it |
 
 The look attributes choose how the diorama is drawn, like `isotrail render`'s options of the same names. `isotrail embed` writes one into the snippet for each look option you give it that isn't the default, so the live diorama matches its poster.
 
@@ -125,6 +126,23 @@ The look attributes choose how the diorama is drawn, like `isotrail render`'s op
 | `background` | `sky`, `transparent` (the page shows through) or a colour such as `#1e2a33` |
 | `time` | the start of the hike, or a local time such as `20:30` on the day of the hike, which then lights the diorama while it plays |
 
+The scene, light and route attributes work the same way, for `isotrail render`'s [scene, light and route options](../docs/usage.md#scene-light-and-route):
+
+| Attribute | Values (default first) |
+|---|---|
+| `prop-density` | `1`, or `0` (no trees, bushes or boulders) to `2` |
+| `paths`, `streams`, `strata` | `on` or `off`: paths and roads from the map, streams, and the layers on the cut faces |
+| `base-blocks` | `6`, or `1` to `24`: how far the base sits below the lowest ground, in blocks |
+| `outlines` | `1`, or `0` to `2` |
+| `shadows`, `night-sky` | `on` or `off` |
+| `weather-effects` | `clouds,shade,rain,snow,haze`, fewer of them, or `none` |
+| `weather` | the recorded weather, or `clear`, `cloudy`, `overcast`, `rain`, `snow` or `fog` |
+| `sun` | the hike's sun, or a compass bearing and elevation in degrees such as `250,8`, which then lights the diorama while it plays |
+| `route-colour` | `#d64834`, or another colour; the progress line follows it unless the page sets `--isotrail-progress` |
+| `route-width` | `2`, or `1` to `4` pixels |
+| `route-hidden` | `dashed`, `dim`, `solid` or `off`: the parts of the route behind ridges |
+| `markers` | `start,finish,head`, fewer of them, or `none` |
+
 The view attributes set where the diorama starts, and where the reset button, 0 and Home take it back to, like `isotrail render`'s camera options. `isotrail embed` writes them for its `--turn`, `--heading`, `--pitch` and `--zoom`.
 
 | Attribute | Values (default first) |
@@ -133,7 +151,7 @@ The view attributes set where the diorama starts, and where the reset button, 0 
 | `pitch` | `30`, or `10` to `80`: how far the camera looks down, in degrees |
 | `zoom` | `1`, or `0.5` to `2`: above 1 the diorama starts zoomed in; below 1 it leaves more room round the slab |
 
-Changing one of them on a running element redraws it; a new `mesher` or `block-height` builds the terrain again, and a new `turn`, `pitch` or `zoom` goes to the new starting view. A value the element can't use, such as an unknown palette name or a `.hex` file that doesn't load, is left at its default, with a warning in the console.
+Changing one of them on a running element redraws it; a new `mesher`, `block-height`, `prop-density`, `paths`, `streams`, `strata` or `base-blocks` builds the terrain again, and a new `turn`, `pitch` or `zoom` goes to the new starting view. A value the element can't use, such as an unknown palette name or a `.hex` file that doesn't load, is left at its default, with a warning in the console.
 
 The poster shows at once. The renderer (about 1.2 MB gzipped) only downloads when the element comes near the screen, and it downloads once however many hikes are on the page. When an element has been well off screen for a few seconds it frees its renderer and shows its poster, and starts again when it comes back; browsers only give a page about 16 WebGL contexts, so a page with many hikes keeps working as it scrolls. A view the visitor turned or zoomed starts again from the starting view when this happens.
 
@@ -199,7 +217,7 @@ isotrail-hike {
   --isotrail-edge: #819796;             /* the buttons' lit top edge */
   --isotrail-text: #ebede9;             /* icons, and the head of the progress line */
   --isotrail-accent: #a4dddb;           /* focus rings and the data credit */
-  --isotrail-progress: #d64834;         /* the route drawn so far */
+  --isotrail-progress: #d64834;         /* the route drawn so far; route-colour by default */
   --isotrail-track: rgb(32 46 55 / 0.45); /* the route still to come */
   border-radius: 6px;
 }

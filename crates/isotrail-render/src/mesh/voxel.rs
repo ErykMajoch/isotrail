@@ -1,6 +1,6 @@
 use isotrail_bundle::SceneBundle;
 
-use super::{Columns, Mesher, Seasonal, Side, Surface, TerrainMesh, cover, props, strata};
+use super::{Columns, Mesher, Seasonal, Side, Surface, Terrain, TerrainMesh, cover, props, strata};
 
 /// One column per cell, its height rounded to whole blocks, with a top in the
 /// cell's landcover colour and darker sides
@@ -17,17 +17,21 @@ impl Default for VoxelMesher {
 }
 
 impl Mesher for VoxelMesher {
-    fn mesh(&self, bundle: &SceneBundle) -> TerrainMesh {
+    fn mesh_with(&self, bundle: &SceneBundle, terrain: &Terrain) -> TerrainMesh {
         let step = bundle.grid.cell_size_m as f32 * self.block_height;
         let tops = column_tops(bundle, step);
         let seasonal = Seasonal::new(bundle);
-        let colours = cover::top_colours(bundle, &seasonal);
+        let colours = cover::top_colours(bundle, &seasonal, terrain);
         let columns = Columns::new(&bundle.grid, bundle.terrain.landcover.clone())
-            .in_season(bundle, &seasonal);
+            .in_season(bundle, &seasonal)
+            .shaped(terrain);
         let lowest = tops.iter().copied().fold(f32::INFINITY, f32::min);
         let (cols, rows) = (columns.cols, columns.rows);
 
-        let mut mesh = TerrainMesh::default();
+        let mut mesh = TerrainMesh {
+            terrain: *terrain,
+            ..TerrainMesh::default()
+        };
         for row in 0..rows {
             for col in 0..cols {
                 let cell = row * cols + col;
@@ -58,7 +62,7 @@ impl Mesher for VoxelMesher {
             &columns,
             bundle.prop_seed,
             step,
-            lowest + strata::base(step),
+            lowest + strata::base(step, terrain),
             &mut mesh,
             |cell, _| tops[cell],
         );
@@ -66,7 +70,7 @@ impl Mesher for VoxelMesher {
         mesh
     }
 
-    fn vertex_bound(&self, bundle: &SceneBundle, limit: u64) -> u64 {
+    fn vertex_bound_with(&self, bundle: &SceneBundle, terrain: &Terrain, limit: u64) -> u64 {
         let step = bundle.grid.cell_size_m as f32 * self.block_height;
         let tops = column_tops(bundle, step);
         let (cols, rows) = (bundle.grid.cols as usize, bundle.grid.rows as usize);
@@ -87,14 +91,15 @@ impl Mesher for VoxelMesher {
         }
         let seasonal = Seasonal::new(bundle);
         let columns = Columns::new(&bundle.grid, bundle.terrain.landcover.clone())
-            .in_season(bundle, &seasonal);
+            .in_season(bundle, &seasonal)
+            .shaped(terrain);
         let lowest = tops.iter().copied().fold(f32::INFINITY, f32::min);
         vertices
             + strata::vertex_bound(
                 &columns,
                 bundle.prop_seed,
                 step,
-                lowest + strata::base(step),
+                lowest + strata::base(step, terrain),
                 |cell, _| tops[cell],
                 limit - vertices,
             )
@@ -164,7 +169,7 @@ mod tests {
             assert!(tops.contains(&expected), "{expected} in {tops:?}");
         }
         let lowest = mesh.positions().map(|p| p.z).fold(f32::INFINITY, f32::min);
-        assert_eq!(lowest, base(10.0));
+        assert_eq!(lowest, base(10.0, &Terrain::default()));
         assert_eq!(lowest, -60.0);
     }
 
@@ -218,7 +223,7 @@ mod tests {
         classes[6] = Landcover::Water;
         let bundle = bundle(grid(4, 3, 10.0), &heights, &classes);
         let mesh = VoxelMesher::default().mesh(&bundle);
-        let water = cover::top_colours(&bundle, &Seasonal::new(&bundle))[5];
+        let water = cover::top_colours(&bundle, &Seasonal::new(&bundle), &Terrain::default())[5];
         let lake: Vec<_> = mesh.triangles().filter(|t| t[0].colour == water).collect();
         assert_eq!(lake.len(), 4);
         for vertex in lake.into_iter().flatten() {
@@ -247,5 +252,25 @@ mod tests {
         assert_eq!(tops(1.0), (vec![0.0, 10.0], -60.0));
         assert_eq!(tops(0.5), (vec![0.0, 15.0], -30.0));
         assert_eq!(tops(2.0), (vec![0.0, 20.0], -120.0));
+    }
+
+    #[test]
+    fn the_base_sits_as_many_blocks_down_as_asked() {
+        let bundle = bundle(grid(2, 1, 10.0), &[0.0, 13.0], &[Landcover::Rock; 2]);
+        let lowest = |base_blocks| {
+            let terrain = Terrain {
+                base_blocks,
+                ..Terrain::default()
+            };
+            let mesher = VoxelMesher::default();
+            let mesh = mesher.mesh_with(&bundle, &terrain);
+            let bound = mesher.vertex_bound_with(&bundle, &terrain, u64::MAX);
+            assert!(mesh.vertices.len() as u64 <= bound);
+            assert_eq!(mesh.terrain, terrain);
+            mesh.positions().map(|p| p.z).fold(f32::INFINITY, f32::min)
+        };
+        assert_eq!(lowest(1), -10.0);
+        assert_eq!(lowest(6), -60.0);
+        assert_eq!(lowest(24), -240.0);
     }
 }

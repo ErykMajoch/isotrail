@@ -5,7 +5,7 @@ use isotrail_bundle::{GridInfo, MoonSample, SceneBundle, SunSample};
 use isotrail_track::{moon_position, sun_position};
 
 use crate::camera::slab_angle;
-use crate::{Atmosphere, SKY_BOTTOM, SKY_TOP};
+use crate::{Atmosphere, ForcedWeather, SKY_BOTTOM, SKY_TOP, WeatherEffects};
 
 /// The late-morning sun of hikes without times
 pub const SUN_AZIMUTH_DEG: f64 = 150.0;
@@ -195,33 +195,34 @@ impl SunState {
     /// The sun, moon and weather over the slab at `unix_s`, which need not
     /// fall within the hike
     pub fn at_instant(bundle: &SceneBundle, unix_s: i64) -> SunState {
-        let grid = &bundle.grid;
-        let Some(time) = DateTime::from_timestamp(unix_s, 0) else {
-            return SunState::for_hike(bundle);
-        };
-        let sun = sun_position(grid.origin_lat, grid.origin_lon, time);
-        let moon = moon_position(grid.origin_lat, grid.origin_lon, time);
-        SunState::with_moon(
-            grid,
-            sun.azimuth_deg,
-            sun.elevation_deg,
-            Some(Moon {
-                azimuth_deg: moon.azimuth_deg,
-                elevation_deg: moon.elevation_deg,
-                illuminated: moon.illuminated,
-            }),
-        )
-        .with_weather_at(bundle, unix_s as f64)
+        SunState::seen(bundle, When::Instant(unix_s), &Conditions::default())
     }
 
     /// The sun, moon and weather at the start of the hike, or the
     /// late-morning sun when the track has no times
     pub fn for_hike(bundle: &SceneBundle) -> SunState {
-        let sun = SunState::sample(bundle, 0);
-        match bundle.sun.first() {
-            Some(first) => sun.with_weather_at(bundle, first.time as f64),
-            None => sun,
-        }
+        SunState::seen(bundle, When::Start, &Conditions::default())
+    }
+
+    /// The light over the slab at `when`, changed as `conditions` say
+    pub fn seen(bundle: &SceneBundle, when: When, conditions: &Conditions) -> SunState {
+        let (azimuth_deg, elevation_deg, moon, weather_time) = position(bundle, when);
+        let [azimuth_deg, elevation_deg] = conditions.sun.unwrap_or([azimuth_deg, elevation_deg]);
+        let sun = SunState::with_moon(&bundle.grid, azimuth_deg, elevation_deg, moon);
+        let recorded = weather_time.and_then(|time_s| {
+            bundle
+                .weather
+                .as_ref()
+                .filter(|weather| !weather.samples.is_empty())
+                .map(|weather| weather.at(time_s))
+        });
+        let state = match conditions.weather {
+            Some(forced) => Some(forced.state(recorded.as_ref())),
+            None => recorded,
+        };
+        sun.with_weather(
+            state.map(|state| Atmosphere::new(&bundle.grid, &state).showing(conditions.effects)),
+        )
     }
 
     /// The light under `weather`: cloud dims and greys the sun and the sky,
@@ -231,7 +232,7 @@ impl SunState {
         let Some(weather) = weather else {
             return self;
         };
-        let overcast = weather.overcast;
+        let overcast = weather.dimming();
         self.intensity *= 1.0 - 0.65 * overcast;
         self.colour = self
             .colour
@@ -249,7 +250,7 @@ impl SunState {
                 .to_array()
                 .map(|c| c as u8)
         });
-        let clear = 1.0 - weather.cloud_cover;
+        let clear = 1.0 - weather.visible_cover();
         self.stars *= clear;
         if let Some(moon) = &mut self.moon {
             moon.opacity *= clear;
@@ -274,56 +275,7 @@ impl SunState {
     /// bundle's samples; before the first and after the last, they stand as
     /// at those
     pub fn during(bundle: &SceneBundle, time_s: f64) -> SunState {
-        let sun = SunState::sun_and_moon(bundle, time_s);
-        if bundle.sun.is_empty() {
-            return sun;
-        }
-        sun.with_weather_at(bundle, time_s)
-    }
-
-    fn sun_and_moon(bundle: &SceneBundle, time_s: f64) -> SunState {
-        let track = &bundle.sun;
-        let i = track.partition_point(|s| (s.time as f64) <= time_s);
-        if i == 0 || i == track.len() {
-            return SunState::sample(bundle, i.saturating_sub(1));
-        }
-        let (from, to) = (&track[i - 1], &track[i]);
-        let t = (time_s - from.time as f64) / (to.time - from.time) as f64;
-        let lerp = |x: f32, y: f32| f64::from(x) + (f64::from(y) - f64::from(x)) * t;
-        let turn = |x: f32, y: f32| {
-            let delta = (f64::from(y) - f64::from(x) + 180.0).rem_euclid(360.0) - 180.0;
-            (f64::from(x) + delta * t).rem_euclid(360.0)
-        };
-        let moon = match (bundle.moon.get(i - 1), bundle.moon.get(i)) {
-            (Some(x), Some(y)) => Some(Moon {
-                azimuth_deg: turn(x.azimuth_deg, y.azimuth_deg),
-                elevation_deg: lerp(x.elevation_deg, y.elevation_deg),
-                illuminated: lerp(x.illuminated, y.illuminated),
-            }),
-            _ => None,
-        };
-        SunState::with_moon(
-            &bundle.grid,
-            turn(from.azimuth_deg, to.azimuth_deg),
-            lerp(from.elevation_deg, to.elevation_deg),
-            moon,
-        )
-    }
-
-    fn sample(bundle: &SceneBundle, i: usize) -> SunState {
-        match bundle.sun.get(i) {
-            Some(&SunSample {
-                azimuth_deg,
-                elevation_deg,
-                ..
-            }) => SunState::with_moon(
-                &bundle.grid,
-                azimuth_deg.into(),
-                elevation_deg.into(),
-                bundle.moon.get(i).map(Moon::from),
-            ),
-            None => SunState::late_morning(&bundle.grid),
-        }
+        SunState::seen(bundle, When::During(time_s), &Conditions::default())
     }
 
     /// An orthographic projection from the sun that holds every point
@@ -353,6 +305,103 @@ impl SunState {
             -min.z + pad,
         );
         projection * view
+    }
+}
+
+/// When over the hike a light is seen
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum When {
+    /// The hike's start, or late morning for a track without times
+    Start,
+    /// Unix seconds, between the bundle's sky samples
+    During(f64),
+    /// Unix seconds, which need not fall within the hike
+    Instant(i64),
+}
+
+/// Changes to the light the bundle gives
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Conditions {
+    /// A sun set by hand: compass bearing and elevation in degrees
+    pub sun: Option<[f64; 2]>,
+    /// A sky in place of the recorded weather
+    pub weather: Option<ForcedWeather>,
+    pub effects: WeatherEffects,
+}
+
+/// The sun's bearing and elevation, the moon, and the time the weather is
+/// read at, if the track has times
+fn position(bundle: &SceneBundle, when: When) -> (f64, f64, Option<Moon>, Option<f64>) {
+    let grid = &bundle.grid;
+    let track = &bundle.sun;
+    let sample = |i: usize| match track.get(i) {
+        Some(&SunSample {
+            azimuth_deg,
+            elevation_deg,
+            ..
+        }) => (
+            azimuth_deg.into(),
+            elevation_deg.into(),
+            bundle.moon.get(i).map(Moon::from),
+        ),
+        None => (SUN_AZIMUTH_DEG, SUN_ELEVATION_DEG, None),
+    };
+    let start = |(azimuth, elevation, moon): (f64, f64, Option<Moon>)| {
+        (
+            azimuth,
+            elevation,
+            moon,
+            track.first().map(|first| first.time as f64),
+        )
+    };
+    match when {
+        When::Start => start(sample(0)),
+        When::Instant(unix_s) => {
+            let Some(time) = DateTime::from_timestamp(unix_s, 0) else {
+                return start(sample(0));
+            };
+            let sun = sun_position(grid.origin_lat, grid.origin_lon, time);
+            let moon = moon_position(grid.origin_lat, grid.origin_lon, time);
+            (
+                sun.azimuth_deg,
+                sun.elevation_deg,
+                Some(Moon {
+                    azimuth_deg: moon.azimuth_deg,
+                    elevation_deg: moon.elevation_deg,
+                    illuminated: moon.illuminated,
+                }),
+                Some(unix_s as f64),
+            )
+        }
+        When::During(time_s) => {
+            let weather_time = (!track.is_empty()).then_some(time_s);
+            let i = track.partition_point(|s| (s.time as f64) <= time_s);
+            if i == 0 || i == track.len() {
+                let (azimuth, elevation, moon) = sample(i.saturating_sub(1));
+                return (azimuth, elevation, moon, weather_time);
+            }
+            let (from, to) = (&track[i - 1], &track[i]);
+            let t = (time_s - from.time as f64) / (to.time - from.time) as f64;
+            let lerp = |x: f32, y: f32| f64::from(x) + (f64::from(y) - f64::from(x)) * t;
+            let turn = |x: f32, y: f32| {
+                let delta = (f64::from(y) - f64::from(x) + 180.0).rem_euclid(360.0) - 180.0;
+                (f64::from(x) + delta * t).rem_euclid(360.0)
+            };
+            let moon = match (bundle.moon.get(i - 1), bundle.moon.get(i)) {
+                (Some(x), Some(y)) => Some(Moon {
+                    azimuth_deg: turn(x.azimuth_deg, y.azimuth_deg),
+                    elevation_deg: lerp(x.elevation_deg, y.elevation_deg),
+                    illuminated: lerp(x.illuminated, y.illuminated),
+                }),
+                _ => None,
+            };
+            (
+                turn(from.azimuth_deg, to.azimuth_deg),
+                lerp(from.elevation_deg, to.elevation_deg),
+                moon,
+                weather_time,
+            )
+        }
     }
 }
 
@@ -657,6 +706,7 @@ mod tests {
             precipitation: isotrail_bundle::Precipitation::None,
             density: 0.0,
             wind: glam::Vec2::ZERO,
+            shown: WeatherEffects::ALL,
         })
     }
 
@@ -706,6 +756,55 @@ mod tests {
         assert_eq!(cover(SunState::during(&bundle, 5_400.0)), 0.5);
         bundle.sun.clear();
         assert_eq!(SunState::during(&bundle, 5_400.0).weather, None);
+    }
+
+    #[test]
+    fn conditions_set_the_sun_and_the_sky_by_hand() {
+        let mut bundle = bundle(grid(2, 2, 10.0), &[0.0; 4], &[Landcover::Grassland; 4]);
+        bundle.sun = vec![SunSample {
+            time: 3_600,
+            azimuth_deg: 150.0,
+            elevation_deg: 40.0,
+        }];
+        let mut weather = isotrail_testkit::synthetic_weather(0, 3);
+        weather.samples[1].cloud_cover_pct = 100.0;
+        weather.samples[1].cloud_low_pct = 100.0;
+        bundle.weather = Some(weather);
+        let seen = |when, conditions: Conditions| SunState::seen(&bundle, when, &conditions);
+        let usual = Conditions::default();
+        assert_eq!(seen(When::Start, usual), SunState::for_hike(&bundle));
+        assert_eq!(
+            seen(When::During(4_000.0), usual),
+            SunState::during(&bundle, 4_000.0)
+        );
+
+        let low_sun = Conditions {
+            sun: Some([270.0, 5.0]),
+            ..usual
+        };
+        let expected = SunState::at(&bundle.grid, 270.0, 5.0)
+            .with_weather(SunState::for_hike(&bundle).weather);
+        assert_eq!(seen(When::Start, low_sun), expected);
+
+        let clear = Conditions {
+            weather: Some(ForcedWeather::Clear),
+            ..usual
+        };
+        let cleared = seen(When::Start, clear);
+        assert_eq!(cleared.weather.unwrap().cloud_cover, 0.0);
+        assert!(brightness(&cleared) > brightness(&seen(When::Start, usual)));
+
+        let unclouded = Conditions {
+            effects: WeatherEffects::NONE,
+            ..usual
+        };
+        let plain = SunState::at(&bundle.grid, 150.0, 40.0);
+        let shown = seen(When::Start, unclouded);
+        assert_eq!(
+            (shown.intensity, shown.colour, shown.sky),
+            (plain.intensity, plain.colour, plain.sky)
+        );
+        assert!(!shown.weather.unwrap().moves());
     }
 
     #[test]

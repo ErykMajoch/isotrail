@@ -742,6 +742,176 @@ fn the_camera_can_turn_tilt_and_zoom() {
 }
 
 #[test]
+fn parts_of_the_scene_light_and_route_can_be_changed() {
+    let temp = with_hike();
+    let cache = temp.path().join("cache");
+    let render = |image: &str, extra: &[&str]| {
+        let mut args = vec!["render", "hike.itb", "--scale", "6", "-o", image];
+        args.extend_from_slice(extra);
+        isotrail(&cache, temp.path(), &args)
+    };
+    let night = ["--sun", "200,-20"];
+    let rain = ["--weather", "rain"];
+    let mut images = Vec::new();
+    for (image, extra) in [
+        ("plain.png", &[][..]),
+        ("bare.png", &["--prop-density", "0"][..]),
+        ("dense.png", &["--prop-density", "2"][..]),
+        ("pathless.png", &["--paths", "off"][..]),
+        ("dry.png", &["--streams", "off"][..]),
+        ("stone.png", &["--strata", "off"][..]),
+        ("thin.png", &["--base-blocks", "2"][..]),
+        ("flat.png", &["--outlines", "0"][..]),
+        ("bold.png", &["--outlines", "2"][..]),
+        ("unshadowed.png", &["--shadows", "off"][..]),
+        ("night.png", &night[..]),
+        (
+            "starless.png",
+            &[night[0], night[1], "--night-sky", "off"][..],
+        ),
+        ("rain.png", &rain[..]),
+        (
+            "rain-unseen.png",
+            &[rain[0], rain[1], "--weather-effects", "clouds"][..],
+        ),
+        ("fog.png", &["--weather", "fog"][..]),
+        ("blue.png", &["--route-colour", "#2050e0"][..]),
+        ("wide-line.png", &["--route-width", "4"][..]),
+        ("unmarked.png", &["--markers", "none"][..]),
+        ("column.png", &["--layout", "column"][..]),
+        ("signed.png", &["--credit-extra", "Walked by A. Hiker"][..]),
+    ] {
+        let output = render(image, extra);
+        assert!(output.status.success(), "{image}: {}", text(&output.stderr));
+        images.push((image, fs::read(temp.path().join(image)).unwrap()));
+    }
+    for (i, (name, a)) in images.iter().enumerate() {
+        for (other, b) in &images[i + 1..] {
+            assert!(a != b, "{name} and {other} are the same");
+        }
+    }
+
+    // The defaults spelled out change nothing, nor do effects with no weather
+    let output = render(
+        "same.png",
+        &[
+            "--prop-density",
+            "1",
+            "--paths",
+            "on",
+            "--strata",
+            "on",
+            "--base-blocks",
+            "6",
+            "--outlines",
+            "1",
+            "--shadows",
+            "on",
+            "--weather-effects",
+            "none",
+            "--route-color",
+            "#D64834",
+            "--route-width",
+            "2",
+            "--route-hidden",
+            "dashed",
+            "--markers",
+            "start,finish,head",
+            "--layout",
+            "auto",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert_eq!(fs::read(temp.path().join("same.png")).unwrap(), images[0].1);
+
+    // From a config file too
+    fs::write(
+        temp.path().join("user-config.toml"),
+        "[render]\nstrata = false\nweather = \"rain\"\n",
+    )
+    .unwrap();
+    let output = render("config.png", &["--weather", "rain", "--strata", "on"]);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert_eq!(
+        fs::read(temp.path().join("config.png")).unwrap(),
+        images[12].1
+    );
+    let output = render("config-stone.png", &["--weather", "clear"]);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let output = render(
+        "stone-clear.png",
+        &["--strata", "off", "--weather", "clear"],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert_eq!(
+        fs::read(temp.path().join("config-stone.png")).unwrap(),
+        fs::read(temp.path().join("stone-clear.png")).unwrap()
+    );
+    fs::remove_file(temp.path().join("user-config.toml")).unwrap();
+
+    for (args, reason) in [
+        (&["--prop-density", "3"][..], "between 0 and 2"),
+        (&["--paths", "maybe"][..], "expected on or off"),
+        (&["--base-blocks", "30"][..], "between 1 and 24"),
+        (&["--outlines", "3"][..], "between 0 and 2"),
+        (
+            &["--weather-effects", "wind"][..],
+            "clouds, shade, rain, snow, haze",
+        ),
+        (&["--weather", "sunny"][..], "clear, cloudy, overcast"),
+        (&["--sun", "200"][..], "AZIMUTH,ELEVATION"),
+        (
+            &["--sun", "200,20", "--time", "12:00"][..],
+            "cannot be used with",
+        ),
+        (&["--route-colour", "red"][..], "#d64834"),
+        (&["--route-width", "5"][..], "between 1 and 4"),
+        (
+            &["--route-hidden", "faint"][..],
+            "dashed, dim, solid or off",
+        ),
+        (&["--markers", "flag"][..], "start, finish, head"),
+        (&["--layout", "grid"][..], "auto, stacked or column"),
+    ] {
+        let output = render("bad.png", args);
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        let stderr = text(&output.stderr);
+        assert!(stderr.contains(reason), "{args:?}: {stderr}");
+    }
+}
+
+#[test]
+fn clips_keep_the_chosen_sky_sun_and_markers() {
+    let temp = with_hike();
+    let cache = temp.path().join("cache");
+    let clip = |name: &str, extra: &[&str]| {
+        let mut args = vec![
+            "render",
+            "hike.itb",
+            "--scale",
+            "10",
+            "--duration",
+            "1",
+            "--fps",
+            "4",
+            "-o",
+            name,
+        ];
+        args.extend_from_slice(extra);
+        let output = isotrail(&cache, temp.path(), &args);
+        assert!(output.status.success(), "{name}: {}", text(&output.stderr));
+        decode_gif(&fs::read(temp.path().join(name)).unwrap())
+    };
+    let plain = clip("plain.gif", &[]);
+    let foggy = clip("fog.gif", &["--weather", "fog"]);
+    let held = clip("held.gif", &["--sun", "250,15", "--markers", "none"]);
+    assert_eq!(plain.len(), foggy.len());
+    for frames in [&foggy, &held] {
+        assert!(frames.iter().zip(&plain).all(|(a, b)| a != b));
+    }
+}
+
+#[test]
 fn the_slab_can_be_padded_and_turned_north() {
     let temp = tempfile::tempdir().unwrap();
     let cache_dir = temp.path().join("cache");

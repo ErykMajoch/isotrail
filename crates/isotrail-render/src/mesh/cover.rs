@@ -1,7 +1,7 @@
 use isotrail_bundle::{Landcover, SceneBundle, line_mask};
 
 use super::season::Seasonal;
-use super::{blend, hash, landcover_rgba};
+use super::{Terrain, blend, hash, landcover_rgba};
 
 const GLINT_KEY: u64 = 1 << 32;
 const GLINT_PER_MILLE: u64 = 30;
@@ -22,7 +22,11 @@ const PAVED: [u8; 4] = [196, 194, 190, 255];
 /// Each cell's top colour: its ground in the season's colours, with lighter
 /// lake shores, a darker sea with surf along its shore, rare glints on open
 /// water or cracks in ice, and the line mask's paths, roads and streams
-pub(super) fn top_colours(bundle: &SceneBundle, seasonal: &Seasonal) -> Vec<[u8; 4]> {
+pub(super) fn top_colours(
+    bundle: &SceneBundle,
+    seasonal: &Seasonal,
+    shown: &Terrain,
+) -> Vec<[u8; 4]> {
     let (grid, terrain) = (&bundle.grid, &bundle.terrain);
     let ground = seasonal.ground(bundle);
     let (cols, rows) = (grid.cols as usize, grid.rows as usize);
@@ -86,7 +90,7 @@ pub(super) fn top_colours(bundle: &SceneBundle, seasonal: &Seasonal) -> Vec<[u8;
                 return if sea { SEA } else { landcover_rgba(class) };
             }
             let ground = ground[cell];
-            let lines = terrain.lines.get(cell).copied().unwrap_or(0);
+            let lines = shown.lines(terrain.lines.get(cell).copied().unwrap_or(0));
             if lines & line_mask::PATH != 0 {
                 blend(ground, TRODDEN, PATH_BLEND)
             } else if lines & line_mask::ROAD != 0 {
@@ -112,7 +116,7 @@ mod tests {
     }
 
     fn tops(bundle: &SceneBundle) -> Vec<[u8; 4]> {
-        top_colours(bundle, &Seasonal::new(bundle))
+        top_colours(bundle, &Seasonal::new(bundle), &Terrain::default())
     }
 
     /// A 12 × 12 lake with a 2-cell dry rim
@@ -240,6 +244,25 @@ mod tests {
         );
         let lighter = |c: [u8; 4]| c[..3].iter().map(|&v| u32::from(v)).sum::<u32>();
         assert!(lighter(trodden) > lighter(heath) && lighter(paved) > lighter(heath));
+
+        let shown = |paths, streams| {
+            let terrain = Terrain {
+                paths,
+                streams,
+                ..Terrain::default()
+            };
+            top_colours(&bundle, &Seasonal::new(&bundle), &terrain)
+        };
+        let water = rgba(Landcover::Water);
+        assert_eq!(
+            shown(false, true),
+            [heath, heath, heath, water, water, water]
+        );
+        assert_eq!(
+            shown(true, false),
+            [heath, trodden, paved, heath, trodden, paved]
+        );
+        assert_eq!(shown(false, false), [heath; 6]);
     }
 
     #[test]

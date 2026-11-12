@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use glam::IVec2;
 use isotrail_bundle::{HikeStats, SceneBundle, Units};
 
-use crate::{Frame, Framing, Insets, Palette, PixelFont, RouteStyle, TextEffect};
+use crate::post::ROUTE_COLOUR;
+use crate::{Frame, Framing, Insets, Palette, PixelFont, TextEffect};
 
 /// Text colour, and the softer colour of subtitles, dates and labels
 pub const TEXT: [u8; 3] = [235, 237, 233];
@@ -50,6 +51,8 @@ pub struct OverlayText {
     pub profile: Vec<f32>,
     /// Credit for the map and elevation data
     pub attribution: Option<String>,
+    /// A line of one's own under the credit
+    pub credit_extra: Option<String>,
 }
 
 /// What goes under the title
@@ -130,6 +133,7 @@ impl OverlayText {
                 .collect(),
             profile: bundle.profile.iter().map(|sample| sample.ele_m).collect(),
             attribution: credit_line(bundle),
+            credit_extra: None,
         }
     }
 }
@@ -316,10 +320,36 @@ pub enum TitleSize {
     Small,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OverlayStyle {
     pub panel: PanelStyle,
     pub title_size: TitleSize,
+    pub layout: Layout,
+    /// The walked part of the profile
+    pub route_colour: [u8; 3],
+}
+
+impl Default for OverlayStyle {
+    fn default() -> OverlayStyle {
+        OverlayStyle {
+            panel: PanelStyle::default(),
+            title_size: TitleSize::default(),
+            layout: Layout::default(),
+            route_colour: ROUTE_COLOUR,
+        }
+    }
+}
+
+/// Where the overlays sit
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Layout {
+    /// A column in landscape frames, stacked otherwise
+    #[default]
+    Auto,
+    /// The title on top and the stats at the bottom
+    Stacked,
+    /// One column on the left
+    Column,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -499,7 +529,7 @@ impl Overlays {
                 FitStep::NoSubtitle => tried_text.subtitle = Subtitle::None,
                 FitStep::TightStats => tried_gap = TIGHT_STAT_GAP,
                 FitStep::NoProfile => tried_text.profile.clear(),
-                _ => tried_text.attribution = None,
+                _ => (tried_text.attribution, tried_text.credit_extra) = (None, None),
             }
             let tried = Overlays::arrange(&tried_text, &tried_style, framing, tried_gap);
             if tried.overflow < overlays.overflow {
@@ -555,7 +585,12 @@ impl Overlays {
             left_px: 0,
             overflow: 0,
         };
-        if width > height {
+        let column = match style.layout {
+            Layout::Auto => width > height,
+            Layout::Stacked => false,
+            Layout::Column => true,
+        };
+        if column {
             let inner = (width as f32 * COLUMN_SHARE).round() as i32 - 2 * metrics.pad.x;
             layout.place_column(text, &metrics, margin, inner.max(1));
         } else {
@@ -667,7 +702,8 @@ impl Overlays {
             PanelStyle::None => outline,
         };
         if let Some(strip) = self.strip {
-            draw_profile(frame, strip, &self.profile, progress, &mut snap);
+            let walked = self.style.route_colour;
+            draw_profile(frame, strip, &self.profile, progress, walked, &mut snap);
         }
         let font = PixelFont::monogram();
         for line in &self.lines {
@@ -866,13 +902,19 @@ fn heading(text: &OverlayText, style: &OverlayStyle, metrics: &Metrics, max_widt
     stack_lines(&block, small)
 }
 
-/// Wrapped but never cut short, as the data licences ask for it
+/// Wrapped but never cut short, as the data licences ask for it, with the
+/// extra line under it
 fn credit(text: &OverlayText, metrics: &Metrics, max_width: u32) -> Block {
     let font = PixelFont::monogram();
     let lines: Vec<(String, u32, Tone)> = text
         .attribution
         .iter()
-        .flat_map(|credit| font.wrap(credit, metrics.small, max_width, usize::MAX))
+        .chain(
+            text.credit_extra
+                .iter()
+                .filter(|extra| !extra.trim().is_empty()),
+        )
+        .flat_map(|credit| font.wrap(credit.trim(), metrics.small, max_width, usize::MAX))
         .map(|line| (line, metrics.small, Tone::Credit))
         .collect();
     stack_lines(&lines, metrics.small)
@@ -1000,14 +1042,21 @@ fn value_lines(value: &str, slot: &Slot, index: usize) -> Vec<Line> {
 
 /// An area chart of the profile filling `rect` from its bottom, the walked
 /// columns in the route's colour
-fn draw_profile(frame: &mut Frame, rect: Rect, profile: &[f32], progress: f32, snap: &mut Snap) {
+fn draw_profile(
+    frame: &mut Frame,
+    rect: Rect,
+    profile: &[f32],
+    progress: f32,
+    walked: [u8; 3],
+    snap: &mut Snap,
+) {
     let (low, high) = profile
         .iter()
         .fold((f32::INFINITY, f32::NEG_INFINITY), |(low, high), &e| {
             (low.min(e), high.max(e))
         });
     let size = rect.max - rect.min;
-    let walked = snap.colour(RouteStyle::default().colour);
+    let walked = snap.colour(walked);
     let ahead = snap.colour(PROFILE_AHEAD);
     for x in 0..size.x {
         let t = if size.x > 1 {
@@ -1217,6 +1266,7 @@ mod tests {
             ],
             profile: Vec::new(),
             attribution: None,
+            credit_extra: None,
         }
     }
 
@@ -1552,6 +1602,7 @@ mod tests {
             stats: Vec::new(),
             profile: vec![300.0],
             attribution: None,
+            credit_extra: None,
         };
         let overlays = layout(&empty);
         assert!(overlays.panels.is_empty() && overlays.lines.is_empty());
@@ -1664,7 +1715,7 @@ mod tests {
 
         let mut frame = blank(&framing, [0, 0, 0, 255]);
         overlays.draw(&mut frame, None, 0.5);
-        let route = RouteStyle::default().colour;
+        let route = ROUTE_COLOUR;
         let bottom = strip.max.y as u32 - 1;
         let colour = |x: i32| {
             let p = frame.pixel(x as u32, bottom);
@@ -1700,7 +1751,7 @@ mod tests {
         let strip = overlays.strip.unwrap();
         let mut frame = blank(&framing, [0, 0, 0, 255]);
         overlays.draw(&mut frame, None, 1.0);
-        let route = RouteStyle::default().colour;
+        let route = ROUTE_COLOUR;
         let row = |y: i32| {
             (strip.min.x..strip.max.x)
                 .filter(|&x| frame.pixel(x as u32, y as u32)[..3] == route)
@@ -1742,6 +1793,96 @@ mod tests {
             .collect();
         assert_eq!(credit.len(), 2);
         assert_eq!(credit.join(" "), CREDIT);
+    }
+
+    #[test]
+    fn a_line_of_ones_own_goes_under_the_credit_and_with_it() {
+        let text = OverlayText {
+            credit_extra: Some(" Photo walks by A. Hiker ".into()),
+            ..full_text()
+        };
+        let overlays = layout(&text);
+        let credit: Vec<&Line> = overlays
+            .lines
+            .iter()
+            .filter(|line| line.tone == Tone::Credit)
+            .collect();
+        assert_eq!(credit.len(), 2);
+        assert_eq!(
+            (credit[0].text.as_str(), credit[1].text.as_str()),
+            (CREDIT, "Photo walks by A. Hiker")
+        );
+        assert!(line_box(credit[0]).max.y < line_box(credit[1]).min.y);
+        assert!(overlays.panels[1].max.y < line_box(credit[0]).min.y);
+
+        let alone = layout(&OverlayText {
+            attribution: None,
+            ..text.clone()
+        });
+        let lines = alone.lines.iter().filter(|line| line.tone == Tone::Credit);
+        assert_eq!(lines.count(), 1);
+
+        // Frames too small for it all give both up together
+        let mut dropped = 0;
+        for height in (120..400).step_by(10) {
+            let tight = Framing {
+                width: 180,
+                height,
+                ..story()
+            };
+            if let Ok(fitted) = Overlays::fit(&text, &OverlayStyle::default(), &tight)
+                && fitted.credit_dropped()
+            {
+                dropped += 1;
+                assert!(fitted.overlays.lines.iter().all(|l| l.tone != Tone::Credit));
+            }
+        }
+        assert!(dropped > 0);
+    }
+
+    #[test]
+    fn the_layout_can_be_forced_and_the_profile_takes_the_route_colour() {
+        let stacked = OverlayStyle {
+            layout: Layout::Stacked,
+            ..OverlayStyle::default()
+        };
+        let column = OverlayStyle {
+            layout: Layout::Column,
+            ..OverlayStyle::default()
+        };
+        let wide = Aspect::Wide.framing(3).unwrap();
+        let usual = Overlays::layout(&full_text(), &OverlayStyle::default(), &wide);
+        assert_eq!(usual.panels.len(), 1);
+        assert_eq!(
+            Overlays::layout(&full_text(), &stacked, &wide).panels.len(),
+            2
+        );
+        assert_eq!(
+            Overlays::layout(&full_text(), &column, &story())
+                .panels
+                .len(),
+            1
+        );
+        let same = OverlayStyle {
+            layout: Layout::Auto,
+            ..OverlayStyle::default()
+        };
+        assert_eq!(Overlays::layout(&full_text(), &same, &wide), usual);
+
+        let green = [40, 200, 60];
+        let tinted = Overlays::layout(
+            &full_text(),
+            &OverlayStyle {
+                route_colour: green,
+                ..OverlayStyle::default()
+            },
+            &story(),
+        );
+        let strip = tinted.strip.unwrap();
+        let mut frame = blank(&story(), [0, 0, 0, 255]);
+        tinted.draw(&mut frame, None, 1.0);
+        let bottom = strip.max.y as u32 - 1;
+        assert_eq!(frame.pixel(strip.min.x as u32 + 1, bottom)[..3], green);
     }
 
     #[test]

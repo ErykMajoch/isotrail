@@ -11,6 +11,11 @@ All notable changes to `isotrail` are documented here.
 - **The camera can move.** `--pitch` tilts it from almost level to almost straight down, `--turn` turns the view round the slab, `--heading` points it at a compass bearing, and `--zoom` draws the diorama smaller or larger than the size that fits. Animations settle on the same view.
 - `--padding PERCENT[,METRES]` sets how much ground surrounds the route, and `--footprint north` cuts the slab north-south and east-west instead of along the route.
 - `embed` takes all of these for its poster, and the web embed gets `turn`, `pitch` and `zoom` attributes for the view it starts from and resets to, and takes `aspect="video"`, `"portrait"` or a ratio such as `"3:2"`.
+- **Parts of the scene switch on and off.** `--prop-density` thins out or thickens the trees, bushes and boulders, or removes them; `--paths`, `--streams` and `--strata` take `on` or `off`; `--base-blocks` sets how deep the slab is.
+- **More say over the light.** `--outlines` sets how strongly edges are drawn, `--shadows off` and `--night-sky off` leave out shadows or the stars and moon, `--weather-effects` picks which of clouds, cloud shade, rain, snow and haze are drawn, `--weather` draws a clear, cloudy, overcast, rainy, snowy or foggy sky of your choice, and `--sun AZIMUTH,ELEVATION` sets the sun by hand.
+- **Route styling.** `--route-colour`, `--route-width`, `--route-hidden dashed|dim|solid|off` for the parts behind ridges, and `--markers` for the start and finish flags and the head marker. The elevation profile and the web embed's progress line follow the route's colour.
+- `--layout stacked|column` places the text the same way for every shape, and `--credit-extra` adds a line of your own under the data credit.
+- All of these are config keys too, and `embed` writes an attribute for each one that isn't the default, so the live diorama matches its poster.
 
 ### Changed
 

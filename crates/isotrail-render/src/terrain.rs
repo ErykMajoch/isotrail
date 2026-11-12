@@ -418,6 +418,10 @@ impl TerrainRenderer {
             target.height(),
         );
         sky.rays.fit(mesh.corners, look.god_rays);
+        if !look.night_sky {
+            sky.stars = 0.0;
+            sky.moon = None;
+        }
         let uniforms = Uniforms {
             view_proj: camera.view_proj.to_cols_array(),
             light_view_proj: light_view_proj.to_cols_array(),
@@ -463,10 +467,13 @@ impl TerrainRenderer {
                 }),
                 ..Default::default()
             });
-            pass.set_pipeline(&self.shadow_pipeline);
-            pass.set_bind_group(0, &self.shadow_bind_group, &[]);
-            pass.set_vertex_buffer(0, mesh.vertices.slice(..));
-            pass.draw(0..mesh.count, 0..1);
+            // Without shadows the map stays clear, so every lookup is lit
+            if look.shadows {
+                pass.set_pipeline(&self.shadow_pipeline);
+                pass.set_bind_group(0, &self.shadow_bind_group, &[]);
+                pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                pass.draw(0..mesh.count, 0..1);
+            }
         }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -509,6 +516,7 @@ impl TerrainRenderer {
             look.route.hidden_dash_px,
         );
         let mut sprites = Vec::new();
+        let markers = look.route.markers;
         if let (Some(line), Some(start)) = (route, route.and_then(RouteLine::start)) {
             let atlas = self.post.sprites();
             let pixel = |point: Vec3| {
@@ -517,9 +525,13 @@ impl TerrainRenderer {
                     .as_ivec2()
             };
             let start = pixel(start.position);
-            sprites.push(atlas.place(Sprite::Start, start));
+            if markers.start {
+                sprites.push(atlas.place(Sprite::Start, start));
+            }
             if scene.progress >= 1.0 {
-                if let Some(finish) = line.finish() {
+                if markers.finish
+                    && let Some(finish) = line.finish()
+                {
                     let mut finish = pixel(finish.position);
                     // Loops and out-and-backs fly both flags side by side
                     if (finish - start).abs().max_element() < FLAG_SPACING_PX {
@@ -527,7 +539,8 @@ impl TerrainRenderer {
                     }
                     sprites.push(atlas.place(Sprite::Finish, finish));
                 }
-            } else if scene.progress > 0.0
+            } else if markers.head
+                && scene.progress > 0.0
                 && let Some(head) = line.point_at(distance_m)
             {
                 sprites.push(atlas.place(Sprite::Head, pixel(head)));

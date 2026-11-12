@@ -303,6 +303,8 @@ fn flag(key: &str, value: &Value, arg: &Arg) -> anyhow::Result<Option<String>> {
         Value::Integer(number) => Some(number.to_string()),
         Value::Float(number) => Some(number.to_string()),
         Value::Datetime(datetime) => Some(clock_time(datetime)),
+        // For the options that take on or off
+        Value::Boolean(on) => Some(if *on { "on" } else { "off" }.to_owned()),
         _ => None,
     };
     Ok(match value {
@@ -423,6 +425,26 @@ mod tests {
             strings(&result),
             ["isotrail", "render", "--offline", "hike.gpx"]
         );
+    }
+
+    #[test]
+    fn on_and_off_settings_take_words_or_booleans() {
+        let dir = tempfile::tempdir().unwrap();
+        let user = write(
+            dir.path(),
+            "user.toml",
+            "[render]\npaths = false\nstrata = \"off\"\nshadows = true\nsun = [200, -5]\n",
+        );
+        let result = with_config(args("isotrail render hike.gpx"), found(user)).unwrap();
+        let line = strings(&result);
+        for flag in [
+            "--paths=off",
+            "--strata=off",
+            "--shadows=on",
+            "--sun=200,-5",
+        ] {
+            assert!(line.iter().any(|arg| arg == flag), "{flag} in {line:?}");
+        }
     }
 
     #[test]

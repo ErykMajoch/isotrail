@@ -3,10 +3,11 @@ use isotrail_bundle::{
 };
 use isotrail_export::{ExportError, GifWriter, render_clip, render_still, upscale};
 use isotrail_render::{
-    Aim, Aspect, Background, DEFAULT_PALETTE, DEFAULT_STATS, DateFormat, Diorama, Frame, GodRays,
-    Gpu, Look, Mesher, Motion, OffscreenTarget, Orbit, OverlayStyle, OverlayText, Overlays, Pace,
-    Palette, SmoothMesher, SunState, TerrainRenderer, Timeline, View, Viewpoints, VoxelMesher,
-    Walk, draw_test_scene,
+    Aim, Aspect, Background, Conditions, DEFAULT_PALETTE, DEFAULT_STATS, DateFormat, Diorama,
+    Edges, Frame, GodRays, Gpu, HiddenRoute, Look, Markers, Mesher, Motion, OffscreenTarget, Orbit,
+    OverlayStyle, OverlayText, Overlays, Pace, Palette, RouteStyle, Shaped, SmoothMesher, SunState,
+    Terrain, TerrainRenderer, Timeline, View, Viewpoints, VoxelMesher, Walk, WeatherEffects, When,
+    draw_test_scene,
 };
 use isotrail_testkit::{
     Tolerance, assert_golden, decode_gif, differing_share, diorama_bundle, hike_bundle,
@@ -42,6 +43,56 @@ fn assert_terrain_golden(name: &str, mesher: &dyn Mesher, look: &Look) {
     assert!(sky(179, 0) && sky(179, 319));
     assert!(!sky(90, 166));
     assert_golden(name, frame.width(), frame.height(), frame.rgba());
+}
+
+/// Props, paths, streams, strata, shadows, outlines, the night sky, the
+/// weather, the hidden route and the markers all switched off
+#[test]
+fn the_bare_scene_matches_golden() {
+    let gpu = isotrail_testkit::gpu();
+    let framing = Aspect::Story.framing(6).unwrap();
+    let bundle = hike_bundle();
+    let bare = Terrain {
+        paths: false,
+        streams: false,
+        strata: false,
+        base_blocks: 2,
+        prop_density: 0.0,
+    };
+    let look = Look {
+        edges: Edges::default().scaled(0.0),
+        shadows: false,
+        night_sky: false,
+        route: RouteStyle {
+            markers: Markers::NONE,
+            ..RouteStyle::default()
+        }
+        .hiding(HiddenRoute::Off),
+        ..Look::default()
+    };
+    let conditions = Conditions {
+        effects: WeatherEffects::NONE,
+        ..Conditions::default()
+    };
+    let render = |terrain: Terrain, look: &Look, conditions: &Conditions| {
+        render_still(
+            &gpu,
+            &bundle,
+            &Shaped {
+                mesher: VoxelMesher::default(),
+                terrain,
+            },
+            &framing,
+            &Aim::default(),
+            &SunState::seen(&bundle, When::Start, conditions),
+            look,
+        )
+        .unwrap()
+    };
+    let frame = render(bare, &look, &conditions);
+    let usual = render(Terrain::default(), &Look::default(), &Conditions::default());
+    assert!(differing_share(frame.rgba(), usual.rgba(), Tolerance::default()) > 0.05);
+    assert_golden("scene-bare", frame.width(), frame.height(), frame.rgba());
 }
 
 #[test]

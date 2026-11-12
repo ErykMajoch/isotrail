@@ -252,6 +252,57 @@ fn the_poster_and_snippet_carry_the_look() {
 }
 
 #[test]
+fn scene_light_and_route_choices_reach_the_poster_and_snippet() {
+    let temp = with_hike("ridge.itb");
+    let plain = isotrail(temp.path(), &["embed", "ridge.itb", "-o", "plain"]);
+    assert!(plain.status.success(), "{}", text(&plain.stderr));
+    let output = isotrail(
+        temp.path(),
+        &[
+            "embed",
+            "ridge.itb",
+            "-o",
+            "scene",
+            "--strata",
+            "off",
+            "--prop-density",
+            "0.5",
+            "--weather",
+            "snow",
+            "--route-colour",
+            "#2050E0",
+            "--markers",
+            "start",
+            "--layout",
+            "stacked",
+            "--credit-extra",
+            "Walked by A. Hiker & co",
+            "--turn",
+            "20",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let (plain, scene) = (temp.path().join("plain"), temp.path().join("scene"));
+    assert_ne!(
+        fs::read(plain.join("ridge.png")).unwrap(),
+        fs::read(scene.join("ridge.png")).unwrap()
+    );
+    let html = fs::read_to_string(scene.join("snippet.html")).unwrap();
+    assert!(
+        html.contains(
+            r##"aspect="wide" strata="off" prop-density="0.5" weather="snow" route-colour="#2050e0" markers="start" turn="20" credit-extra="Walked by A. Hiker &amp; co" style="##
+        ),
+        "{html}"
+    );
+    // The layout only shapes the poster
+    assert!(!html.contains("layout"), "{html}");
+    assert_eq!(
+        fs::read(plain.join("ridge.itb")).unwrap(),
+        fs::read(scene.join("ridge.itb")).unwrap()
+    );
+}
+
+#[test]
 fn the_starting_view_and_size_reach_the_snippet() {
     let temp = with_hike("ridge.itb");
     let output = isotrail(

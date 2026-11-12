@@ -7,7 +7,7 @@ mod surface;
 mod voxel;
 
 use glam::{Vec2, Vec3};
-use isotrail_bundle::{GridInfo, Landcover, SceneBundle};
+use isotrail_bundle::{GridInfo, Landcover, SceneBundle, line_mask};
 use season::Seasonal;
 
 use crate::RenderError;
@@ -19,19 +19,92 @@ pub use voxel::VoxelMesher;
 
 /// How far the slab's base sits below the lowest terrain, in blocks of one
 /// cell size
-const BASE_BLOCKS: u32 = 6;
+pub const BASE_BLOCKS: u32 = 6;
 const SIDE_SHADE: f32 = 0.75;
+
+/// Which parts of the slab show, and how deep it is
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Terrain {
+    /// Paths and roads from the map
+    pub paths: bool,
+    pub streams: bool,
+    /// Soil and rock layers on the cut faces; without them, plain stone
+    pub strata: bool,
+    /// How far the base sits below the lowest terrain, in blocks
+    pub base_blocks: u32,
+    /// Props as a share of the usual number; 0 for none
+    pub prop_density: f32,
+}
+
+impl Default for Terrain {
+    fn default() -> Terrain {
+        Terrain {
+            paths: true,
+            streams: true,
+            strata: true,
+            base_blocks: BASE_BLOCKS,
+            prop_density: 1.0,
+        }
+    }
+}
+
+impl Terrain {
+    /// A cell's line-mask bits without the lines switched off
+    pub fn lines(&self, bits: u8) -> u8 {
+        let mut shown = bits;
+        if !self.paths {
+            shown &= !(line_mask::PATH | line_mask::ROAD);
+        }
+        if !self.streams {
+            shown &= !line_mask::STREAM;
+        }
+        shown
+    }
+}
 
 /// Turns a bundle's terrain into triangles in the slab frame: x along the
 /// long side, y across it (row 0 at +y), z up, all in metres from the slab
 /// centre and the lowest terrain, with heights exaggerated
 pub trait Mesher {
-    fn mesh(&self, bundle: &SceneBundle) -> TerrainMesh;
+    fn mesh(&self, bundle: &SceneBundle) -> TerrainMesh {
+        self.mesh_with(bundle, &Terrain::default())
+    }
 
     /// The most vertices [`Mesher::mesh`] and [`TerrainMesh::add_props`]
     /// would make together, without making them. Counting may stop at any
     /// number past `limit`
-    fn vertex_bound(&self, bundle: &SceneBundle, limit: u64) -> u64;
+    fn vertex_bound(&self, bundle: &SceneBundle, limit: u64) -> u64 {
+        self.vertex_bound_with(bundle, &Terrain::default(), limit)
+    }
+
+    fn mesh_with(&self, bundle: &SceneBundle, terrain: &Terrain) -> TerrainMesh;
+
+    fn vertex_bound_with(&self, bundle: &SceneBundle, terrain: &Terrain, limit: u64) -> u64;
+}
+
+/// A mesher that shows the slab as `terrain` has it
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Shaped<M> {
+    pub mesher: M,
+    pub terrain: Terrain,
+}
+
+impl<M: Mesher> Mesher for Shaped<M> {
+    fn mesh(&self, bundle: &SceneBundle) -> TerrainMesh {
+        self.mesher.mesh_with(bundle, &self.terrain)
+    }
+
+    fn vertex_bound(&self, bundle: &SceneBundle, limit: u64) -> u64 {
+        self.mesher.vertex_bound_with(bundle, &self.terrain, limit)
+    }
+
+    fn mesh_with(&self, bundle: &SceneBundle, terrain: &Terrain) -> TerrainMesh {
+        self.mesher.mesh_with(bundle, terrain)
+    }
+
+    fn vertex_bound_with(&self, bundle: &SceneBundle, terrain: &Terrain, limit: u64) -> u64 {
+        self.mesher.vertex_bound_with(bundle, terrain, limit)
+    }
 }
 
 #[repr(C)]
@@ -80,11 +153,13 @@ pub(crate) fn check_size(mesh: &TerrainMesh, max_bytes: u64) -> Result<(), Rende
 
 const VERTEX_BYTES: u64 = size_of::<Vertex>() as u64;
 
-/// Unindexed triangles, three vertices each, and the top they form
+/// Unindexed triangles, three vertices each, the top they form and the
+/// parts of the slab they show
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TerrainMesh {
     pub vertices: Vec<Vertex>,
     pub surface: Surface,
+    pub terrain: Terrain,
 }
 
 impl TerrainMesh {
@@ -195,6 +270,8 @@ struct Columns {
     ground: Vec<[u8; 4]>,
     frozen: Vec<bool>,
     sea: Vec<bool>,
+    /// Layers on the cut faces, or plain stone under any water
+    strata: bool,
 }
 
 impl Columns {
@@ -215,7 +292,13 @@ impl Columns {
             frozen: vec![false; landcover.len()],
             sea: vec![false; landcover.len()],
             landcover,
+            strata: true,
         }
+    }
+
+    fn shaped(mut self, terrain: &Terrain) -> Columns {
+        self.strata = terrain.strata;
+        self
     }
 
     /// The ground and lakes as the season has them

@@ -47,6 +47,17 @@ impl Edges {
         depth_threshold_px: 2.0,
         crease_angle_deg: 40.0,
     };
+
+    /// Every strength times `factor`, each kept within 0 and 1
+    pub fn scaled(self, factor: f32) -> Edges {
+        let scale = |strength: f32| (strength * factor).clamp(0.0, 1.0);
+        Edges {
+            silhouette: scale(self.silhouette),
+            depth: scale(self.depth),
+            crease: scale(self.crease),
+            ..self
+        }
+    }
 }
 
 impl Default for Edges {
@@ -64,7 +75,7 @@ impl Default for Edges {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RouteStyle {
     pub colour: [u8; 3],
-    /// In internal pixels, from 1 to 3
+    /// In internal pixels, from 1 to 4
     pub width_px: u32,
     /// How much of the route's colour covers the terrain that hides it
     pub hidden_opacity: f32,
@@ -73,17 +84,78 @@ pub struct RouteStyle {
     pub hidden_dash_px: f32,
     /// How much a one-pixel border darkens the terrain around the visible line
     pub outline: f32,
+    pub markers: Markers,
 }
 
 impl Default for RouteStyle {
     fn default() -> Self {
         RouteStyle {
-            colour: [214, 72, 52],
+            colour: ROUTE_COLOUR,
             width_px: 2,
             hidden_opacity: 0.6,
             hidden_dash_px: 2.0,
             outline: 0.4,
+            markers: Markers::ALL,
         }
+    }
+}
+
+pub const ROUTE_COLOUR: [u8; 3] = [214, 72, 52];
+
+impl RouteStyle {
+    pub fn hiding(self, hidden: HiddenRoute) -> RouteStyle {
+        let default = RouteStyle::default();
+        let (hidden_opacity, hidden_dash_px) = match hidden {
+            HiddenRoute::Dashed => (default.hidden_opacity, default.hidden_dash_px),
+            HiddenRoute::Dim => (default.hidden_opacity, 0.0),
+            HiddenRoute::Solid => (1.0, 0.0),
+            HiddenRoute::Off => (0.0, 0.0),
+        };
+        RouteStyle {
+            hidden_opacity,
+            hidden_dash_px,
+            ..self
+        }
+    }
+}
+
+/// How the parts of the route behind ridges show
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HiddenRoute {
+    /// Faded and dashed
+    #[default]
+    Dashed,
+    /// Faded
+    Dim,
+    /// Like the rest of the route
+    Solid,
+    Off,
+}
+
+/// The flags at the start and finish and the marker at the route's head
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Markers {
+    pub start: bool,
+    pub finish: bool,
+    pub head: bool,
+}
+
+impl Markers {
+    pub const ALL: Markers = Markers {
+        start: true,
+        finish: true,
+        head: true,
+    };
+    pub const NONE: Markers = Markers {
+        start: false,
+        finish: false,
+        head: false,
+    };
+}
+
+impl Default for Markers {
+    fn default() -> Markers {
+        Markers::ALL
     }
 }
 
@@ -116,6 +188,10 @@ pub struct Look {
     /// How wide shadow edges soften, in cells; 0 keeps them hard
     pub soft_shadows: f32,
     pub god_rays: GodRays,
+    /// Whether the terrain casts shadows
+    pub shadows: bool,
+    /// Stars and the moon's disc after dusk
+    pub night_sky: bool,
 }
 
 /// Beams of sunlight slanting down through the scene
@@ -141,6 +217,8 @@ impl Look {
             occlusion: 0.0,
             soft_shadows: 0.0,
             god_rays: GodRays::Off,
+            shadows: true,
+            night_sky: true,
         }
     }
 }
@@ -156,6 +234,8 @@ impl Default for Look {
             occlusion: DEFAULT_OCCLUSION,
             soft_shadows: DEFAULT_SOFT_SHADOWS,
             god_rays: GodRays::Weather,
+            shadows: true,
+            night_sky: true,
         }
     }
 }
@@ -308,9 +388,10 @@ impl Sky {
             let sky_bottom = Vec3::from_array(sun.sky[1].map(f32::from)) / 255.0;
             let across = weather.wind.dot(right.truncate());
             let (rain, snow) = weather.rain_and_snow();
+            let cover = weather.visible_cover();
             SkyWeather {
-                cloud_threshold: if weather.cloud_cover > 0.0 {
-                    cloud_threshold(weather.cloud_cover)
+                cloud_threshold: if cover > 0.0 {
+                    cloud_threshold(cover)
                 } else {
                     SkyWeather::CLEAR.cloud_threshold
                 },
@@ -318,7 +399,7 @@ impl Sky {
                 cloud_drift_px: across * time_s * width / 200.0,
                 cloud_lit,
                 cloud_shade: (cloud_lit * 0.7).lerp(sky_top, 0.2),
-                haze: weather.haze,
+                haze: weather.visible_haze(),
                 haze_colour: sky_bottom.lerp(cloud_lit, 0.5),
                 rain,
                 snow,
@@ -333,9 +414,8 @@ impl Sky {
         let up = smoothstep(-0.02, 0.08, sun.direction.z) * (1.0 - sun.stars);
         let low = 1.0 - 0.5 * sun.direction.z.clamp(0.0, 1.0);
         let gaps = sun.weather.map_or(0.0, |weather| {
-            smoothstep(0.15, 0.35, weather.cloud_cover)
-                * smoothstep(0.95, 0.7, weather.cloud_cover)
-                * (1.0 - weather.overcast)
+            let cover = weather.visible_cover();
+            smoothstep(0.15, 0.35, cover) * smoothstep(0.95, 0.7, cover) * (1.0 - weather.dimming())
         });
         let light = (-sun.direction).normalize_or(Vec3::NEG_Z);
         let travel = camera.view_proj * light.extend(0.0);
@@ -608,7 +688,7 @@ impl PostPass {
                 .extend(look.route.hidden_opacity)
                 .to_array(),
             counts: [
-                look.route.width_px.clamp(1, 3),
+                look.route.width_px.clamp(1, 4),
                 sprites.len().min(MAX_SPRITES) as u32,
                 background,
                 sky.star_seed,

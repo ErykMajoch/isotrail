@@ -1,7 +1,7 @@
 use anyhow::{Context, bail};
 use chrono::{NaiveDate, NaiveTime, TimeZone};
 use isotrail_bundle::SceneBundle;
-use isotrail_render::SunState;
+use isotrail_render::{Conditions, SunState, When};
 use isotrail_track::{Tz, timezone_at};
 use tracing::info;
 
@@ -11,8 +11,12 @@ pub fn parse_time(value: &str) -> Result<NaiveTime, String> {
 }
 
 /// The sun, moon and weather at the start of the hike, or at `time` on the
-/// hike's start date in its time zone
-pub fn hike_sun(bundle: &SceneBundle, time: Option<NaiveTime>) -> anyhow::Result<SunState> {
+/// hike's start date in its time zone, changed as `conditions` say
+pub fn hike_sun(
+    bundle: &SceneBundle,
+    time: Option<NaiveTime>,
+    conditions: &Conditions,
+) -> anyhow::Result<SunState> {
     let grid = &bundle.grid;
     let Some(time) = time else {
         if let Some(sun) = bundle.sun.first() {
@@ -22,7 +26,7 @@ pub fn hike_sun(bundle: &SceneBundle, time: Option<NaiveTime>) -> anyhow::Result
                 "sun at the start"
             );
         }
-        return Ok(SunState::for_hike(bundle));
+        return Ok(SunState::seen(bundle, When::Start, conditions));
     };
     let Some(date) = bundle.meta.local_date.as_deref() else {
         bail!("--time needs a track with times, to know which day to light");
@@ -48,7 +52,7 @@ pub fn hike_sun(bundle: &SceneBundle, time: Option<NaiveTime>) -> anyhow::Result
                 zone.name()
             )
         })?;
-    let sun = SunState::at_instant(bundle, at.timestamp());
+    let sun = SunState::seen(bundle, When::Instant(at.timestamp()), conditions);
     info!("sun and moon at {}", at.format("%Y-%m-%d %H:%M %Z"));
     Ok(sun)
 }
@@ -93,11 +97,18 @@ mod tests {
     #[test]
     fn hikes_are_lit_by_their_start_unless_told_otherwise() {
         let bundle = bundle();
-        let start = hike_sun(&bundle, None).unwrap();
+        let start = hike_sun(&bundle, None, &Conditions::default()).unwrap();
         assert_eq!(start, SunState::at(&bundle.grid, 120.0, 35.0));
 
         // 14 June 2025 in the Alps, CEST: the sun sets around 21:15
-        let at = |hhmm| hike_sun(&bundle, Some(parse_time(hhmm).unwrap())).unwrap();
+        let at = |hhmm| {
+            hike_sun(
+                &bundle,
+                Some(parse_time(hhmm).unwrap()),
+                &Conditions::default(),
+            )
+            .unwrap()
+        };
         let expected = |utc_hour, minute| {
             let utc = chrono::Utc
                 .with_ymd_and_hms(2025, 6, 14, utc_hour, minute, 0)
@@ -128,20 +139,20 @@ mod tests {
     fn times_need_a_date_and_must_exist() {
         let mut untimed = bundle();
         untimed.meta.local_date = None;
-        let message = hike_sun(&untimed, parse_time("12:00").ok())
+        let message = hike_sun(&untimed, parse_time("12:00").ok(), &Conditions::default())
             .unwrap_err()
             .to_string();
         assert!(message.contains("track with times"), "{message}");
 
         let mut spring = bundle();
         spring.meta.local_date = Some("2025-03-30".into());
-        let message = hike_sun(&spring, parse_time("02:30").ok())
+        let message = hike_sun(&spring, parse_time("02:30").ok(), &Conditions::default())
             .unwrap_err()
             .to_string();
         assert!(
             message.contains("does not exist in Europe/Rome"),
             "{message}"
         );
-        assert!(hike_sun(&spring, parse_time("03:30").ok()).is_ok());
+        assert!(hike_sun(&spring, parse_time("03:30").ok(), &Conditions::default()).is_ok());
     }
 }

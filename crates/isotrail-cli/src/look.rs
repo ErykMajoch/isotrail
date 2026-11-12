@@ -5,8 +5,8 @@ use chrono::NaiveTime;
 use clap::{Args, ValueEnum};
 use isotrail_render::{
     BLOCK_HEIGHT_RANGE, Background, DEFAULT_OCCLUSION, DEFAULT_PALETTE, DEFAULT_SOFT_SHADOWS,
-    GodRays, Look, Mesher, MesherKind, OCCLUSION_RANGE, Palette, SOFT_SHADOWS_RANGE, VoxelMesher,
-    parse_within,
+    GodRays, Look, Mesher, MesherKind, OCCLUSION_RANGE, Palette, SOFT_SHADOWS_RANGE, Terrain,
+    VoxelMesher, parse_within,
 };
 use tracing::warn;
 
@@ -100,12 +100,12 @@ impl LookArgs {
         })
     }
 
-    pub fn mesher(&self, typed: &Typed) -> Box<dyn Mesher> {
+    pub fn mesher(&self, typed: &Typed, terrain: Terrain) -> Box<dyn Mesher> {
         let kind = MesherKind::from(self.mesher);
         if kind == MesherKind::Smooth && typed.has("block_height") {
             warn!("--block-height only applies to --mesher voxel, so it does nothing here");
         }
-        kind.mesher(self.block_height)
+        kind.mesher(self.block_height, terrain)
     }
 
     /// The .hex file `--palette` names, rather than a built-in palette or none

@@ -1,9 +1,11 @@
 use chrono::{NaiveDate, NaiveTime};
 use isotrail_bundle::SceneBundle;
 use isotrail_render::{
-    Aim, BLOCK_HEIGHT_RANGE, Background, GodRays, Look, MAX_ZOOM, Mesher, MesherKind,
-    OCCLUSION_RANGE, PITCH_RANGE, Palette, SOFT_SHADOWS_RANGE, SunState, TURN_RANGE, View,
-    VoxelMesher, ZOOM_RANGE, parse_within,
+    Aim, BASE_BLOCKS_RANGE, BLOCK_HEIGHT_RANGE, Background, Conditions, Edges, ForcedWeather,
+    GodRays, HiddenRoute, Look, MAX_ZOOM, Markers, Mesher, MesherKind, OCCLUSION_RANGE,
+    OUTLINES_RANGE, PITCH_RANGE, PROP_DENSITY_RANGE, Palette, ROUTE_WIDTH_RANGE, RouteStyle,
+    SOFT_SHADOWS_RANGE, SunState, TURN_RANGE, Terrain, View, VoxelMesher, WeatherEffects, When,
+    ZOOM_RANGE, parse_colour, parse_count, parse_sun, parse_switch, parse_within,
 };
 use js_sys::{Array, Function, Object, Reflect};
 use wasm_bindgen::{JsCast, JsValue};
@@ -14,7 +16,10 @@ pub struct Options {
     pub look: Look,
     mesher: MesherKind,
     block_height: f32,
-    /// The sun held at `time`, through playback and scrubbing
+    terrain: Terrain,
+    /// A hand-set sun, a chosen sky and the weather's effects drawn
+    pub conditions: Conditions,
+    /// The sun held at `time` or set by hand, through playback and scrubbing
     pub held_sun: Option<SunState>,
     /// The starting view's turn, pitch and zoom
     aim: Aim,
@@ -36,7 +41,48 @@ impl Options {
             })
             .unwrap_or(defaults.soft_shadows),
             god_rays: read(options, "godRays", str::parse::<GodRays>).unwrap_or(defaults.god_rays),
+            edges: read(options, "outlines", |text| {
+                parse_within(text, &OUTLINES_RANGE)
+            })
+            .map_or(defaults.edges, |outlines| Edges::default().scaled(outlines)),
+            shadows: read(options, "shadows", parse_switch).unwrap_or(defaults.shadows),
+            night_sky: read(options, "nightSky", parse_switch).unwrap_or(defaults.night_sky),
+            route: RouteStyle {
+                colour: read(options, "routeColour", parse_colour).unwrap_or(defaults.route.colour),
+                width_px: read(options, "routeWidth", |text| {
+                    parse_count(text, &ROUTE_WIDTH_RANGE)
+                })
+                .unwrap_or(defaults.route.width_px),
+                markers: read(options, "markers", str::parse::<Markers>)
+                    .unwrap_or(defaults.route.markers),
+                ..defaults.route
+            }
+            .hiding(read(options, "routeHidden", str::parse::<HiddenRoute>).unwrap_or_default()),
             ..defaults
+        };
+        let usual = Terrain::default();
+        let terrain = Terrain {
+            paths: read(options, "paths", parse_switch).unwrap_or(usual.paths),
+            streams: read(options, "streams", parse_switch).unwrap_or(usual.streams),
+            strata: read(options, "strata", parse_switch).unwrap_or(usual.strata),
+            base_blocks: read(options, "baseBlocks", |text| {
+                parse_count(text, &BASE_BLOCKS_RANGE)
+            })
+            .unwrap_or(usual.base_blocks),
+            prop_density: read(options, "propDensity", |text| {
+                parse_within(text, &PROP_DENSITY_RANGE)
+            })
+            .unwrap_or(usual.prop_density),
+        };
+        let conditions = Conditions {
+            sun: read(options, "sun", parse_sun),
+            weather: read(options, "weather", str::parse::<ForcedWeather>),
+            effects: read(options, "weatherEffects", str::parse::<WeatherEffects>)
+                .unwrap_or_default(),
+        };
+        let held_sun = match conditions.sun {
+            Some(_) => Some(SunState::seen(bundle, When::Start, &conditions)),
+            None => read(options, "time", |text| sun_at(bundle, text, &conditions)),
         };
         Options {
             look,
@@ -45,7 +91,9 @@ impl Options {
                 parse_within(text, &BLOCK_HEIGHT_RANGE)
             })
             .unwrap_or(VoxelMesher::default().block_height),
-            held_sun: read(options, "time", |text| sun_at(bundle, text)),
+            terrain,
+            conditions,
+            held_sun,
             aim: Aim {
                 turn_deg: read(options, "turn", |text| parse_within(text, &TURN_RANGE))
                     .unwrap_or(0.0),
@@ -80,13 +128,14 @@ impl Options {
     }
 
     pub fn mesher(&self) -> Box<dyn Mesher> {
-        self.mesher.mesher(Some(self.block_height))
+        self.mesher.mesher(Some(self.block_height), self.terrain)
     }
 
     /// Whether the terrain must be built again to go from `self` to `other`
     pub fn remeshes(&self, other: &Options) -> bool {
         self.mesher != other.mesher
             || (self.mesher == MesherKind::Voxel && self.block_height != other.block_height)
+            || self.terrain != other.terrain
     }
 }
 
@@ -135,7 +184,7 @@ fn palette(text: &str) -> Result<Option<Palette>, String> {
 }
 
 /// The sun at a local time on the hike's start date, in its time zone
-fn sun_at(bundle: &SceneBundle, text: &str) -> Result<SunState, String> {
+fn sun_at(bundle: &SceneBundle, text: &str, conditions: &Conditions) -> Result<SunState, String> {
     let time = NaiveTime::parse_from_str(text.trim(), "%H:%M")
         .map_err(|_| "expected a local time such as 20:30".to_owned())?;
     let date = bundle
@@ -159,7 +208,7 @@ fn sun_at(bundle: &SceneBundle, text: &str) -> Result<SunState, String> {
             "{date} {text} does not exist in {zone} (the clocks skip it)"
         ));
     }
-    Ok(SunState::at_instant(bundle, utc))
+    Ok(SunState::seen(bundle, When::Instant(utc), conditions))
 }
 
 /// Seconds `zone` is ahead of UTC at `utc`, from the browser's time zone data

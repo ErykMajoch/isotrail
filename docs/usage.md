@@ -22,6 +22,7 @@ The commands that draw or prepare a hike share their options. They are described
 | `--palette` ([look](#terrain-and-look)) | yes | yes | – | several |
 | `--mesher`, `--block-height`, `--background`, `--time`, `--occlusion`, `--soft-shadows`, `--god-rays` ([look](#terrain-and-look)) | yes | yes | – | – |
 | `--exaggeration` ([look](#terrain-and-look)) | yes | yes | yes | yes |
+| [Scene, light and route](#scene-light-and-route) | yes | yes | – | – |
 | [Text and overlays](#text-and-overlays) | yes | for the poster | `--title` only | – |
 | [Animation](#animation) | yes | – | – | – |
 | [Data](#data) | yes | yes | yes | yes |
@@ -63,7 +64,7 @@ The scene is drawn at the output size divided by `--scale` (360 x 640 for a stor
 
 Each aspect has a safe area that the diorama and text stay inside. Stories leave the top 14% and bottom 20% of the image free, because social apps cover those parts with their own header and reply bar. `video` has the same shape as `story` but keeps the top 14%, the bottom 35% and 6% at each side clear, for short-video feeds that lay a caption and a column of buttons over the picture. `portrait` is a tall 3:4 post. The other aspects, and `--size`, keep 5% clear on every side. `--safe-area` replaces the margins of whichever shape you render.
 
-Images wider than they are tall put the title, stats and profile in one column on the left, beside the diorama; the others put the title at the top and the stats at the bottom. An MP4 needs an even number of pixels on each side, which isotrail checks before it starts.
+Images wider than they are tall put the title, stats and profile in one column on the left, beside the diorama; the others put the title at the top and the stats at the bottom. [`--layout`](#text-and-overlays) chooses either for any shape. An MP4 needs an even number of pixels on each side, which isotrail checks before it starts.
 
 ### Camera
 
@@ -97,6 +98,30 @@ Very tall or very detailed terrain, such as a large `--exaggeration` with a smal
 
 The slab is turned to follow the route, and the camera looks the way the hike goes, so the start is in front. For loops and out-and-backs, the camera looks towards the halfway point. See [How it works](how-it-works.md) for what each part of the look does.
 
+### Scene, light and route
+
+These switch parts of the scene on and off, change the light and style the route. Options that take `on` or `off` take `true` or `false` in a [config file](configuration.md) too.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--prop-density X` | `1` | How many trees, bushes and boulders stand on the terrain, as a share of the usual number, from `0` (none) to `2` |
+| `--paths on|off` | `on` | Paths and roads from the map, drawn as lighter ground. Off, the ground under them takes its own colour, and trees may grow there |
+| `--streams on|off` | `on` | Streams from the map. Rivers and lakes stay |
+| `--strata on|off` | `on` | Soil and rock layers on the slab's cut faces. Off, the faces are plain stone, with any lake or sea still showing at the edge |
+| `--base-blocks N` | `6` | How far the slab's base sits below the lowest ground, in blocks, from `1` to `24` |
+| `--outlines X` | `1` | How strongly edges are outlined, from `0` (none) to `2` |
+| `--shadows on|off` | `on` | Shadows cast by the terrain and props |
+| `--night-sky on|off` | `on` | Stars and the moon after dusk. Moonlight still lights the terrain |
+| `--weather-effects LIST|none` | `clouds,shade,rain,snow,haze` | Which of the weather's effects to draw: `clouds` in the sky (with the dimmer, greyer light under them), `shade` from passing clouds on the ground, `rain`, `snow` and `haze` (with fog). Without `clouds`, `--god-rays auto` sees a clear sky |
+| `--weather SKY` | the recorded weather | Draw `clear`, `cloudy`, `overcast`, `rain`, `snow` or `fog` instead, with the recorded wind. It holds through a whole animation, and the data credit stays as the bundle has it |
+| `--sun AZIMUTH,ELEVATION` | from the hike's time | Set the sun by hand: its compass bearing (`0` to `360`) and its elevation above the horizon (`-90` to `90`), such as `250,8` for a low evening light from the west-south-west. It holds through a whole animation, and can't be typed with `--time` |
+| `--route-colour #RRGGBB` | `#d64834` | The route's colour; the profile's walked part and the web embed's progress line follow it. `--route-color` works too |
+| `--route-width PX` | `2` | The route's width in drawn pixels, from `1` to `4` |
+| `--route-hidden dashed|dim|solid|off` | `dashed` | How the parts of the route behind ridges show: faded and dashed, faded, like the rest of the route, or not at all |
+| `--markers LIST|none` | `start,finish,head` | Which markers to draw: the `start` and `finish` flags and, in animations, the route's `head` |
+
+Like the palette, colours are snapped to the nearest one in the palette, so an unusual `--route-colour` may come out a little different. `--weather-effects none --shadows off --outlines 0 --strata off --prop-density 0` gives a bare, schematic slab.
+
 ### Text and overlays
 
 | Option | Default | Description |
@@ -111,6 +136,8 @@ The slab is turned to follow the route, and the camera looks the way the hike go
 | `--stats LIST` | `distance,gain,time,high` | Stats to print, in order. See the list below |
 | `--units metric\|imperial` | `metric` | Kilometres and metres, or miles and feet |
 | `--no-attribution` | off | Leave the data credit off the image, and print it to paste into the caption |
+| `--layout auto|stacked|column` | `auto` | Where the text goes: `auto` puts it in one column on the left of images wider than they are tall, and the title on top with the stats at the bottom otherwise. `stacked` and `column` choose one for every shape |
+| `--credit-extra TEXT` | none | A line of your own under the data credit, such as your name or site. It goes with the credit when there is no room for it, and isn't printed for the caption |
 
 The available stats are:
 
@@ -145,7 +172,7 @@ When the weather is drawn, the credit on the image ends in "Open-Meteo.com", and
 
 ### Weather
 
-When the bundle holds the weather during the hike, the render shows it as it was at the start (or at `--time`): clouds in the sky and, on a partly cloudy day, their shade drifting over the ground; a grey sky and duller light when it is overcast; rain or snow slanted by the wind; and haze in fog and heavy rain. Thin high cloud shows in the sky but doesn't dim the light. Animations follow the weather hour by hour as the route draws, with the rain, snow and clouds moving from frame to frame. `--no-weather` draws a clear sky instead.
+When the bundle holds the weather during the hike, the render shows it as it was at the start (or at `--time`): clouds in the sky and, on a partly cloudy day, their shade drifting over the ground; a grey sky and duller light when it is overcast; rain or snow slanted by the wind; and haze in fog and heavy rain. Thin high cloud shows in the sky but doesn't dim the light. Animations follow the weather hour by hour as the route draws, with the rain, snow and clouds moving from frame to frame. `--no-weather` draws a clear sky instead, `--weather-effects` leaves out single effects, and `--weather` draws a sky of your choice (see [Scene, light and route](#scene-light-and-route)).
 
 ### Season
 
@@ -289,13 +316,13 @@ The image inside the element shows the poster, at the element's size, on pages w
 | `--runtime-url URL` | `isotrail-embed.js` in `DIR` | The address of `isotrail-embed.js`, when one copy serves every hike on the site |
 | `--exaggeration X` | automatic | As for [`render`](#terrain-and-look) |
 
-`embed` also takes `render`'s [terrain and look options](#terrain-and-look), [camera options](#camera), [text and overlay options](#text-and-overlays) and [data options](#data), and reads [config files](configuration.md). The poster is drawn with all of them. The look options reach the live diorama too: each one that isn't the default becomes an attribute of the element in the snippet, as in `--palette resurrect-64 --mesher smooth`:
+`embed` also takes `render`'s [terrain and look options](#terrain-and-look), [scene, light and route options](#scene-light-and-route), [camera options](#camera), [text and overlay options](#text-and-overlays) and [data options](#data), and reads [config files](configuration.md). The poster is drawn with all of them. The look, scene, light and route options reach the live diorama too: each one that isn't the default becomes an attribute of the element in the snippet, as in `--palette resurrect-64 --mesher smooth`:
 
 ```html
 <isotrail-hike src="derwent-edge.itb" poster="derwent-edge.png" aspect="wide" palette="resurrect-64" mesher="smooth" …>
 ```
 
-The camera options become the `turn`, `pitch` and `zoom` attributes, which set the view the diorama starts from and returns to when it is reset; a `--heading` is written as the `turn` that faces the same way. With `--zoom` above 1 the diorama starts zoomed in, and below 1 it leaves more room round the slab. A palette file is copied into `DIR` and the `palette` attribute points at the copy. With `--time`, the diorama keeps that light while the route plays, as an animation does. `--title` is saved in the bundle, so the live diorama is labelled with it as well as the poster.
+The camera options become the `turn`, `pitch` and `zoom` attributes, which set the view the diorama starts from and returns to when it is reset; a `--heading` is written as the `turn` that faces the same way. With `--zoom` above 1 the diorama starts zoomed in, and below 1 it leaves more room round the slab. A palette file is copied into `DIR` and the `palette` attribute points at the copy. With `--time` or `--sun`, the diorama keeps that light while the route plays, as an animation does. `--credit-extra` becomes the `credit-extra` attribute, and the live diorama shows the line under its data credit; `--layout` only shapes the poster. `--title` is saved in the bundle, so the live diorama is labelled with it as well as the poster.
 
 When the input is a bundle that already sits in `DIR` under the name `embed` would give it, as in `isotrail embed site/hike.itb -o site`, it is left as it is and only the poster and snippet are written. If `--title`, `--season`, `--no-weather` or `--exaggeration` would change it, the command stops instead, so the bundle you started from is never replaced; write to another folder.
 
