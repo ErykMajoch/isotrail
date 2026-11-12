@@ -16,6 +16,7 @@ use crate::frame::{AspectArg, FrameArgs, Shape, parse_scale};
 use crate::look::LookArgs;
 use crate::output;
 use crate::overlay::OverlayArgs;
+use crate::playback::PlaybackArgs;
 use crate::render::Source;
 use crate::report::{Report, ReportArgs, Written, say};
 use crate::scene::SceneArgs;
@@ -94,6 +95,9 @@ pub struct EmbedArgs {
 
     #[command(flatten)]
     overlay: OverlayArgs,
+
+    #[command(flatten)]
+    playback: PlaybackArgs,
 
     #[command(flatten)]
     data: DataArgs,
@@ -180,9 +184,11 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
         .flatten()
         .chain(args.look.palette_file().filter(|path| path.is_file()))
         .chain(args.theme.path().filter(|path| path.is_file()))
+        .chain(args.playback.strings_file().filter(|path| path.is_file()))
         .collect();
     output::plan(outputs.map(PathBuf::as_path), &inputs)?;
     args.overlay.check()?;
+    args.playback.check()?;
     let theme = args.theme.read()?;
     let mesher = args.look.mesher(typed, args.scene.terrain(&theme));
     let look = args.scene.apply(args.look.look(&theme)?);
@@ -267,6 +273,7 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
     attributes.extend(args.scene.attributes(&theme.route));
     attributes.extend(view_attributes(&aim, &bundle));
     attributes.extend(args.overlay.attributes());
+    attributes.extend(args.playback.attributes()?);
     let html = snippet(&Snippet {
         name: &name,
         title: args.overlay.title(&bundle),
@@ -348,7 +355,8 @@ struct Snippet<'a> {
     shape: Shape,
     base_url: Option<&'a str>,
     runtime_url: Option<&'a str>,
-    /// The look options that aren't the default
+    /// The options that aren't the default; an empty value is written as
+    /// the attribute's name alone
     attributes: &'a [(&'static str, String)],
 }
 
@@ -388,7 +396,10 @@ fn snippet(snippet: &Snippet) -> String {
     let look: String = snippet
         .attributes
         .iter()
-        .map(|(name, value)| format!(r#" {name}="{}""#, html_attr(value)))
+        .map(|(name, value)| match value.as_str() {
+            "" => format!(" {name}"),
+            value => format!(r#" {name}="{}""#, html_attr(value)),
+        })
         .collect();
     let mut html = String::new();
     let _ = writeln!(

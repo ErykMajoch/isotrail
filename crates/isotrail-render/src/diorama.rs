@@ -59,6 +59,10 @@ impl Diorama {
         &self.turntable
     }
 
+    pub fn set_max_zoom(&mut self, zoom: f32) {
+        self.turntable.set_max_zoom(zoom);
+    }
+
     /// Lights the frames drawn from now on with `sun`
     pub fn set_sun(&mut self, sun: SunState) {
         self.sun = sun;

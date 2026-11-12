@@ -12,6 +12,8 @@ pub const DEFAULT_YAW_OFFSET_DEG: f32 = 20.0;
 /// reach counts as a loop
 const LOOP_SHARE: f32 = 0.25;
 pub const MAX_ZOOM: f32 = 3.0;
+/// What a viewer may set as its largest zoom
+pub const MAX_ZOOM_RANGE: std::ops::RangeInclusive<f32> = 1.0..=6.0;
 
 /// Shares of the frame, per side, that the diorama must stay out of
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -373,7 +375,7 @@ fn safe_centre(framing: &Framing) -> Vec2 {
 pub struct View {
     /// Added to the still's camera turn
     pub yaw_offset_deg: f32,
-    /// 1 shows the whole slab, up to [`MAX_ZOOM`]
+    /// 1 shows the whole slab, up to the turntable's largest zoom
     pub zoom: f32,
     /// Slab-frame metres across the ground from the middle of the whole-slab
     /// view to the middle of this one, so it turns with the slab
@@ -405,6 +407,7 @@ pub struct Turntable {
     points: Vec<Vec3>,
     framing: Framing,
     metres_per_px: f32,
+    max_zoom: f32,
 }
 
 impl Turntable {
@@ -431,6 +434,18 @@ impl Turntable {
             points,
             framing: *framing,
             metres_per_px,
+            max_zoom: MAX_ZOOM,
+        }
+    }
+
+    pub fn max_zoom(&self) -> f32 {
+        self.max_zoom
+    }
+
+    /// Clamped to [`MAX_ZOOM_RANGE`]
+    pub fn set_max_zoom(&mut self, zoom: f32) {
+        if zoom.is_finite() {
+            self.max_zoom = zoom.clamp(*MAX_ZOOM_RANGE.start(), *MAX_ZOOM_RANGE.end());
         }
     }
 
@@ -457,7 +472,7 @@ impl Turntable {
         if !factor.is_finite() || !pixel.is_finite() {
             return view;
         }
-        let zoom = (view.zoom * factor).clamp(1.0, MAX_ZOOM);
+        let zoom = (view.zoom * factor).clamp(1.0, self.max_zoom);
         let fit = self.fit(&view);
         let (before, after) = (
             self.metres_per_px / view.zoom.max(1.0),
@@ -499,7 +514,7 @@ impl Turntable {
                 Vec2::ZERO
             },
         };
-        let zoom = view.zoom.clamp(1.0, MAX_ZOOM);
+        let zoom = view.zoom.clamp(1.0, self.max_zoom);
         let fit = self.fit(&view);
         let centre = safe_centre(&self.framing);
         let (width, height) = (self.framing.width as f32, self.framing.height as f32);
@@ -942,6 +957,24 @@ mod tests {
         let whole = turntable.zoom_at(close, 0.01, Vec2::new(10.0, 10.0));
         assert_eq!(whole.zoom, 1.0);
         assert!(whole.focus.length() < 1e-3, "{}", whole.focus);
+    }
+
+    #[test]
+    fn the_largest_zoom_can_be_raised_and_lowered() {
+        let (mut turntable, _) = turntable();
+        let centre = Vec2::new(320.0, 180.0);
+        turntable.set_max_zoom(6.0);
+        assert_eq!(turntable.zoom_at(View::default(), 10.0, centre).zoom, 6.0);
+        turntable.set_max_zoom(1.5);
+        let close = View {
+            zoom: 3.0,
+            ..View::default()
+        };
+        assert_eq!(turntable.clamp(close).zoom, 1.5);
+        turntable.set_max_zoom(20.0);
+        assert_eq!(turntable.max_zoom(), 6.0);
+        turntable.set_max_zoom(f32::NAN);
+        assert_eq!(turntable.max_zoom(), 6.0);
     }
 
     #[test]

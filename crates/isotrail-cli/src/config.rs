@@ -544,9 +544,9 @@ cache-dir = \"cache\"
         assert!(message.contains("settings go in a [render]"), "{message}");
         let message = error("[stats]\nunits = \"imperial\"\n");
         assert!(message.contains("found \"stats\" outside"), "{message}");
-        let message = error("[embed]\nduration = 5\n");
+        let message = error("[embed]\nfps = 5\n");
         assert!(
-            message.contains("unknown setting \"duration\" in the [embed] table"),
+            message.contains("unknown setting \"fps\" in the [embed] table"),
             "{message}"
         );
         // Another command's table is checked too
@@ -678,6 +678,8 @@ duration = \"5s\"
 
 [embed]
 base-url = \"/hikes/\"
+loop = \"forever\"
+controls = [\"play\", \"scrubber\"]
 
 [style-lab]
 palette = [\"apollo\", \"aap-64\"]
@@ -690,6 +692,9 @@ palette = [\"apollo\", \"aap-64\"]
                 "isotrail",
                 "embed",
                 "--base-url=/hikes/",
+                "--controls=play,scrubber",
+                "--duration=5s",
+                "--loop=forever",
                 "--mesher=smooth",
                 "--palette=resurrect-64",
                 "--scale=5",

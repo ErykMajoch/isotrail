@@ -43,7 +43,7 @@ pub struct EncodingArgs {
     ffmpeg: Option<PathBuf>,
 }
 
-fn parse_plays(value: &str) -> Result<Plays, String> {
+pub(crate) fn parse_plays(value: &str) -> Result<Plays, String> {
     match value.trim().to_ascii_lowercase().as_str() {
         "forever" => Ok(Plays::Forever),
         "once" => Ok(Plays::Times(NonZeroU16::MIN)),

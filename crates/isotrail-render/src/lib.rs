@@ -28,8 +28,8 @@ mod timeline;
 mod weather;
 
 pub use camera::{
-    Aim, Aspect, Camera, Canvas, DEFAULT_YAW_OFFSET_DEG, Framing, Insets, MAX_ZOOM, PITCH_DEG,
-    Turntable, View, Viewpoints, route_heading, view_heading,
+    Aim, Aspect, Camera, Canvas, DEFAULT_YAW_OFFSET_DEG, Framing, Insets, MAX_ZOOM, MAX_ZOOM_RANGE,
+    PITCH_DEG, Turntable, View, Viewpoints, route_heading, view_heading,
 };
 pub use diorama::Diorama;
 pub use error::RenderError;

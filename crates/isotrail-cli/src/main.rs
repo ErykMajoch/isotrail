@@ -11,6 +11,7 @@ mod frame;
 mod look;
 mod output;
 mod overlay;
+mod playback;
 mod render;
 mod report;
 mod scene;

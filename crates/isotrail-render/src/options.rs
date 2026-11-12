@@ -3,8 +3,8 @@ use std::ops::RangeInclusive;
 use std::str::FromStr;
 
 use crate::{
-    Background, ForcedWeather, GodRays, HiddenRoute, Layout, Markers, Mesher, Shaped, SmoothMesher,
-    Terrain, VoxelMesher, WeatherEffects,
+    Background, ForcedWeather, GodRays, HiddenRoute, Layout, Markers, Mesher, Pace, Shaped,
+    SmoothMesher, Terrain, VoxelMesher, WeatherEffects,
 };
 
 pub const OCCLUSION_RANGE: RangeInclusive<f32> = 0.0..=1.0;
@@ -359,6 +359,18 @@ impl fmt::Display for MesherKind {
             MesherKind::Voxel => "voxel",
             MesherKind::Smooth => "smooth",
         })
+    }
+}
+
+impl FromStr for Pace {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Pace, String> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "distance" => Ok(Pace::Distance),
+            "time" => Ok(Pace::Time),
+            _ => Err("expected distance or time".to_owned()),
+        }
     }
 }
 

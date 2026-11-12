@@ -108,7 +108,7 @@ import Hike from '../components/Hike.astro';
 | `src` | The scene bundle (`.itb`) to show |
 | `poster` | An image shown straight away, and kept if the browser can't draw the diorama |
 | `aspect` | `story` or `video` (9:16), `portrait` (3:4), `feed` (4:5), `square`, `wide` (16:9, the default), or a width and height such as `3:2`. The element fills its container's width at this aspect |
-| `autoplay` | Plays the route once as soon as the diorama is ready, unless the visitor prefers reduced motion |
+| `autoplay` | Plays as soon as the diorama is ready, unless the visitor prefers reduced motion; `isotrail embed --autoplay` writes it |
 | `backend` | `webgl` forces the WebGL2 fallback, for testing it in a browser that has WebGPU |
 | `credit` | `none` hides the data credit line. Only use it when the page credits the data itself (see below) |
 | `credit-extra` | A line of the page's own, such as a name or site, shown under the data credit; `isotrail embed --credit-extra` writes it |
@@ -151,7 +151,52 @@ The view attributes set where the diorama starts, and where the reset button, 0 
 | `pitch` | `30`, or `10` to `80`: how far the camera looks down, in degrees |
 | `zoom` | `1`, or `0.5` to `2`: above 1 the diorama starts zoomed in; below 1 it leaves more room round the slab |
 
-Changing one of them on a running element redraws it; a new `mesher`, `block-height`, `prop-density`, `paths`, `streams`, `strata` or `base-blocks` builds the terrain again, and a new `turn`, `pitch` or `zoom` goes to the new starting view. A value the element can't use, such as an unknown palette name or a `.hex` file that doesn't load, is left at its default, with a warning in the console.
+The playback attributes set how the route plays, like `isotrail render`'s [animation options](../docs/usage.md#animation) of the same names. `isotrail embed` writes them from its [playback options](../docs/usage.md#playback-and-controls).
+
+| Attribute | Values (default first) |
+|---|---|
+| `duration` | `10`, or `1` to `180` seconds for one play, split as in an animation: 0.5 s on the scene and 8 s drawing the route for every 10 s, then 1.5 s on the finished hike, which only shows between loops |
+| `intro`, `hold` | 5% and 15% of `duration`, or `0` to `180` seconds: on the scene before the route draws, and on the finished hike before the next play. Together they must leave half a second to draw the route |
+| `loop-back` | on its own: between plays, the route undraws and the camera turns back, so a loop runs on without a jump |
+| `orbit` | `30`, or `-360` to `360`: degrees the camera turns while the route draws, easing back to the starting view; `0` keeps it still |
+| `pace` | `distance`, or `time` to follow the recorded times (a hike without times draws at an even speed) |
+| `loop` | not set: one play. On its own or `forever`: plays until paused. A number, such as `3`: that many plays |
+
+These attributes change the element itself:
+
+| Attribute | Values (default first) |
+|---|---|
+| `controls` | `play,zoom,reset,scrubber`, fewer of them, or `none`: the buttons and the progress line to show. Turning and zooming by hand, and the keys, still work |
+| `max-zoom` | `3`, or `1` to `6`: the largest zoom a visitor can reach |
+| `lang` | the page's: the language of the [words](#words) the element shows and reads out. `en` and `pl` are built in; any other is English unless `strings` gives its words. Like any `lang`, the element takes it from the page (`<html lang="pl">`) when it has none of its own |
+| `strings` | a JSON object of [words](#words) to use instead of the built-in ones, such as `{"play": "Start"}`; `isotrail embed --strings FILE` writes it from a file |
+| `theme` | the address of a [theme file](../docs/configuration.md#theme-files), such as `/hikes/autumn.toml`, for the diorama's colours and light; `isotrail embed --theme` copies the file and writes it. Its `[labels]` aren't used: the live diorama draws no text |
+
+Changing one of them on a running element redraws it; a new `mesher`, `block-height`, `prop-density`, `paths`, `streams`, `strata` or `base-blocks` builds the terrain again, and a new `turn`, `pitch` or `zoom` goes to the new starting view. A value the element can't use, such as an unknown palette name or a `.hex` or theme file that doesn't load, is left at its default, with a warning in the console. A new playback attribute applies from the next play.
+
+### Words
+
+Every word the element shows or reads out to screen readers can be replaced with `strings`. `{key}` stands for Ctrl, or ⌘ on a Mac, and the other names in braces are filled in where the word is used:
+
+| Word | English |
+|---|---|
+| `play`, `pause` | Play, Pause (the play button's label) |
+| `zoomIn`, `zoomOut`, `reset` | Zoom in, Zoom out, Reset view |
+| `scrubber` | Route drawn (the progress line's label) |
+| `progress` | `{percent}%` (how the progress line reads out) |
+| `help` | how to turn, zoom and move the diorama, read out with it |
+| `wheelHint` | Hold `{key}` and scroll to zoom |
+| `poster` | Hike diorama (the poster's description, unless the image inside the element has its own) |
+| `diorama` | 3D diorama of `{title}` (the diorama's description) |
+| `untitled` | a hike (the title of a hike without one) |
+| `load`, `damaged`, `version`, `gpu`, `runtime` | the messages in [When something fails](#when-something-fails) |
+
+```html
+<isotrail-hike src="/hikes/rysy.itb" lang="de"
+  strings='{"play": "Abspielen", "pause": "Anhalten", "reset": "Ansicht zurücksetzen"}'></isotrail-hike>
+```
+
+Words left out keep the built-in ones for the language, or English.
 
 The poster shows at once. The renderer (about 1.2 MB gzipped) only downloads when the element comes near the screen, and it downloads once however many hikes are on the page. When an element has been well off screen for a few seconds it frees its renderer and shows its poster, and starts again when it comes back; browsers only give a page about 16 WebGL contexts, so a page with many hikes keeps working as it scrolls. A view the visitor turned or zoomed starts again from the starting view when this happens.
 
@@ -177,8 +222,12 @@ A warning with the details also goes to the console. A failed element stays as i
 |---|---|---|
 | `isotrail-ready` | the diorama has drawn its first frame and replaced the poster | `{ backend }`: `"webgpu"` or `"gl"` |
 | `isotrail-error` | the element gave up and shows its poster or a message | `{ reason, message }`, with `reason` from the table above |
+| `isotrail-play` | playing starts, from the play button, the keyboard, `autoplay` or `play()` | `{ progress }` |
+| `isotrail-pause` | playing stops: paused, scrubbed, or at the end of the last play (just before `isotrail-ended`) | `{ progress }` |
+| `isotrail-ended` | the last play has reached the finish | `{ progress }` |
+| `isotrail-progress` | the share of the route drawn changes: on every frame while it plays, and when it is scrubbed or set | `{ progress }`, from 0 to 1 |
 
-Both bubble, and cross shadow roots:
+All of them bubble, and cross shadow roots:
 
 ```js
 document.addEventListener('isotrail-error', (event) => {
@@ -197,14 +246,38 @@ The line can be restyled with `::part(credit)`. If you hide it, with `credit="no
 | | Mouse and trackpad | Touch | Keyboard (the diorama focused) |
 |---|---|---|---|
 | Turn | drag (Shift-drag or right-drag when zoomed in) | drag, or twist two fingers | ← → |
-| Zoom (up to 3×) | Ctrl/⌘ + scroll, pinch, or the − + buttons | pinch | + − |
+| Zoom (up to 3×, or `max-zoom`) | Ctrl/⌘ + scroll, pinch, or the − + buttons | pinch | + − |
 | Move around when zoomed in | drag | drag | Shift + arrows |
 | Back to the start view | the reset button | the reset button | 0 or Home |
 | Play and pause | the play button | the play button | Space or K |
 
-A plain mouse wheel keeps scrolling the page, and shows a reminder to hold Ctrl (⌘ on a Mac). Playing draws the route over about eight seconds, while the camera settles back to the start view as in the animated exports. The line along the diorama's bottom edge shows how much of the route is drawn, in the route's colour; click or drag along it to scrub, or focus it and use the arrow keys. The light follows the time at the route's head, through any nights of a multi-day trek, as in the animated exports; until the visitor plays or scrubs, the diorama shows the light at the start, as on the poster. The weather follows the same clock, and rain and snow keep falling while the diorama is on screen, unless the visitor prefers reduced motion. The season, with its snow and ice, is the one saved in the bundle; `isotrail embed --season` saves another. The light has the same depth as in the stills, with beams of sunlight when the sun breaks through a partly cloudy sky. The play button sits in the bottom-left corner, and the zoom and reset buttons in the bottom-right. Zooming never shows more than the whole slab, and the zoom centres on the pointer.
+A plain mouse wheel keeps scrolling the page, and shows a reminder to hold Ctrl (⌘ on a Mac). Playing draws the route over about eight seconds (or as `duration`, `intro` and `orbit` say), while the camera settles back to the start view as in the animated exports, and stops on the finished hike unless `loop` plays it again. Turning the diorama by hand while it plays stops the camera's own turn. The line along the diorama's bottom edge shows how much of the route is drawn, in the route's colour; click or drag along it to scrub, or focus it and use the arrow keys. The light follows the time at the route's head, through any nights of a multi-day trek, as in the animated exports; until the visitor plays or scrubs, the diorama shows the light at the start, as on the poster. The weather follows the same clock, and rain and snow keep falling while the diorama is on screen, unless the visitor prefers reduced motion. The season, with its snow and ice, is the one saved in the bundle; `isotrail embed --season` saves another. The light has the same depth as in the stills, with beams of sunlight when the sun breaks through a partly cloudy sky. The play button sits in the bottom-left corner, and the zoom and reset buttons in the bottom-right. Zooming never shows more than the whole slab, and the zoom centres on the pointer.
 
-Scripts can call `play()` and `pause()` on the element, and read `playing`.
+### Scripting the element
+
+| Member | What it does |
+|---|---|
+| `play()` | Plays from the start, or from where it was paused or scrubbed to. Called before the diorama is ready, it plays as soon as it is |
+| `pause()` | Pauses |
+| `playing` | `true` while it plays |
+| `progress` | The share of the route drawn, from 0 to 1, as the progress line shows. Setting it moves the line, like scrubbing, and playing carries on from there |
+| `reset()` | Back to the starting view, as the reset button does; playback is left as it is |
+| `ready` | A promise that resolves with `{ backend }` once the diorama has replaced the poster, or rejects with an `Error` whose `reason` is one of [When something fails](#when-something-fails). A new `src` gives a new promise |
+
+Wait for the element to be defined before calling its methods from a module that may run first:
+
+```js
+await customElements.whenDefined('isotrail-hike');
+const hike = document.querySelector('isotrail-hike');
+hike.addEventListener('isotrail-ended', () => console.log('finished'));
+try {
+  await hike.ready;
+  hike.progress = 0.5;   // halfway along the route
+  hike.play();
+} catch (error) {
+  console.log('no diorama:', error.reason);
+}
+```
 
 ### Styling
 
@@ -248,7 +321,7 @@ Serve the `web/` folder with any static file server, and open `/demo/`:
 python -m http.server -d web 8000    # then open http://localhost:8000/demo/
 ```
 
-The page shows the synthetic hike twice: wide with a poster, and square, playing on its own. A link at the top switches both to the WebGL2 fallback (`?backend=webgl` in the address).
+The page shows the synthetic hike three times: wide with a poster, square, playing on its own and looping, and wide without controls. A link at the top switches both to the WebGL2 fallback (`?backend=webgl` in the address).
 
 To try it on a phone on the same network, serve it to the network with `python -m http.server -d web 8000 --bind 0.0.0.0` and open `http://<your computer's address>:8000/demo/` on the phone. Browsers only offer WebGPU on secure pages (HTTPS or `localhost`), so a plain `http://` address like this uses WebGL2.
 
@@ -270,9 +343,10 @@ viewer.zoomBy(1.5, x, y);                     // zoom, keeping canvas pixel (x, 
 viewer.pan(dx, dy);                           // move with a drag of (dx, dy) canvas pixels
 viewer.resetView();                           // back to the starting view
 viewer.setTime(performance.now() / 1000);     // moves rain, snow and clouds on: any steadily rising clock, in seconds
-viewer.setOptions({ mesher: 'smooth', time: '20:30' });   // changes the look and starting view
+viewer.setOptions({ mesher: 'smooth', time: '20:30', pace: 'time', maxZoom: 6, theme: text });   // changes the look, pace and starting view
 viewer.draw();
-console.log(viewer.backend, viewer.zoom, viewer.title);   // "webgpu" or "gl", 1 to 3, the hike's name
+console.log(viewer.backend, viewer.zoom, viewer.maxZoom, viewer.title);   // "webgpu" or "gl", 1 to maxZoom, 3 to 6, the hike's name
+console.log(viewer.routeColour);              // "#d64834", or the colour the options or theme give the route
 console.log(viewer.credit);                   // the data credits, joined with " · "
 console.log(viewer.weatherMoves);             // true while rain or snow falls, so frames keep changing
 viewer.onLost((message) => { ... });          // the GPU was lost: free the viewer and load again
@@ -281,13 +355,13 @@ viewer.free();                                // releases the GPU memory at once
 
 Nothing is drawn until the first `resize`. Until the first `setProgress`, the whole route shows under the light at the start, as on the poster; `setProgress` draws the route at an even speed with a pause for each night of a multi-day trek, lit by the time at its head. Each art pixel covers a whole number of device pixels, chosen so that the frame's long side is at most 640 pixels, as in a still rendered at `--scale 3`. Call `resize` again whenever the canvas changes size, and `draw` after any change. While `weatherMoves` is true, keep calling `setTime` and `draw` every frame for the rain and snow to fall.
 
-The look is an object with any of `palette` (a built-in name, `none`, or the text of a `.hex` file: the element fetches files for you, the API doesn't), `mesher`, `blockHeight`, `occlusion`, `softShadows`, `godRays`, `background` and `time`, and the starting view's `turn`, `pitch` and `zoom`, taking the same values as the element's attributes, as strings or numbers. Each one left out or unusable takes its default; unusable ones also warn in the console. `setOptions` replaces the whole look, and throws an error with reason `"gpu"` if the GPU can't hold the terrain a new mesher builds.
+The look is an object with any of `palette` (a built-in name, `none`, or the text of a `.hex` file: the element fetches files for you, the API doesn't), `mesher`, `blockHeight`, `occlusion`, `softShadows`, `godRays`, `background` and `time`, the scene, light and route options, the starting view's `turn`, `pitch` and `zoom`, `maxZoom`, `pace` (for `setProgress`) and `theme` (the text of a theme file, under all the others), taking the same values as the element's attributes, as strings or numbers. Each one left out or unusable takes its default; unusable ones also warn in the console. `setOptions` replaces the whole look, and throws an error with reason `"gpu"` if the GPU can't hold the terrain a new mesher builds.
 
 Arguments that aren't finite numbers, such as `NaN`, are ignored. `Viewer.load` rejects with an `Error` whose `reason` is `"version"`, `"damaged"` or `"gpu"`, as in [When something fails](#when-something-fails); `resize` throws one with reason `"gpu"` if the GPU can't hold the diorama at that size. After any error from the viewer, free it. `onLost` is only called on WebGPU; on WebGL2, listen for `webglcontextlost` on the canvas.
 
 ## Testing the element
 
-`web/test/check.mjs` loads synthetic hikes into headless Chrome or Edge and checks the element: the credit, the focus ring, each failure's message and event, a lost GPU, twenty embeds on one page, touch targets, a strict Content-Security-Policy, and that playing creates no GPU objects. It needs Node 22 or later and the runtime built with `sh web/build.sh`:
+`web/test/check.mjs` loads synthetic hikes into headless Chrome or Edge and checks the element: the credit, the focus ring, each failure's message and event, a lost GPU, every attribute, playback with its events and loops, the script API, the words in Polish and from `strings`, a theme file, twenty embeds on one page, touch targets, a strict Content-Security-Policy, and that playing creates no GPU objects. It needs Node 22 or later and the runtime built with `sh web/build.sh`:
 
 ```bash
 node web/test/check.mjs chrome           # WebGPU where the browser has it

@@ -59,7 +59,7 @@
   <main>
     <h1>isotrail embed demo</h1>
     <p>
-      A synthetic hike in two <code>&lt;isotrail-hike&gt;</code> elements. Drag to turn it, pinch or hold
+      A synthetic hike in three <code>&lt;isotrail-hike&gt;</code> elements. Drag to turn it, pinch or hold
       Ctrl (⌘ on a Mac) and scroll to zoom, and press play to watch the route draw itself.
       <a id="backend" href="?backend=webgl">Try the WebGL2 fallback</a>
     </p>
@@ -67,10 +67,14 @@
     <h2>Wide, with a poster</h2>
     <isotrail-hike src="hike.itb" poster="hike.png" aspect="wide" style="display:block;aspect-ratio:16/9"><img src="hike.png" alt="Diorama of a synthetic hike" style="display:block;width:100%"></isotrail-hike>
 
-    <h2>Square, playing on its own</h2>
+    <h2>Square, playing on its own and looping</h2>
     <div class="square">
-      <isotrail-hike src="hike.itb" aspect="square" autoplay></isotrail-hike>
+      <isotrail-hike src="hike.itb" aspect="square" autoplay loop loop-back duration="12"></isotrail-hike>
     </div>
+
+    <h2>Without controls</h2>
+    <p>Drag to turn it; with the diorama focused, Space plays the route.</p>
+    <isotrail-hike src="hike.itb" aspect="wide" controls="none" orbit="0"></isotrail-hike>
   </main>
 </body>
 </html>

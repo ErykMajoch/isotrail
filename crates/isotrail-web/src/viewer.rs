@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use glam::Vec2;
 use isotrail_bundle::{BundleError, SceneBundle};
 use isotrail_render::{
-    Diorama, Framing, Gpu, Insets, OffscreenTarget, Pace, PixelGrid, Present, SunState,
-    TerrainMesh, TerrainRenderer, View, Viewpoints, Walk, When, credit_line, mesh_within,
+    Diorama, Framing, Gpu, Insets, OffscreenTarget, PixelGrid, Present, SunState, TerrainMesh,
+    TerrainRenderer, View, Viewpoints, Walk, When, credit_line, mesh_within,
 };
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
@@ -124,7 +124,7 @@ impl Viewer {
         let options = Options::read(&options, &bundle);
         let mesh = mesh_within(options.mesher().as_ref(), &bundle, gpu.max_buffer_size())
             .map_err(|err| failure("gpu", err))?;
-        let walk = Walk::new(&bundle);
+        let walk = Walk::paced(&bundle, options.pacing);
         let sun = options
             .held_sun
             .unwrap_or_else(|| SunState::seen(&bundle, When::Start, &options.conditions));
@@ -175,10 +175,23 @@ impl Viewer {
         credit_line(&self.bundle).unwrap_or_default()
     }
 
-    /// Magnification, from 1 (the whole slab) to 3
+    /// Magnification, from 1 (the whole slab) to `maxZoom`
     #[wasm_bindgen(getter)]
     pub fn zoom(&self) -> f32 {
         self.view.zoom
+    }
+
+    /// The largest magnification, 3 unless the options set another
+    #[wasm_bindgen(getter, js_name = maxZoom)]
+    pub fn max_zoom(&self) -> f32 {
+        self.options.max_zoom
+    }
+
+    /// The route's colour as `#rrggbb`, from the options or the theme
+    #[wasm_bindgen(getter, js_name = routeColour)]
+    pub fn route_colour(&self) -> String {
+        let [r, g, b] = self.options.look.route.colour;
+        format!("#{r:02x}{g:02x}{b:02x}")
     }
 
     /// Sets the canvas's drawing buffer size in device pixels, and the pixel
@@ -213,16 +226,21 @@ impl Viewer {
     /// held like `time`); the route's `routeColour` (`"#rrggbb"`),
     /// `routeWidth` (1 to 4), `routeHidden` (`"dashed"`, `"dim"`, `"solid"`
     /// or `"off"`) and `markers` (`"start,finish,head"` or fewer, or
-    /// `"none"`); and `turn` (degrees, -360 to 360), `pitch` (degrees, 10 to
-    /// 80) and `zoom` (0.5 to 2) for the view it starts from and resets to.
-    /// Values may be strings or numbers; one it can't use stays at its
-    /// default with a console warning. Fails with reason `"gpu"` when the
-    /// GPU can't hold the terrain the new options build
+    /// `"none"`); `turn` (degrees, -360 to 360), `pitch` (degrees, 10 to
+    /// 80) and `zoom` (0.5 to 2) for the view it starts from and resets to;
+    /// `maxZoom` (1 to 6, default 3); `pace` (`"distance"` or `"time"`) for
+    /// `setProgress`; and `theme`, the text of a theme file, under all of
+    /// these. Values may be strings or numbers; one it can't use stays at
+    /// its default with a console warning. Fails with reason `"gpu"` when
+    /// the GPU can't hold the terrain the new options build
     #[wasm_bindgen(js_name = setOptions)]
     pub fn set_options(&mut self, options: JsValue) -> Result<(), JsValue> {
         let options = Options::read(&options, &self.bundle);
         let remesh = self.options.remeshes(&options);
         let refit = self.options.refits(&options);
+        if options.pacing != self.options.pacing {
+            self.walk = Walk::paced(&self.bundle, options.pacing);
+        }
         self.options = options;
         if remesh {
             self.mesh = mesh_within(
@@ -235,10 +253,17 @@ impl Viewer {
         if refit {
             self.view = self.options.start_view();
         }
+        if let Some(stage) = &mut self.stage {
+            stage.diorama.set_max_zoom(self.options.max_zoom);
+            self.view = stage.diorama.turntable().clamp(self.view);
+        }
         if (remesh || refit)
             && let Some(grid) = self.stage.take().map(|stage| stage.grid)
         {
             self.build_stage(grid)?;
+        }
+        if let Some(share) = self.share {
+            self.progress = self.walk.step(self.options.pace, share).progress;
         }
         self.light();
         Ok(())
@@ -253,7 +278,7 @@ impl Viewer {
         };
         let turn: Vec<f32> = (0..360).step_by(FIT_STEP_DEG).map(|d| d as f32).collect();
         self.stage = None;
-        let diorama = Diorama::new(
+        let mut diorama = Diorama::new(
             &self.gpu,
             &self.renderer,
             &self.bundle,
@@ -266,6 +291,7 @@ impl Viewer {
             self.sun,
         )
         .map_err(|err| failure("gpu", err))?;
+        diorama.set_max_zoom(self.options.max_zoom);
         let frame = OffscreenTarget::new(&self.gpu, grid.width, grid.height);
         // At the new scale the focus can fall outside the whole-slab view
         self.view = diorama.turntable().clamp(self.view);
@@ -277,8 +303,9 @@ impl Viewer {
         Ok(())
     }
 
-    /// How far through drawing the route, from 0 to 1, at an even speed with
-    /// a pause for each night, lit by the time at the route's head; until
+    /// How far through drawing the route, from 0 to 1, at an even speed (or
+    /// following the recorded times, with `pace: "time"`) with a pause for
+    /// each night, lit by the time at the route's head; until
     /// this is first called, the whole route shows under the sun at the
     /// start, as on the poster
     #[wasm_bindgen(js_name = setProgress)]
@@ -287,7 +314,7 @@ impl Viewer {
             return;
         }
         self.share = Some(share);
-        self.progress = self.walk.step(Pace::Distance, share).progress;
+        self.progress = self.walk.step(self.options.pace, share).progress;
         self.light();
     }
 
@@ -411,7 +438,7 @@ impl Viewer {
     fn light(&mut self) {
         let step = self
             .share
-            .map(|share| self.walk.step(Pace::Distance, share));
+            .map(|share| self.walk.step(self.options.pace, share));
         let conditions = &self.options.conditions;
         self.sun = match (self.options.held_sun, step.and_then(|step| step.time_s)) {
             (Some(held), _) => held,

@@ -44,11 +44,21 @@ const LOOK = {
   'route-hidden': 'routeHidden',
   markers: 'markers',
 };
+// Attributes the renderer takes besides the look
+const VIEWER = { ...LOOK, pace: 'pace', 'max-zoom': 'maxZoom' };
+const CLIP = ['duration', 'intro', 'hold', 'loop-back', 'orbit', 'loop'];
+const CONTROLS = ['play', 'zoom', 'reset', 'scrubber'];
 const ROUTE_COLOUR = /^#[0-9a-f]{6}$/i;
-const INTRO_S = 0.5;
-const DRAW_S = 8;
+// The parts of a clip, as the animated exports split it
+const DURATION_S = 10;
+const MAX_DURATION_S = 180;
+const INTRO_SHARE = 0.05;
+const DRAW_SHARE = 0.8;
+const HOLD_SHARE = 0.15;
+const REWIND_SHARE = 0.15;
+const MIN_DRAW_S = 0.5;
 const ORBIT_DEG = 30;
-const MAX_ZOOM = 3;
+const MAX_PLAYS = 1000;
 const TURN_PER_PX = 0.4;
 const KEY_TURN_DEG = 10;
 const KEY_PAN_PX = 40;
@@ -62,12 +72,47 @@ const RELEASE_MS = 3000;
 // A second lost GPU this soon after the first keeps the poster
 const RESTART_WINDOW_MS = 60000;
 
-const MESSAGES = {
-  load: "This hike couldn't be loaded.",
-  damaged: "This hike couldn't be loaded.",
-  version: 'This hike was saved by a different version of isotrail.',
-  gpu: "This browser can't show the 3D view.",
-  runtime: "This browser can't show the 3D view.",
+// Every word the element shows or reads out, by language; {key} is Ctrl
+// or ⌘, and the other {names} are filled in where they are used
+const WORDS = {
+  en: {
+    play: 'Play',
+    pause: 'Pause',
+    zoomIn: 'Zoom in',
+    zoomOut: 'Zoom out',
+    reset: 'Reset view',
+    scrubber: 'Route drawn',
+    progress: '{percent}%',
+    help: 'Drag to turn the diorama. Pinch, or hold {key} and scroll, to zoom; once zoomed in, drag to move around and Shift-drag to turn. Keys: left and right arrows turn, plus and minus zoom, Shift with the arrows moves, 0 resets the view, Space plays and pauses.',
+    wheelHint: 'Hold {key} and scroll to zoom',
+    poster: 'Hike diorama',
+    diorama: '3D diorama of {title}',
+    untitled: 'a hike',
+    load: "This hike couldn't be loaded.",
+    damaged: "This hike couldn't be loaded.",
+    version: 'This hike was saved by a different version of isotrail.',
+    gpu: "This browser can't show the 3D view.",
+    runtime: "This browser can't show the 3D view.",
+  },
+  pl: {
+    play: 'Odtwórz',
+    pause: 'Wstrzymaj',
+    zoomIn: 'Przybliż',
+    zoomOut: 'Oddal',
+    reset: 'Przywróć widok',
+    scrubber: 'Narysowana część trasy',
+    progress: '{percent}%',
+    help: 'Przeciągnij, aby obrócić dioramę. Aby przybliżyć, rozsuń palce albo przytrzymaj {key} i przewiń; po przybliżeniu przeciągaj, aby się przesuwać, a z wciśniętym Shiftem, aby obracać. Klawisze: strzałki w lewo i w prawo obracają, plus i minus przybliżają i oddalają, Shift ze strzałkami przesuwa, 0 przywraca widok, spacja odtwarza i wstrzymuje.',
+    wheelHint: 'Przytrzymaj {key} i przewiń, aby przybliżyć',
+    poster: 'Diorama wędrówki',
+    diorama: 'Diorama 3D: {title}',
+    untitled: 'wędrówka',
+    load: 'Nie udało się wczytać tej wędrówki.',
+    damaged: 'Nie udało się wczytać tej wędrówki.',
+    version: 'Tę wędrówkę zapisała inna wersja isotrail.',
+    gpu: 'Ta przeglądarka nie może pokazać widoku 3D.',
+    runtime: 'Ta przeglądarka nie może pokazać widoku 3D.',
+  },
 };
 const CREDIT_LINKS = {
   OpenStreetMap: 'https://www.openstreetmap.org/copyright',
@@ -120,8 +165,138 @@ function ease(x) {
   return (1 - Math.cos(Math.PI * Math.min(Math.max(x, 0), 1))) / 2;
 }
 
-function orbit(time) {
-  return -ORBIT_DEG * (1 - ease(time / (INTRO_S + DRAW_S)));
+function fill(text, values) {
+  return text.replace(/\{(\w+)\}/g, (match, name) => values[name] ?? match);
+}
+
+function ignored(name, value, reason) {
+  const shown = String(value).slice(0, 40);
+  console.warn(`<isotrail-hike> ignored ${name} ${JSON.stringify(shown)}, so it uses the default: ${reason}`);
+}
+
+// Seconds such as 10 or 2.5s, within a range
+function seconds(element, name, min, fallback) {
+  const value = element.getAttribute(name);
+  if (value === null || value.trim() === '') return fallback;
+  const number = Number(value.trim().replace(/s$/, ''));
+  if (Number.isFinite(number) && number >= min && number <= MAX_DURATION_S) return number;
+  ignored(name, value, `must be between ${min} and ${MAX_DURATION_S} seconds`);
+  return fallback;
+}
+
+// How a play runs, in seconds, split as in the animated exports: the intro
+// showing the scene, the route drawing itself, the hold on the finished
+// hike and, with loop-back, the rewind; the hold and the rewind only play
+// between loops
+function readClip(element) {
+  const duration = seconds(element, 'duration', 1, DURATION_S);
+  let intro = seconds(element, 'intro', 0, null);
+  let hold = seconds(element, 'hold', 0, null);
+  const loopBack = element.hasAttribute('loop-back');
+  const parts = () => {
+    const share = (s, fallback) => (s === null ? fallback : s / duration);
+    const rewind = loopBack ? REWIND_SHARE : 0;
+    const draw =
+      intro === null && hold === null && !loopBack
+        ? DRAW_SHARE
+        : 1 - share(intro, INTRO_SHARE) - share(hold, HOLD_SHARE) - rewind;
+    return [share(intro, INTRO_SHARE), draw, share(hold, HOLD_SHARE)].map((s) => s * duration);
+  };
+  let [introS, drawS, holdS] = parts();
+  if (drawS < MIN_DRAW_S - 1e-4) {
+    console.warn(
+      `<isotrail-hike> ignored intro and hold, so they use the default: a ${duration} s clip would leave ${Math.max(drawS, 0).toFixed(2)} s to draw the route, and it needs at least ${MIN_DRAW_S} s`,
+    );
+    intro = null;
+    hold = null;
+    [introS, drawS, holdS] = parts();
+  }
+  let orbit = ORBIT_DEG;
+  const orbitValue = element.getAttribute('orbit');
+  if (orbitValue !== null && orbitValue.trim() !== '') {
+    const number = Number(orbitValue);
+    if (Number.isFinite(number) && Math.abs(number) <= 360) orbit = number;
+    else ignored('orbit', orbitValue, 'must be between -360 and 360');
+  }
+  let plays = 1;
+  const loop = element.getAttribute('loop');
+  if (loop !== null) {
+    const word = loop.trim().toLowerCase();
+    const count = Number(word);
+    if (word === '' || word === 'forever') plays = Infinity;
+    else if (word === 'once') plays = 1;
+    else if (Number.isInteger(count) && count >= 1 && count <= MAX_PLAYS) plays = count;
+    else ignored('loop', loop, `expected forever, once or a number of plays from 1 to ${MAX_PLAYS}`);
+  }
+  const settled = introS + drawS;
+  const rewindStart = settled + holdS;
+  const rewound = (time) =>
+    loopBack && time >= rewindStart && duration > rewindStart
+      ? Math.min((time - rewindStart) / (duration - rewindStart), 1)
+      : null;
+  return {
+    duration,
+    intro: introS,
+    draw: drawS,
+    settled,
+    plays,
+    // Share of the route drawn at a time in the clip
+    share(time) {
+      const back = rewound(time);
+      if (back !== null) return 1 - ease(back);
+      return Math.min(Math.max((time - introS) / drawS, 0), 1);
+    },
+    // Degrees turned from the still's view, easing back to it as the route
+    // finishes, and away again as it rewinds
+    yaw(time) {
+      const back = rewound(time);
+      if (back !== null) return -orbit * ease(back);
+      return time >= settled ? 0 : -orbit * (1 - ease(time / settled));
+    },
+  };
+}
+
+// The built-in words for the element's language, or the page's, under any
+// the strings attribute gives
+function readWords(element) {
+  const tag = (element.closest('[lang]')?.getAttribute('lang') ?? '').trim().toLowerCase();
+  const words = { ...WORDS.en, ...(WORDS[tag.split('-')[0]] ?? {}) };
+  const strings = element.getAttribute('strings');
+  if (strings === null || strings.trim() === '') return words;
+  let given;
+  try {
+    given = JSON.parse(strings);
+  } catch (error) {
+    ignored('strings', strings, `not JSON: ${error.message}`);
+    return words;
+  }
+  if (typeof given !== 'object' || given === null || Array.isArray(given)) {
+    ignored('strings', strings, 'expected a JSON object of words');
+    return words;
+  }
+  for (const [name, text] of Object.entries(given)) {
+    if (!(name in WORDS.en)) {
+      ignored('strings', name, `unknown word; the words are ${Object.keys(WORDS.en).join(', ')}`);
+    } else if (typeof text !== 'string') {
+      ignored(`strings.${name}`, JSON.stringify(text), 'expected text');
+    } else {
+      words[name] = text;
+    }
+  }
+  return words;
+}
+
+// The controls to show, all by default
+function readControls(element) {
+  const value = element.getAttribute('controls');
+  if (value === null || value.trim() === '') return new Set(CONTROLS);
+  if (value.trim().toLowerCase() === 'none') return new Set();
+  const shown = new Set();
+  for (const name of value.split(',').map((part) => part.trim().toLowerCase())) {
+    if (CONTROLS.includes(name)) shown.add(name);
+    else ignored('controls', name, `expected ${CONTROLS.join(', ')} or none`);
+  }
+  return shown;
 }
 
 const icon = (body) =>
@@ -248,6 +423,7 @@ const CSS = `
   button:hover::before { background-color: rgb(52 70 80 / 0.9); }
   button:focus-visible::before { box-shadow: inset 0 0 0 2px var(--isotrail-accent); }
   button[aria-disabled="true"] { cursor: default; }
+  button[hidden], input[hidden] { display: none; }
   button[aria-disabled="true"] svg { opacity: 0.4; }
   svg {
     position: relative;
@@ -354,29 +530,40 @@ function adoptStyles(root) {
 const template = document.createElement('template');
 template.innerHTML = `
 <div class="frame">
-  <img alt="Hike diorama">
-  <div class="message">${MESSAGES.gpu}</div>
+  <img alt="">
+  <div class="message"></div>
   <div class="hint" aria-live="polite"></div>
   <div class="controls">
-    <input type="range" part="scrubber" min="0" max="1000" value="1000" aria-label="Route drawn">
+    <input type="range" part="scrubber" min="0" max="1000" value="1000">
     <div class="bar">
       <div class="buttons">
-        <button type="button" part="play" data-action="play" aria-label="Play">${ICONS.play}</button>
+        <button type="button" part="play" data-action="play">${ICONS.play}</button>
       </div>
       <p class="credit" part="credit"></p>
       <div class="buttons">
-        <button type="button" part="zoom-out" data-action="zoom-out" aria-label="Zoom out">${ICONS.zoomOut}</button>
-        <button type="button" part="zoom-in" data-action="zoom-in" aria-label="Zoom in">${ICONS.zoomIn}</button>
-        <button type="button" part="reset" data-action="reset" aria-label="Reset view">${ICONS.reset}</button>
+        <button type="button" part="zoom-out" data-action="zoom-out">${ICONS.zoomOut}</button>
+        <button type="button" part="zoom-in" data-action="zoom-in">${ICONS.zoomIn}</button>
+        <button type="button" part="reset" data-action="reset">${ICONS.reset}</button>
       </div>
     </div>
   </div>
 </div>
-<p class="help" id="help">Drag to turn the diorama. Pinch, or hold ${ZOOM_KEY} and scroll, to zoom; once zoomed in, drag to move around and Shift-drag to turn. Keys: left and right arrows turn, plus and minus zoom, Shift with the arrows moves, 0 resets the view, Space plays and pauses.</p>
+<p class="help" id="help"></p>
 `;
 
 class IsotrailHike extends HTMLElement {
-  static observedAttributes = ['src', 'poster', 'aspect', 'credit-extra', ...Object.keys(LOOK)];
+  static observedAttributes = [
+    'src',
+    'poster',
+    'aspect',
+    'credit-extra',
+    'theme',
+    'controls',
+    'lang',
+    'strings',
+    ...CLIP,
+    ...Object.keys(VIEWER),
+  ];
 
   #frameBox;
   #poster;
@@ -389,8 +576,13 @@ class IsotrailHike extends HTMLElement {
   #scrubber;
   #zoomIn;
   #zoomOut;
+  #resetButton;
+  #help;
   #hint;
   #hintTimer = 0;
+  #words = WORDS.en;
+  #failure = null;
+  #title = '';
 
   #viewer = null;
   #webgl = false;
@@ -404,13 +596,18 @@ class IsotrailHike extends HTMLElement {
   #drawn = false;
   #restartedAt = null;
   #lookChanges = 0;
+  #ready = null;
 
+  #clip = null;
   #progress = 1;
-  // Until played or scrubbed, the viewer shows the poster's light
+  // Until played, scrubbed or set, the viewer shows the poster's light
   #moved = false;
   #yaw = 0;
-  #time = INTRO_S + DRAW_S;
+  #time = 0;
+  #playsLeft = 1;
   #playing = false;
+  // play() before the diorama is up
+  #wantsPlay = false;
   #settling = false;
   #last = null;
   #pointers = new Map();
@@ -429,22 +626,24 @@ class IsotrailHike extends HTMLElement {
     this.#scrubber = root.querySelector('input');
     this.#zoomIn = root.querySelector('[data-action="zoom-in"]');
     this.#zoomOut = root.querySelector('[data-action="zoom-out"]');
+    this.#resetButton = root.querySelector('[data-action="reset"]');
+    this.#help = root.querySelector('.help');
     this.#hint = root.querySelector('.hint');
+    this.#newReady();
+    this.#clip = readClip(this);
+    this.#time = this.#clip.settled;
 
     this.#controls.addEventListener('click', (event) => this.#onButton(event));
     this.#scrubber.addEventListener('input', () => {
       this.pause();
-      this.#cancelSettle();
-      this.#progress = this.#scrubber.value / 1000;
-      this.#moved = true;
-      this.#time = INTRO_S + this.#progress * DRAW_S;
-      this.#syncScrubber();
-      this.#schedule();
+      this.#seek(this.#scrubber.value / 1000);
     });
   }
 
   connectedCallback() {
     this.#syncPoster();
+    this.#applyWords();
+    this.#applyControls();
     if (!this.hasAttribute('data-state')) this.#setState('poster');
     this.#intersection = new IntersectionObserver((entries) => this.#onIntersect(entries), {
       rootMargin: '200px',
@@ -461,7 +660,7 @@ class IsotrailHike extends HTMLElement {
     this.#setState('poster');
   }
 
-  attributeChangedCallback(name, _old, value) {
+  attributeChangedCallback(name, old, value) {
     if (name === 'aspect') {
       const ratio = aspectRatio(value);
       this.style.setProperty('--isotrail-aspect', ratio);
@@ -469,13 +668,26 @@ class IsotrailHike extends HTMLElement {
       if (this.style.aspectRatio) this.style.aspectRatio = ratio;
     } else if (name === 'poster') {
       this.#syncPoster();
-    } else if (name === 'src' && this.#started) {
-      this.#teardown();
-      this.#setState('poster');
-      if (this.#near) this.#start();
+    } else if (name === 'src') {
+      if (old !== value && this.#ready.state !== 'pending') this.#newReady();
+      if (this.#started) {
+        this.#teardown();
+        this.#setState('poster');
+        if (this.#near) this.#start();
+      }
     } else if (name === 'credit-extra') {
       if (this.#viewer) this.#showCredit(this.#creditText);
-    } else if (name in LOOK) {
+    } else if (name === 'lang' || name === 'strings') {
+      if (this.isConnected) this.#applyWords();
+    } else if (name === 'controls') {
+      if (this.isConnected) this.#applyControls();
+    } else if (CLIP.includes(name)) {
+      this.#clip = readClip(this);
+      this.#playsLeft = Math.min(this.#playsLeft, this.#clip.plays);
+      this.#time = this.#playing
+        ? Math.min(this.#time, this.#clip.duration)
+        : this.#clip.intro + this.#progress * this.#clip.draw;
+    } else if (name in VIEWER || name === 'theme') {
       if (name === 'route-colour') {
         // The progress line follows the route unless the page sets its own
         const colour = ROUTE_COLOUR.test(value ?? '') ? value : null;
@@ -490,26 +702,91 @@ class IsotrailHike extends HTMLElement {
     return this.#playing;
   }
 
+  // How much of the route is drawn, from 0 to 1, as the progress line shows
+  get progress() {
+    return this.#progress;
+  }
+
+  set progress(value) {
+    const share = Number(value);
+    if (!Number.isFinite(share)) return;
+    this.#seek(Math.min(Math.max(share, 0), 1));
+  }
+
+  // Settles once the diorama has replaced the poster, or the element gives up
+  get ready() {
+    return this.#ready.promise;
+  }
+
   play() {
-    if (!this.#viewer || this.#playing) return;
+    if (this.#playing) return;
+    if (!this.#viewer) {
+      this.#wantsPlay = true;
+      return;
+    }
+    this.#wantsPlay = false;
     this.#moved = true;
-    if (this.#progress >= 1) {
+    const clip = this.#clip;
+    const restart = this.#progress >= 1 && !(this.#time > clip.settled && this.#playsLeft > 1);
+    if (restart) {
       this.#time = 0;
-      this.#progress = 0;
+      this.#playsLeft = clip.plays;
       this.#settling = !reducedMotion();
-    } else {
-      this.#time = INTRO_S + this.#progress * DRAW_S;
     }
     this.#playing = true;
     this.#last = null;
     this.#syncPlayButton();
+    this.#emit('isotrail-play', { progress: restart ? 0 : this.#progress });
+    if (restart) this.#setProgress(0);
     this.#schedule();
   }
 
   pause() {
+    this.#wantsPlay = false;
     if (!this.#playing) return;
     this.#playing = false;
     this.#syncPlayButton();
+    this.#emit('isotrail-pause', { progress: this.#progress });
+  }
+
+  // Back to the starting view, as the reset button does
+  reset() {
+    this.#resetView();
+  }
+
+  #newReady() {
+    const ready = { state: 'pending' };
+    ready.promise = new Promise((resolve, reject) => {
+      ready.resolve = resolve;
+      ready.reject = reject;
+    });
+    // A page that never reads ready sees no unhandled rejection
+    ready.promise.catch(() => {});
+    this.#ready = ready;
+  }
+
+  #settleReady(state, value) {
+    const ready = this.#ready;
+    if (ready.state !== 'pending') return;
+    ready.state = state;
+    if (state === 'resolved') ready.resolve(value);
+    else ready.reject(value);
+  }
+
+  // Moves the drawing to `share` of the way, like the progress line
+  #seek(share) {
+    this.#cancelSettle();
+    this.#moved = true;
+    this.#time = this.#clip.intro + share * this.#clip.draw;
+    this.#setProgress(share);
+    this.#schedule();
+  }
+
+  #setProgress(share) {
+    if (share === this.#progress) return;
+    this.#progress = share;
+    this.#syncScrubber();
+    this.#emit('isotrail-progress', { progress: share });
   }
 
   // The poster attribute, or else the image the snippet puts inside the
@@ -519,8 +796,39 @@ class IsotrailHike extends HTMLElement {
     const src = this.getAttribute('poster') || fallback?.getAttribute('src');
     if (src) this.#poster.src = new URL(src, document.baseURI).href;
     else this.#poster.removeAttribute('src');
-    this.#poster.alt = fallback?.alt || 'Hike diorama';
+    this.#poster.alt = fallback?.alt || this.#words.poster;
     this.#frameBox.classList.toggle('has-poster', Boolean(src));
+  }
+
+  #applyWords() {
+    const words = readWords(this);
+    this.#words = words;
+    this.#playButton.setAttribute('aria-label', this.#playing ? words.pause : words.play);
+    this.#zoomIn.setAttribute('aria-label', words.zoomIn);
+    this.#zoomOut.setAttribute('aria-label', words.zoomOut);
+    this.#resetButton.setAttribute('aria-label', words.reset);
+    this.#scrubber.setAttribute('aria-label', words.scrubber);
+    this.#help.textContent = fill(words.help, { key: ZOOM_KEY });
+    this.#message.textContent = words[this.#failure ?? 'gpu'] ?? words.runtime;
+    this.#syncPoster();
+    this.#syncScrubber();
+    this.#labelCanvas();
+  }
+
+  #applyControls() {
+    const shown = readControls(this);
+    this.#playButton.hidden = !shown.has('play');
+    this.#zoomIn.hidden = !shown.has('zoom');
+    this.#zoomOut.hidden = !shown.has('zoom');
+    this.#resetButton.hidden = !shown.has('reset');
+    this.#scrubber.hidden = !shown.has('scrubber');
+  }
+
+  #labelCanvas() {
+    this.#canvas?.setAttribute(
+      'aria-label',
+      fill(this.#words.diorama, { title: this.#title || this.#words.untitled }),
+    );
   }
 
   #onIntersect(entries) {
@@ -545,6 +853,7 @@ class IsotrailHike extends HTMLElement {
     const generation = ++this.#generation;
     const src = this.getAttribute('src');
     if (!src) return;
+    if (this.#ready.state === 'rejected') this.#newReady();
     if (!hasGpu()) {
       this.#fail('gpu', new Error('the browser has neither WebGPU nor WebGL2'));
       return;
@@ -581,23 +890,31 @@ class IsotrailHike extends HTMLElement {
     this.#guard(() => {
       viewer.onLost(lost);
       this.#webgl = viewer.backend === 'gl';
-      canvas.setAttribute('aria-label', `3D diorama of ${viewer.title || 'a hike'}`);
+      this.#title = viewer.title;
+      this.#labelCanvas();
       this.#showCredit(viewer.credit);
+      this.#followRoute();
     });
     if (this.#viewer !== viewer) return;
     this.#resize = new ResizeObserver(([entry]) => this.#onResize(entry));
     this.#resize.observe(canvas);
   }
 
-  // The look attributes as the renderer takes them, with a .hex palette's
-  // text in place of its address
+  // The look attributes as the renderer takes them, with the text of a .hex
+  // palette and a theme file in place of their addresses
   async #look() {
     const look = {};
-    for (const [attribute, key] of Object.entries(LOOK)) {
+    for (const [attribute, key] of Object.entries(VIEWER)) {
       const value = this.getAttribute(attribute);
       if (value !== null) look[key] = value;
     }
-    if (look.palette) look.palette = await readPalette(look.palette);
+    const theme = this.getAttribute('theme');
+    const [palette, text] = await Promise.all([
+      look.palette ? readPalette(look.palette) : undefined,
+      theme?.trim() ? fetchText(theme, 'theme') : undefined,
+    ]);
+    if (look.palette) look.palette = palette;
+    if (text !== undefined) look.theme = text;
     return look;
   }
 
@@ -608,8 +925,16 @@ class IsotrailHike extends HTMLElement {
     const look = await this.#look();
     if (this.#viewer !== viewer || change !== this.#lookChanges) return;
     this.#guard(() => viewer.setOptions(look));
+    this.#followRoute();
     this.#syncZoom();
     this.#schedule();
+  }
+
+  // The progress line takes the route's colour, from its attribute or the
+  // theme
+  #followRoute() {
+    const colour = this.#guard((viewer) => viewer.routeColour);
+    if (colour) this.#scrubber.style.setProperty('--route', colour);
   }
 
   // One fresh start, in case the browser reset its GPU; the poster if it
@@ -632,9 +957,15 @@ class IsotrailHike extends HTMLElement {
     this.#teardown();
     // Stays put until src changes or the element is put back in the page
     this.#started = true;
-    this.#message.textContent = MESSAGES[reason] ?? MESSAGES.runtime;
+    this.#wantsPlay = false;
+    this.#failure = reason in this.#words ? reason : 'runtime';
+    this.#message.textContent = this.#words[this.#failure];
     this.#setState('fallback');
-    this.#emit('isotrail-error', { reason, message: String(error?.message ?? error ?? '') });
+    const message = String(error?.message ?? error ?? '');
+    this.#emit('isotrail-error', { reason, message });
+    const failure = new Error(message);
+    failure.reason = reason;
+    this.#settleReady('rejected', failure);
   }
 
   #emit(name, detail) {
@@ -655,6 +986,7 @@ class IsotrailHike extends HTMLElement {
   }
 
   #teardown() {
+    const wasPlaying = this.#playing;
     this.#generation++;
     this.#started = false;
     this.#playing = false;
@@ -678,10 +1010,13 @@ class IsotrailHike extends HTMLElement {
     this.#pointers.clear();
     this.#progress = 1;
     this.#moved = false;
-    this.#time = INTRO_S + DRAW_S;
+    this.#time = this.#clip.settled;
+    this.#playsLeft = 1;
     this.#yaw = 0;
+    this.#failure = null;
     this.#syncPlayButton();
     this.#syncScrubber();
+    if (wasPlaying) this.#emit('isotrail-pause', { progress: this.#progress });
   }
 
   // A fresh canvas for each load, as a canvas keeps the first kind of
@@ -751,9 +1086,8 @@ class IsotrailHike extends HTMLElement {
     this.#guard((viewer) => viewer.resize(width, height));
     if (!this.#viewer) return;
     this.#syncZoom();
-    if (!this.#drawn && width > 0 && this.hasAttribute('autoplay') && !reducedMotion()) {
-      this.play();
-    }
+    const autoplay = this.hasAttribute('autoplay') && !reducedMotion();
+    if (!this.#drawn && width > 0 && (this.#wantsPlay || autoplay)) this.play();
     this.#schedule();
   }
 
@@ -765,21 +1099,10 @@ class IsotrailHike extends HTMLElement {
   #draw(now) {
     this.#frame = 0;
     if (!this.#viewer) return;
-    if (this.#playing) {
-      if (this.#last !== null) this.#time += Math.min((now - this.#last) / 1000, MAX_STEP_S);
-      this.#last = now;
-      this.#progress = Math.min(Math.max((this.#time - INTRO_S) / DRAW_S, 0), 1);
-      if (this.#time >= INTRO_S + DRAW_S) {
-        this.#time = INTRO_S + DRAW_S;
-        this.#playing = false;
-        this.#settling = false;
-        this.#syncPlayButton();
-      }
-      this.#syncScrubber();
-    }
+    if (this.#playing) this.#advance(now);
     const drawn = this.#guard((viewer) => {
       if (this.#moved) viewer.setProgress(this.#progress);
-      viewer.setYaw(this.#yaw + (this.#settling ? orbit(this.#time) : 0));
+      viewer.setYaw(this.#yaw + (this.#settling ? this.#clip.yaw(this.#time) : 0));
       viewer.setTime(reducedMotion() ? 0 : now / 1000);
       viewer.draw();
       return true;
@@ -788,13 +1111,37 @@ class IsotrailHike extends HTMLElement {
     if (!this.#drawn && this.#canvas.width > 0) {
       this.#drawn = true;
       this.#setState('ready');
-      this.#emit('isotrail-ready', { backend: this.#guard((viewer) => viewer.backend) });
+      const detail = { backend: this.#guard((viewer) => viewer.backend) };
+      this.#emit('isotrail-ready', detail);
+      this.#settleReady('resolved', detail);
     }
     if (this.#playing) {
       if (this.#near) this.#schedule();
       else this.#last = null;
     } else if (this.#near && this.#weatherMoves()) {
       this.#schedule();
+    }
+  }
+
+  // Moves the clip on to `now`, into the next play when it loops, and stops
+  // on the finished hike after the last
+  #advance(now) {
+    const clip = this.#clip;
+    if (this.#last !== null) this.#time += Math.min((now - this.#last) / 1000, MAX_STEP_S);
+    this.#last = now;
+    if (this.#playsLeft > 1 && this.#time >= clip.duration) {
+      this.#time = Math.min(this.#time - clip.duration, clip.duration);
+      this.#playsLeft -= 1;
+    }
+    const ended = this.#playsLeft <= 1 && this.#time >= clip.settled;
+    if (ended) this.#time = clip.settled;
+    this.#setProgress(clip.share(this.#time));
+    if (ended) {
+      this.#playing = false;
+      this.#settling = false;
+      this.#syncPlayButton();
+      this.#emit('isotrail-pause', { progress: this.#progress });
+      this.#emit('isotrail-ended', { progress: this.#progress });
     }
   }
 
@@ -805,7 +1152,7 @@ class IsotrailHike extends HTMLElement {
 
   #cancelSettle() {
     if (!this.#settling) return;
-    this.#yaw += orbit(this.#time);
+    this.#yaw += this.#clip.yaw(this.#time);
     this.#settling = false;
   }
 
@@ -916,7 +1263,7 @@ class IsotrailHike extends HTMLElement {
   #onWheel(event) {
     if (!this.#viewer) return;
     if (!event.ctrlKey && !event.metaKey) {
-      this.#showHint(`Hold ${ZOOM_KEY} and scroll to zoom`);
+      this.#showHint(fill(this.#words.wheelHint, { key: ZOOM_KEY }));
       return;
     }
     event.preventDefault();
@@ -980,19 +1327,23 @@ class IsotrailHike extends HTMLElement {
 
   #syncPlayButton() {
     this.#playButton.innerHTML = this.#playing ? ICONS.pause : ICONS.play;
-    this.#playButton.setAttribute('aria-label', this.#playing ? 'Pause' : 'Play');
+    this.#playButton.setAttribute('aria-label', this.#playing ? this.#words.pause : this.#words.play);
   }
 
   #syncScrubber() {
     this.#scrubber.value = Math.round(this.#progress * 1000);
     this.#scrubber.style.setProperty('--walked', `${this.#progress * 100}%`);
-    this.#scrubber.setAttribute('aria-valuetext', `${Math.round(this.#progress * 100)}%`);
+    this.#scrubber.setAttribute(
+      'aria-valuetext',
+      fill(this.#words.progress, { percent: Math.round(this.#progress * 100) }),
+    );
   }
 
   #syncZoom() {
     const zoom = this.#guard((viewer) => viewer.zoom);
+    const max = this.#guard((viewer) => viewer.maxZoom);
     if (zoom === undefined || !this.#canvas) return;
-    this.#zoomIn.setAttribute('aria-disabled', String(zoom >= MAX_ZOOM - 0.001));
+    this.#zoomIn.setAttribute('aria-disabled', String(zoom >= max - 0.001));
     this.#zoomOut.setAttribute('aria-disabled', String(zoom <= 1.001));
     this.#canvas.style.touchAction = zoom > 1.001 ? 'none' : 'pan-y';
   }
@@ -1007,18 +1358,31 @@ function pinch(a, b) {
   };
 }
 
+// Texts fetched once for every element that names them
+const texts = new Map();
+async function fetchText(value, what) {
+  const url = new URL(value, document.baseURI).href;
+  if (!texts.has(url)) {
+    const loading = fetch(url).then(async (response) => {
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      return response.text();
+    });
+    loading.catch(() => texts.delete(url));
+    texts.set(url, loading);
+  }
+  try {
+    return await texts.get(url);
+  } catch (error) {
+    console.warn(`<isotrail-hike> could not load the ${what} ${value}, so it uses the default:`, error);
+    return undefined;
+  }
+}
+
 // A palette's name as it is, or the text of a .hex file at that address
 async function readPalette(value) {
   const url = new URL(value, document.baseURI);
   if (!url.pathname.toLowerCase().endsWith('.hex')) return value;
-  try {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-    return await response.text();
-  } catch (error) {
-    console.warn(`<isotrail-hike> could not load the palette ${value}, so it uses the default:`, error);
-    return undefined;
-  }
+  return fetchText(value, 'palette');
 }
 
 async function fetchBytes(src) {

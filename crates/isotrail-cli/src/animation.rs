@@ -68,7 +68,7 @@ pub struct AnimationArgs {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-enum PaceArg {
+pub(crate) enum PaceArg {
     Distance,
     Time,
 }
@@ -141,7 +141,7 @@ fn seconds(value: &str) -> Result<f32, String> {
         .ok_or_else(|| "expected seconds, such as 10s or 2.5".to_owned())
 }
 
-fn parse_duration(value: &str) -> Result<f32, String> {
+pub(crate) fn parse_duration(value: &str) -> Result<f32, String> {
     let seconds = seconds(value)?;
     if (1.0..=MAX_MP4_DURATION_S).contains(&seconds) {
         Ok(seconds)
@@ -150,7 +150,7 @@ fn parse_duration(value: &str) -> Result<f32, String> {
     }
 }
 
-fn parse_part(value: &str) -> Result<f32, String> {
+pub(crate) fn parse_part(value: &str) -> Result<f32, String> {
     let seconds = seconds(value)?;
     if (0.0..=MAX_MP4_DURATION_S).contains(&seconds) {
         Ok(seconds)
@@ -159,7 +159,7 @@ fn parse_part(value: &str) -> Result<f32, String> {
     }
 }
 
-fn parse_orbit(value: &str) -> Result<f32, String> {
+pub(crate) fn parse_orbit(value: &str) -> Result<f32, String> {
     let degrees: f32 = value.parse().map_err(|e| format!("{e}"))?;
     if (-360.0..=360.0).contains(&degrees) {
         Ok(degrees)

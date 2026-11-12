@@ -51,6 +51,11 @@ await writeFile(join(data, 'newer.itb'), withVersion(999));
 await writeFile(join(data, 'damaged.itb'), hike.subarray(0, 40));
 await writeFile(join(data, 'poster.png'), png(160, 90, [58, 122, 90]));
 await writeFile(join(data, 'warm.hex'), '1a1c2c\n5d275d\nb13e53\nef7d57\nffcd75\na7f070\n');
+await writeFile(
+  join(data, 'loud.toml'),
+  '[landcover]\ngrassland = "#e040c0"\nconiferous = "#f0e020"\n\n[route]\ncolour = "#2050e0"\n',
+);
+await writeFile(join(data, 'bad.toml'), '[landcover]\nlawn = "#e040c0"\n');
 
 // Pages, the web folder under /web/ and the bundles under /data/
 const requests = [];
@@ -62,6 +67,7 @@ const TYPES = {
   '.png': 'image/png',
   '.itb': 'application/octet-stream',
   '.hex': 'text/plain',
+  '.toml': 'text/plain',
 };
 const STRICT_CSP =
   "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self'; connect-src 'self'";
@@ -185,6 +191,72 @@ Object.assign(pages, {
     ]),
     { head: '<style>.grid{grid-template-columns:repeat(3,288px)}</style>' },
   ),
+  '/play.html': page(
+    grid([
+      embed('id="s" src="/data/hike.itb" aspect="wide" duration="1.5"'),
+      embed('id="l2" src="/data/hike.itb" aspect="wide" duration="1" loop="2"'),
+      embed('id="lf" src="/data/hike.itb" aspect="wide" duration="1" loop loop-back'),
+      embed('id="o0" src="/data/hike.itb" aspect="wide" orbit="0"'),
+      embed('id="od" src="/data/hike.itb" aspect="wide"'),
+      embed('id="tw" src="/data/hike.itb" aspect="wide"'),
+      embed('id="pt" src="/data/paced.itb" aspect="wide" pace="time"'),
+      embed('id="pd" src="/data/paced.itb" aspect="wide"'),
+      embed('id="pu" src="/data/hike.itb" aspect="wide" pace="time"'),
+      embed('id="b" src="/data/hike.itb" aspect="wide" duration="0" orbit="400" loop="many" pace="walk" max-zoom="9" controls="play,map"'),
+      embed('id="i" src="/data/hike.itb" aspect="wide" duration="2" intro="1" hold="0.8"'),
+    ]),
+    { head: '<style>.grid{grid-template-columns:repeat(3,288px)}</style>' },
+  ),
+  '/script.html': page(
+    grid([
+      embed('id="early" src="/data/hike.itb" aspect="wide" duration="2"'),
+      embed('id="preset" src="/data/hike.itb" aspect="wide"'),
+      embed('id="a" src="/data/hike.itb" aspect="wide"'),
+      embed('id="bad" src="/data/missing.itb" aspect="wide"'),
+    ]),
+    {
+      head:
+        '<style>.grid{grid-template-columns:repeat(3,288px)}</style>' +
+        `<script type="module">
+          await customElements.whenDefined('isotrail-hike');
+          const early = document.getElementById('early');
+          early.play();
+          document.getElementById('preset').progress = 0.25;
+          window.__early = early.ready.then((detail) => detail.backend);
+          window.__rejected = document.getElementById('bad').ready.then(() => 'resolved', (error) => error.reason);
+        </script>`,
+    },
+  ),
+  '/controls.html': page(
+    grid([
+      embed('id="d" src="/data/hike.itb" aspect="wide"'),
+      embed('id="none" src="/data/hike.itb" aspect="wide" controls="none"'),
+      embed('id="ps" src="/data/hike.itb" aspect="wide" controls="play,scrubber"'),
+      embed('id="mz" src="/data/hike.itb" aspect="wide" max-zoom="6"'),
+    ]),
+    { head: '<style>.grid{grid-template-columns:repeat(3,288px)}</style>' },
+  ),
+  '/words.html': page(
+    grid([
+      embed('id="pl" src="/data/hike.itb" aspect="wide" lang="pl"'),
+      `<div lang="pl-PL">${embed('id="inh" src="/data/hike.itb" aspect="wide"')}</div>`,
+      embed('id="de" src="/data/hike.itb" aspect="wide" lang="de"'),
+      embed(`id="st" src="/data/hike.itb" aspect="wide" strings='{"play":"Start","zoomIn":"Closer"}'`),
+      embed(`id="bs" src="/data/hike.itb" aspect="wide" strings='{"play":1,"nope":"x"}'`),
+      embed('id="bj" src="/data/hike.itb" aspect="wide" strings="not json"'),
+      embed('id="plf" src="/data/missing.itb" aspect="wide" lang="pl"'),
+    ]),
+  ),
+  '/theme.html': page(
+    grid([
+      embed('id="d" src="/data/hike.itb" aspect="wide"'),
+      embed('id="t" src="/data/hike.itb" aspect="wide" theme="/data/loud.toml"'),
+      embed('id="bt" src="/data/hike.itb" aspect="wide" theme="/data/bad.toml"'),
+      embed('id="mt" src="/data/hike.itb" aspect="wide" theme="/data/missing.toml"'),
+      embed('id="tr" src="/data/hike.itb" aspect="wide" theme="/data/loud.toml" route-colour="#e0a020"'),
+    ]),
+    { head: '<style>.grid{grid-template-columns:repeat(3,288px)}</style>' },
+  ),
   '/many.html': page(
     Array.from({ length: 20 }, (_, i) =>
       `<isotrail-hike id="m${i}" src="/data/hike.itb" aspect="wide" backend="webgl"></isotrail-hike><p>gap</p>`,
@@ -199,7 +271,7 @@ const INSTRUMENT = `
   window.__warnings = [];
   const warn = console.warn;
   console.warn = function (...a) { __warnings.push(a.map(String).join(' ')); return warn.apply(this, a); };
-  for (const name of ['isotrail-ready', 'isotrail-error']) {
+  for (const name of ['isotrail-ready', 'isotrail-error', 'isotrail-play', 'isotrail-pause', 'isotrail-ended', 'isotrail-progress']) {
     addEventListener(name, (e) => __events.push({ name, id: e.target.id, ...e.detail }));
   }
   window.__csp = [];
@@ -465,13 +537,187 @@ try {
   check('without it there is no extra line', (await extraOf('d')) === null);
   const routeOf = (id) => cdp.evaluate(`getComputedStyle(${el(id)}.shadowRoot.querySelector('input')).getPropertyValue('--route').trim()`);
   check('the progress line takes the route colour', (await routeOf('r')) === '#2050e0', await routeOf('r'));
-  check('a bad route colour leaves the progress line alone', (await routeOf('u')) === '', await routeOf('u'));
+  check('a bad route colour leaves the progress line in the default colour', (await routeOf('u')) === '#d64834', await routeOf('u'));
   await cdp.evaluate(`${el('d')}.setAttribute('credit-extra', 'My site')`);
   check('changing credit-extra updates the line', (await extraOf('d')) === 'My site', String(await extraOf('d')));
   await cdp.evaluate(`${el('d')}.setAttribute('strata', 'off')`);
   await sleep(1000);
   check('changing a scene attribute builds the terrain again', (await shot('d')) !== sceneShot && (await stateOf('d')) === 'ready');
   check('no uncaught errors on the scene page', cdp.exceptions.length === 0, cdp.exceptions.join(' | '));
+
+  // Playback: events in order, loops, the orbit, the pace and bad values
+  const eventsOf = (id, names) =>
+    cdp.evaluate(`__events.filter((e) => e.id === ${JSON.stringify(id)} && ${JSON.stringify(names)}.includes(e.name)).map((e) => e.name)`);
+  const allReady = (ids) => cdp.waitFor(`${JSON.stringify(ids)}.every((id) => document.getElementById(id).dataset.state === 'ready')`);
+  await go('/play.html');
+  const playIds = ['s', 'l2', 'lf', 'o0', 'od', 'tw', 'pt', 'pd', 'pu', 'b', 'i'];
+  check('eleven playback embeds become ready', await allReady(playIds));
+  await sleep(300);
+  // Waits for events rather than a time: SwiftShader draws slowly, and a
+  // slow frame moves the clip on by at most a tenth of a second
+  const hasEvent = (id, name) => `__events.some((e) => e.id === ${JSON.stringify(id)} && e.name === ${JSON.stringify(name)})`;
+  await cdp.evaluate(`['s', 'l2', 'lf'].forEach((id) => document.getElementById(id).play())`);
+  const bothEnded = await cdp.waitFor(`${hasEvent('s', 'isotrail-ended')} && ${hasEvent('l2', 'isotrail-ended')}`);
+  check('short plays end', bothEnded);
+  const lfUndrew = `(() => { const p = __events.filter((e) => e.id === 'lf' && e.name === 'isotrail-progress').map((e) => e.progress); return p.some((v, i) => i > 0 && v < p[i - 1] && v > 0.05); })()`;
+  await cdp.waitFor(lfUndrew);
+  const order = (await eventsOf('s', ['isotrail-play', 'isotrail-progress', 'isotrail-pause', 'isotrail-ended'])).filter(
+    (name, i, all) => name !== 'isotrail-progress' || all[i - 1] !== 'isotrail-progress',
+  );
+  check(
+    'a play sends play, progress, pause and ended in order',
+    JSON.stringify(order) === JSON.stringify(['isotrail-play', 'isotrail-progress', 'isotrail-pause', 'isotrail-ended']),
+    order.join(', '),
+  );
+  const progressS = await cdp.evaluate(`__events.filter((e) => e.id === 's' && e.name === 'isotrail-progress').map((e) => e.progress)`);
+  check(
+    'progress rises from 0 to 1',
+    progressS[0] === 0 && progressS.at(-1) === 1 && progressS.every((p, i) => i === 0 || p >= progressS[i - 1]),
+    progressS.slice(0, 3).concat(progressS.slice(-2)).join(', '),
+  );
+  check('an ended play stops on the finished hike', !(await cdp.evaluate(`${el('s')}.playing`)) && (await cdp.evaluate(`${el('s')}.progress`)) === 1);
+  check('loop="2" plays twice, then ends', JSON.stringify(await eventsOf('l2', ['isotrail-ended'])) === '["isotrail-ended"]' && !(await cdp.evaluate(`${el('l2')}.playing`)));
+  const l2Progress = await cdp.evaluate(`__events.filter((e) => e.id === 'l2' && e.name === 'isotrail-progress').map((e) => e.progress)`);
+  check('and starts the second play from the start', l2Progress.filter((p, i) => i > 0 && p < l2Progress[i - 1]).length === 1, l2Progress.join(','));
+  check('loop keeps playing past its duration', await cdp.evaluate(`${el('lf')}.playing`));
+  const lfProgress = await cdp.evaluate(`__events.filter((e) => e.id === 'lf' && e.name === 'isotrail-progress').map((e) => e.progress)`);
+  check('loop-back undraws the route before the next play', lfProgress.some((p, i) => i > 0 && p < lfProgress[i - 1] && p > 0.05), lfProgress.slice(0, 40).join(','));
+  await cdp.evaluate(`${el('lf')}.pause()`);
+  check('pause() stops a loop and sends pause', !(await cdp.evaluate(`${el('lf')}.playing`)) && (await eventsOf('lf', ['isotrail-pause'])).length === 1);
+
+  // A paused frame with no orbit matches a twin set to the same progress,
+  // and one with the default orbit doesn't
+  await cdp.evaluate(`['o0', 'od'].forEach((id) => document.getElementById(id).play())`);
+  await cdp.waitFor(`['o0', 'od'].every((id) => document.getElementById(id).progress > 0.1)`);
+  await cdp.evaluate(`['o0', 'od'].forEach((id) => document.getElementById(id).pause())`);
+  await sleep(300);
+  const twinShot = async (id) => {
+    await cdp.evaluate(`${el('tw')}.progress = ${el(id)}.progress`);
+    await sleep(300);
+    return shot('tw');
+  };
+  const o0Progress = await cdp.evaluate(`${el('o0')}.progress`);
+  check('the paused embeds are part-way', o0Progress > 0 && o0Progress < 1, String(o0Progress));
+  check('orbit="0" plays without turning', (await shot('o0')) === (await twinShot('o0')));
+  check('the default orbit turns while it plays', (await shot('od')) !== (await twinShot('od')));
+  await cdp.evaluate(`['pt', 'pd'].forEach((id) => { document.getElementById(id).progress = 0.5; })`);
+  await sleep(400);
+  check('pace="time" follows the recorded times', (await shot('pt')) !== (await shot('pd')));
+  const playWarnings = await cdp.evaluate('__warnings');
+  check(
+    'bad playback values warn on the console',
+    ['duration "0"', 'orbit "400"', 'loop "many"', 'pace "walk"', 'maxZoom "9"', 'controls "map"', 'ignored intro and hold', 'paces by distance'].every((part) =>
+      playWarnings.some((w) => w.includes(part)),
+    ),
+    playWarnings.join(' | '),
+  );
+  check('and the bad embed keeps every control', (await visible(`${el('b')}.shadowRoot.querySelector('[part=play]')`)) && !(await visible(`${el('b')}.shadowRoot.querySelector('[part=reset]')`)));
+  check('no uncaught errors on the playback page', cdp.exceptions.length === 0, cdp.exceptions.join(' | '));
+
+  // The script API: play() and progress before ready, ready, progress and reset()
+  await go('/script.html');
+  check('four script embeds settle', await cdp.waitFor(`['early', 'preset', 'a'].every((id) => document.getElementById(id).dataset.state === 'ready') && ${el('bad')}.dataset.state === 'fallback'`));
+  check('ready resolves with the backend', typeof (await cdp.evaluate('window.__early')) === 'string', String(await cdp.evaluate('window.__early')));
+  check('ready rejects with the reason', (await cdp.evaluate('window.__rejected')) === 'load', String(await cdp.evaluate('window.__rejected')));
+  check('play() before ready plays once ready', await cdp.waitFor(hasEvent('early', 'isotrail-play')));
+  check('progress set before ready is kept', (await cdp.evaluate(`[${el('preset')}.progress, ${el('preset')}.shadowRoot.querySelector('input').value]`)).join() === '0.25,250');
+  await cdp.evaluate(`${el('a')}.progress = 0.5`);
+  check('setting progress moves the progress line', (await cdp.evaluate(`[${el('a')}.progress, ${el('a')}.shadowRoot.querySelector('input').value]`)).join() === '0.5,500');
+  check('and sends isotrail-progress', await cdp.evaluate(`__events.some((e) => e.id === 'a' && e.name === 'isotrail-progress' && e.progress === 0.5)`));
+  await cdp.evaluate(`${el('a')}.progress = NaN; ${el('a')}.progress = 'x'`);
+  check('progress ignores values that are not numbers', (await cdp.evaluate(`${el('a')}.progress`)) === 0.5);
+  await cdp.evaluate(`${el('a')}.progress = 7`);
+  check('progress stays within 0 and 1', (await cdp.evaluate(`${el('a')}.progress`)) === 1);
+  await sleep(300);
+  const startShot = await shot('a');
+  await cdp.evaluate(`${el('a')}.shadowRoot.querySelector('[part=zoom-in]').click()`);
+  await sleep(300);
+  await cdp.evaluate(`${el('a')}.reset()`);
+  let resetBack = false;
+  for (let i = 0; i < 30 && !resetBack; i++) {
+    await sleep(100);
+    resetBack = (await shot('a')) === startShot;
+  }
+  check('reset() returns to the starting view', resetBack);
+  const firstReady = await cdp.evaluate(`${el('a')}.ready === ${el('a')}.ready`);
+  await cdp.evaluate(`window.__oldReady = ${el('a')}.ready; ${el('a')}.setAttribute('src', '/data/timed.itb')`);
+  check('a new src gives a new ready promise', firstReady && (await cdp.evaluate(`window.__oldReady !== ${el('a')}.ready`)));
+  check('which resolves when it shows', await cdp.waitFor(`${el('a')}.dataset.state === 'ready'`));
+  check('no uncaught errors on the script page', cdp.exceptions.length === 0, cdp.exceptions.join(' | '));
+
+  // Which controls show, and how far the zoom goes
+  await go('/controls.html');
+  check('four controls embeds become ready', await allReady(['d', 'none', 'ps', 'mz']));
+  const part = (id, name) => `${el(id)}.shadowRoot.querySelector('[part=${name}]')`;
+  const shown = async (id) => {
+    const parts = [];
+    for (const name of ['play', 'zoom-in', 'zoom-out', 'reset', 'scrubber', 'credit']) {
+      if (await visible(part(id, name))) parts.push(name);
+    }
+    return parts.join(',');
+  };
+  check('every control shows by default', (await shown('d')) === 'play,zoom-in,zoom-out,reset,scrubber,credit', await shown('d'));
+  check('controls="none" shows only the credit', (await shown('none')) === 'credit', await shown('none'));
+  check('controls="play,scrubber" shows those', (await shown('ps')) === 'play,scrubber,credit', await shown('ps'));
+  const zoomInDisabled = (id) => cdp.evaluate(`${part(id, 'zoom-in')}.getAttribute('aria-disabled')`);
+  const clickZoom = (id, times) => cdp.evaluate(`for (let i = 0; i < ${times}; i++) ${part(id, 'zoom-in')}.click()`);
+  await clickZoom('d', 5);
+  await clickZoom('mz', 5);
+  check('the default zoom stops at 3×', (await zoomInDisabled('d')) === 'true');
+  check('max-zoom="6" goes further', (await zoomInDisabled('mz')) === 'false');
+  await clickZoom('mz', 4);
+  check('and stops at 6×', (await zoomInDisabled('mz')) === 'true');
+  await cdp.evaluate(`${el('ps')}.setAttribute('controls', 'zoom')`);
+  check('changing controls updates them', (await shown('ps')) === 'zoom-in,zoom-out,credit', await shown('ps'));
+
+  // Words: built-in Polish, inherited from the page, an override, bad values
+  await go('/words.html');
+  await cdp.waitFor(`['pl', 'inh', 'de', 'st', 'bs', 'bj'].every((id) => document.getElementById(id).dataset.state === 'ready') && ${el('plf')}.dataset.state === 'fallback'`);
+  const label = (id, name) => cdp.evaluate(`${part(id, name)}.getAttribute('aria-label')`);
+  check('lang="pl" speaks Polish', (await label('pl', 'play')) === 'Odtwórz' && (await label('pl', 'reset')) === 'Przywróć widok');
+  check('the canvas is labelled in Polish', /^Diorama 3D: Zażółć/.test(await cdp.evaluate(`${el('pl')}.shadowRoot.querySelector('canvas').getAttribute('aria-label')`)));
+  check('lang is taken from the page', (await label('inh', 'play')) === 'Odtwórz');
+  check('a language without words stays English', (await label('de', 'play')) === 'Play');
+  check('strings overrides words', (await label('st', 'play')) === 'Start' && (await label('st', 'zoom-in')) === 'Closer' && (await label('st', 'reset')) === 'Reset view');
+  check('a failure message in Polish', (await cdp.evaluate(`${el('plf')}.shadowRoot.querySelector('.message').textContent`)) === 'Nie udało się wczytać tej wędrówki.');
+  const wordWarnings = await cdp.evaluate('__warnings');
+  check(
+    'bad strings warn on the console',
+    ['strings.play "1"', 'strings "nope"', 'strings "not json"'].every((p) => wordWarnings.some((w) => w.includes(p))),
+    wordWarnings.join(' | '),
+  );
+  check('and keep the built-in words', (await label('bs', 'play')) === 'Play' && (await label('bj', 'play')) === 'Play');
+  await cdp.evaluate(`${el('de')}.setAttribute('lang', 'pl')`);
+  check('changing lang changes the words', (await label('de', 'play')) === 'Odtwórz');
+  await cdp.evaluate(`${el('pl')}.play()`);
+  check('the pause label is Polish too', (await label('pl', 'play')) === 'Wstrzymaj');
+
+  // A theme file: different pixels, the progress line in its route colour,
+  // and the built-in theme for a bad or missing file
+  await go('/theme.html');
+  check('five theme embeds become ready', await allReady(['d', 't', 'bt', 'mt', 'tr']));
+  await sleep(300);
+  const themeDefault = await shot('d');
+  check('theme changes the colours', (await shot('t')) !== themeDefault);
+  check('a bad theme draws the built-in one', (await shot('bt')) === themeDefault);
+  check('a missing theme draws the built-in one', (await shot('mt')) === themeDefault);
+  const themeWarnings = await cdp.evaluate('__warnings');
+  check(
+    'and each warns on the console',
+    ['ignored the theme', 'could not load the theme /data/missing.toml'].every((p) => themeWarnings.some((w) => w.includes(p))) &&
+      themeWarnings.some((w) => w.includes('lawn')),
+    themeWarnings.join(' | '),
+  );
+  check('the progress line takes the theme\'s route colour', (await routeOf('t')) === '#2050e0', await routeOf('t'));
+  check('route-colour beats the theme', (await routeOf('tr')) === '#e0a020', await routeOf('tr'));
+  await cdp.evaluate(`${el('d')}.setAttribute('theme', '/data/loud.toml')`);
+  let themed = false;
+  for (let i = 0; i < 50 && !themed; i++) {
+    await sleep(100);
+    themed = (await shot('d')) === (await shot('t'));
+  }
+  check('setting theme on a live element redraws in it', themed);
+  check('no uncaught errors on the theme page', cdp.exceptions.length === 0, cdp.exceptions.join(' | '));
 
   // The snippet's poster, with and without the script
   await go('/noscript.html');

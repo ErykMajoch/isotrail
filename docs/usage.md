@@ -26,7 +26,8 @@ The commands that draw or prepare a hike share their options. They are described
 | `--theme FILE` ([theme files](configuration.md#theme-files)) | yes | yes | – | yes |
 | [Scene, light and route](#scene-light-and-route) | yes | yes | – | – |
 | [Text and overlays](#text-and-overlays) | yes | for the poster | `--title` only | – |
-| [Animation](#animation), [encoding](#encoding) | yes | – | – | – |
+| `--duration`, `--intro`, `--hold`, `--loop-back`, `--orbit`, `--pace` ([animation](#animation)), `--loop` ([encoding](#encoding)) | yes | [for playback](#playback-and-controls) | – | – |
+| `--fps`, `--step-fps` ([animation](#animation)), other [encoding](#encoding) options | yes | – | – | – |
 | [Data](#data) | yes | yes | yes | yes |
 | `--config FILE` ([configuration](configuration.md)) | yes | yes | yes | yes |
 | `--json` ([output for scripts](#output-for-scripts)) | yes | yes | yes | yes |
@@ -320,7 +321,7 @@ Writes everything a web page needs to show the hike as an interactive diorama wi
 | `DIR/<name>.png` | The poster, shown until the diorama is ready and kept in browsers that can't draw it. It is the same image as `isotrail render --aspect <aspect>` with the same options, overlays included |
 | `DIR/snippet.html` | The two lines to paste into a page, also printed when the command finishes |
 | `DIR/<palette>.hex` | A copy of the palette file, with `--palette FILE` only |
-| `DIR/<theme>.toml` | A copy of the theme file, with `--theme FILE` only. The snippet names it in a `theme` attribute; for now the poster is themed and the live diorama keeps the built-in colours |
+| `DIR/<theme>.toml` | A copy of the theme file, with `--theme FILE` only. The snippet names it in a `theme` attribute, so the live diorama is themed like the poster |
 | `DIR/isotrail-embed.js`, `DIR/pkg/` | The web runtime, with `--with-runtime` only |
 
 `<name>` is the input's file name without its extension. A GPX file is first prepared in the same way as [`bundle`](#bundle), with the same data options.
@@ -352,6 +353,26 @@ The image inside the element shows the poster, at the element's size, on pages w
 ```
 
 The camera options become the `turn`, `pitch` and `zoom` attributes, which set the view the diorama starts from and returns to when it is reset; a `--heading` is written as the `turn` that faces the same way. With `--zoom` above 1 the diorama starts zoomed in, and below 1 it leaves more room round the slab. A palette file is copied into `DIR` and the `palette` attribute points at the copy. With `--time` or `--sun`, the diorama keeps that light while the route plays, as an animation does. `--credit-extra` becomes the `credit-extra` attribute, and the live diorama shows the line under its data credit; `--layout` only shapes the poster. `--title` is saved in the bundle, so the live diorama is labelled with it as well as the poster.
+
+### Playback and controls
+
+These options set how the live diorama plays and what it shows. Each one that isn't the default becomes an attribute of the element; the poster doesn't change.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--duration SECONDS` | `10s` | Length of one play, from `1s` to `180s`, split as in an [animation](#animation): 0.5 s on the scene and 8 s drawing the route for every 10 s, then 1.5 s on the finished hike, which only shows between loops |
+| `--intro SECONDS`, `--hold SECONDS` | 5% and 15% | Time on the scene before the route draws, and on the finished hike before the next play |
+| `--loop-back` | off | Between plays, undraw the route and turn the camera back, so a looping diorama runs on without a jump |
+| `--orbit DEG` | `30` | How far the camera turns while the route draws; `0` keeps it still and a negative angle turns the other way |
+| `--pace distance\|time` | `distance` | Draw the route at an even speed, or follow the recorded times |
+| `--loop forever\|once\|N` | `once` | How many times the diorama plays when started |
+| `--autoplay` | off | Play as soon as the diorama shows, unless the visitor prefers reduced motion |
+| `--controls LIST\|none` | all | The controls to show: `play`, `zoom`, `reset` and `scrubber` (the progress line), or `none`. Turning and zooming by hand, and the keys, still work |
+| `--max-zoom X` | `3` | The largest zoom a visitor can reach, from `1` to `6` |
+| `--lang CODE` | the page's | The language of the buttons, hints and messages: `en` or `pl` built in. Without it the element follows the page's own `lang` |
+| `--strings FILE` | none | A JSON file of words to use instead of the built-in ones, such as `{"play": "Start"}`; the [words](../web/README.md#words) are listed with the element. The file is written into the snippet |
+
+In a [config file](configuration.md), the `[render]` table's `duration`, `orbit`, `loop` and the other playback keys reach `embed` too, so an embed plays like the animations, unless the `[embed]` table sets them.
 
 When the input is a bundle that already sits in `DIR` under the name `embed` would give it, as in `isotrail embed site/hike.itb -o site`, it is left as it is and only the poster and snippet are written. If `--title`, `--season`, `--no-weather` or `--exaggeration` would change it, the command stops instead, so the bundle you started from is never replaced; write to another folder.
 

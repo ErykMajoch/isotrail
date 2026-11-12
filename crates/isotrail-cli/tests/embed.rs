@@ -448,7 +448,7 @@ fn embed_reads_config_files() {
     let site = temp.path().join("site");
     let html = fs::read_to_string(site.join("snippet.html")).unwrap();
     assert!(
-        html.contains(r#"aspect="wide" palette="aap-64" mesher="smooth" style="#),
+        html.contains(r#"aspect="wide" palette="aap-64" mesher="smooth" duration="5" style="#),
         "{html}"
     );
     assert_eq!(png_size(&site.join("ridge.png")), (1920, 1080));
@@ -545,4 +545,79 @@ fn json_lists_the_bundle_poster_and_snippet() {
     );
     assert!(quiet.status.success(), "{}", text(&quiet.stderr));
     assert!(quiet.stdout.is_empty(), "{}", text(&quiet.stdout));
+}
+
+#[test]
+fn playback_and_interface_choices_reach_the_snippet() {
+    let temp = with_hike("ridge.itb");
+    fs::write(
+        temp.path().join("words.json"),
+        r#"{"play": "Start", "reset": "Back to \"start\""}"#,
+    )
+    .unwrap();
+    let output = isotrail(
+        temp.path(),
+        &[
+            "embed",
+            "ridge.itb",
+            "-o",
+            "play",
+            "--duration",
+            "12s",
+            "--loop",
+            "forever",
+            "--loop-back",
+            "--orbit=-45",
+            "--pace",
+            "time",
+            "--autoplay",
+            "--controls",
+            "play,scrubber",
+            "--max-zoom",
+            "5",
+            "--lang",
+            "pl",
+            "--strings",
+            "words.json",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let html = fs::read_to_string(temp.path().join("play/snippet.html")).unwrap();
+    assert!(
+        html.contains(
+            r#"aspect="wide" duration="12" loop-back orbit="-45" pace="time" loop autoplay controls="play,scrubber" max-zoom="5" lang="pl" strings="{&quot;play&quot;:&quot;Start&quot;,&quot;reset&quot;:&quot;Back to \&quot;start\&quot;&quot;}" style="#
+        ),
+        "{html}"
+    );
+    // A config file's [embed] table holds them too
+    let config = temp.path().join("config.toml");
+    fs::write(&config, "[embed]\nloop = 3\ncontrols = \"none\"\n").unwrap();
+    let output = isotrail_with_config(temp.path(), &["embed", "ridge.itb", "-o", "set"], &config);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let html = fs::read_to_string(temp.path().join("set/snippet.html")).unwrap();
+    assert!(html.contains(r#" loop="3" controls="none" "#), "{html}");
+}
+
+#[test]
+fn bad_playback_choices_are_refused_before_any_work() {
+    let temp = with_hike("ridge.itb");
+    fs::write(temp.path().join("words.json"), r#"{"map": "Map"}"#).unwrap();
+    for (flags, expected) in [
+        (
+            &["--duration", "2", "--intro", "1", "--hold", "0.9"][..],
+            "to draw the route",
+        ),
+        (&["--strings", "words.json"][..], "unknown word \"map\""),
+        (&["--strings", "missing.json"][..], "missing.json"),
+        (&["--controls", "play,map"][..], "unknown control"),
+        (&["--max-zoom", "8"][..], "--max-zoom"),
+    ] {
+        let mut args = vec!["embed", "ridge.itb", "-o", "site"];
+        args.extend(flags);
+        let output = isotrail(temp.path(), &args);
+        assert_eq!(output.status.code(), Some(2), "{flags:?}");
+        let message = text(&output.stderr);
+        assert!(message.contains(expected), "{flags:?}: {message}");
+        assert!(!temp.path().join("site/snippet.html").exists(), "{flags:?}");
+    }
 }

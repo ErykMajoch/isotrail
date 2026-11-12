@@ -39,7 +39,7 @@ A `size` typed on the command line replaces the `aspect` from a file, as the two
 
 | Command | Takes from `[render]` |
 | --- | --- |
-| `embed` | Everything that is also an `embed` option: the look, camera, text and overlays, data, `scale`, `size` and `safe-area` (for the poster) and `aspect` when it names one shape |
+| `embed` | Everything that is also an `embed` option: the look, camera, text and overlays, data, `scale`, `size` and `safe-area` (for the poster), `aspect` when it names one shape, and the playback settings `duration`, `intro`, `hold`, `loop-back`, `orbit`, `pace` and `loop` |
 | `bundle` | `title`, `exaggeration` and the data settings |
 | `style-lab` | `exaggeration`, `theme` and the data settings (including `padding`, `footprint` and the server and cache settings) only, so the palette and scale you render with don't narrow its comparison |
 
@@ -54,6 +54,8 @@ aspect = ["story", "feed"]     # renders only: an embed has one shape
 aspect = "wide"
 base-url = "/hikes/"
 with-runtime = true
+loop = "forever"               # the embed's own: GIFs keep the [render] setting
+controls = ["play", "scrubber"]
 
 [style-lab]
 palette = ["apollo", "resurrect-64", "warm.hex"]
@@ -174,7 +176,7 @@ Weekdays start on Monday. Date patterns take `{weekday}`, `{weekday-short}`, `{d
 
 Options you type, and settings in a config file, win over the theme: the two that overlap are `--route-colour` and `--route-width`. The theme wins over the built-in values. `--outlines` still scales the edges, and a forced `--weather` still greys the theme's sky.
 
-`embed --theme` draws the poster in the theme, copies the file beside the bundle and names it in the snippet's `theme` attribute.
+`embed --theme` draws the poster in the theme, copies the file beside the bundle and names it in the snippet's `theme` attribute, so the live diorama is drawn in the same theme. Its `[labels]` don't reach the live diorama, which draws no text; the element's own words are set with its `lang` and `strings` attributes (`embed --lang`, `--strings`).
 
 ### Rules
 

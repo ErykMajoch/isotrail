@@ -24,11 +24,16 @@ All notable changes to `isotrail` are documented here.
 
 - **Theme files.** One TOML file sets isotrail's own colours, words and fine-tuning: the ground, rock layers, trees, water, seasons, sky and light, the route, the text and panels. `--theme FILE` works on `render`, `embed` and `style-lab`, and as the `theme` key in a config file; options you type still win over it. `isotrail theme print` writes the built-in theme to start from.
 - **Overlays in your language.** A theme's `[labels]` table translates every word printed on the image, with patterns for times and dates and the decimal separator, so a story can read `sobota, 14 czerwca 2025` and `7,4 km`.
-- `embed --theme` copies the theme beside the bundle and names it in the snippet's `theme` attribute.
+- `embed --theme` copies the theme beside the bundle and names it in the snippet's `theme` attribute, and the web embed draws the live diorama in it.
+- **The web embed plays the way you choose.** New attributes `duration`, `intro`, `hold`, `orbit`, `pace` and `loop-back` shape a play as the same options shape an animation, and `loop` (`loop`, `loop="3"`) plays it again. `embed` writes them from the same options, and `--autoplay` too.
+- **Fewer controls, deeper zoom.** `controls="play,scrubber"` or `controls="none"` shows only some of the buttons and the progress line, and `max-zoom` lets visitors zoom in up to 6×. `embed --controls` and `--max-zoom` write them.
+- **The web embed in your language.** Its buttons, hints and messages come in English and Polish, chosen by the page's or the element's `lang`, and `strings` replaces any of them with your own words. `embed --lang` and `--strings FILE` write them.
+- **Scripting the web embed.** The element sends `isotrail-play`, `isotrail-pause`, `isotrail-ended` and `isotrail-progress` events, its `progress` can be read and set, `reset()` returns to the starting view, and `ready` is a promise that settles once the diorama shows or fails. `play()` called before the diorama is ready plays it once it is.
 
 ### Changed
 
 - A `--scale` that doesn't divide the image size is refused before any download, with exit code 2.
+- A config file's `[render]` settings `duration`, `orbit`, `pace`, `intro`, `hold`, `loop-back` and `loop` now reach `embed` too, so the web embed plays like the animations; an `[embed]` table can set its own.
 
 ## [1.3.1] - 2026-11-11
 

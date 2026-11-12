@@ -2,10 +2,11 @@ use chrono::{NaiveDate, NaiveTime};
 use isotrail_bundle::SceneBundle;
 use isotrail_render::{
     Aim, BASE_BLOCKS_RANGE, BLOCK_HEIGHT_RANGE, Background, Conditions, Edges, ForcedWeather,
-    GodRays, HiddenRoute, Look, MAX_ZOOM, Markers, Mesher, MesherKind, OCCLUSION_RANGE,
-    OUTLINES_RANGE, PITCH_RANGE, PROP_DENSITY_RANGE, Palette, ROUTE_WIDTH_RANGE, RouteStyle,
-    SOFT_SHADOWS_RANGE, SunState, TURN_RANGE, Terrain, View, VoxelMesher, WeatherEffects, When,
-    ZOOM_RANGE, parse_colour, parse_count, parse_sun, parse_switch, parse_within,
+    GodRays, HiddenRoute, Look, MAX_ZOOM, MAX_ZOOM_RANGE, Markers, Mesher, MesherKind,
+    OCCLUSION_RANGE, OUTLINES_RANGE, PITCH_RANGE, PROP_DENSITY_RANGE, Pace, Pacing, Palette,
+    ROUTE_WIDTH_RANGE, RouteStyle, SOFT_SHADOWS_RANGE, SunState, TURN_RANGE, Terrain, Theme, View,
+    VoxelMesher, Walk, WeatherEffects, When, ZOOM_RANGE, parse_colour, parse_count, parse_sun,
+    parse_switch, parse_within,
 };
 use js_sys::{Array, Function, Object, Reflect};
 use wasm_bindgen::{JsCast, JsValue};
@@ -23,11 +24,16 @@ pub struct Options {
     pub held_sun: Option<SunState>,
     /// The starting view's turn, pitch and zoom
     aim: Aim,
+    /// How the route's drawing follows the hike
+    pub pace: Pace,
+    pub pacing: Pacing,
+    pub max_zoom: f32,
 }
 
 impl Options {
     pub fn read(options: &JsValue, bundle: &SceneBundle) -> Options {
-        let defaults = Look::default();
+        let theme = theme(options);
+        let defaults = theme.look();
         let look = Look {
             palette: read(options, "palette", palette).unwrap_or(defaults.palette.clone()),
             background: read(options, "background", str::parse::<Background>)
@@ -60,7 +66,7 @@ impl Options {
             .hiding(read(options, "routeHidden", str::parse::<HiddenRoute>).unwrap_or_default()),
             ..defaults
         };
-        let usual = Terrain::default();
+        let usual = theme.terrain();
         let terrain = Terrain {
             paths: read(options, "paths", parse_switch).unwrap_or(usual.paths),
             streams: read(options, "streams", parse_switch).unwrap_or(usual.streams),
@@ -80,7 +86,7 @@ impl Options {
             weather: read(options, "weather", str::parse::<ForcedWeather>),
             effects: read(options, "weatherEffects", str::parse::<WeatherEffects>)
                 .unwrap_or_default(),
-            ..Conditions::default()
+            ..theme.conditions()
         };
         let held_sun = match conditions.sun {
             Some(_) => Some(SunState::seen(bundle, When::Start, &conditions)),
@@ -94,6 +100,12 @@ impl Options {
             })
             .unwrap_or(VoxelMesher::default().block_height),
             terrain,
+            pace: pace(options, bundle),
+            pacing: theme.pacing,
+            max_zoom: read(options, "maxZoom", |text| {
+                parse_within(text, &MAX_ZOOM_RANGE)
+            })
+            .unwrap_or(MAX_ZOOM),
             conditions,
             held_sun,
             aim: Aim {
@@ -119,7 +131,7 @@ impl Options {
     /// Where the view starts, and returns to on reset
     pub fn start_view(&self) -> View {
         View {
-            zoom: self.aim.zoom.clamp(1.0, MAX_ZOOM),
+            zoom: self.aim.zoom.clamp(1.0, self.max_zoom),
             ..View::default()
         }
     }
@@ -139,6 +151,38 @@ impl Options {
             || (self.mesher == MesherKind::Voxel && self.block_height != other.block_height)
             || self.terrain != other.terrain
     }
+}
+
+/// The theme file's text, or the built-in theme without a usable one
+fn theme(options: &JsValue) -> Theme {
+    let Some(text) = options
+        .is_object()
+        .then(|| Reflect::get(options, &"theme".into()).ok())
+        .flatten()
+        .and_then(|value| value.as_string())
+        .filter(|text| !text.trim().is_empty())
+    else {
+        return Theme::default();
+    };
+    Theme::parse(&text).unwrap_or_else(|error| {
+        web_sys::console::warn_1(
+            &format!("<isotrail-hike> ignored the theme, so it uses the built-in one: {error}")
+                .into(),
+        );
+        Theme::default()
+    })
+}
+
+/// By time only for a hike that has times
+fn pace(options: &JsValue, bundle: &SceneBundle) -> Pace {
+    let pace = read(options, "pace", str::parse::<Pace>).unwrap_or_default();
+    if pace == Pace::Time && !Walk::new(bundle).is_timed() {
+        web_sys::console::warn_1(
+            &"<isotrail-hike> paces by distance: the hike has no times to pace by".into(),
+        );
+        return Pace::Distance;
+    }
+    pace
 }
 
 /// The option `key` parsed, or none when it is missing, empty or bad
