@@ -9,6 +9,7 @@ use serde::Serialize;
 
 static QUIET: AtomicBool = AtomicBool::new(false);
 static JSON: AtomicBool = AtomicBool::new(false);
+static DOWNLOADING: AtomicBool = AtomicBool::new(false);
 
 pub fn set_quiet(quiet: bool) {
     QUIET.store(quiet, Ordering::Relaxed);
@@ -21,6 +22,39 @@ pub fn print_line(line: fmt::Arguments) {
     }
 }
 
+/// Says once per run, on stderr, that data is being downloaded, unless the
+/// run is quiet or reports in JSON
+pub fn downloading(line: &str) {
+    if !DOWNLOADING.swap(true, Ordering::Relaxed)
+        && !QUIET.load(Ordering::Relaxed)
+        && !JSON.load(Ordering::Relaxed)
+    {
+        eprintln!("{line}");
+    }
+}
+
+/// The line before a run's first download, naming what it fetches
+pub fn download_line(map_data: bool, weather: bool) -> String {
+    let what = match (map_data, weather) {
+        (true, true) => "elevation, map and weather data",
+        (true, false) => "elevation and map data",
+        (false, true) => "elevation and weather data",
+        (false, false) => "elevation data",
+    };
+    format!("Downloading {what} for this area (kept in the cache for next time)")
+}
+
+/// A path as printed, with the separator the user typed: on Windows, a path
+/// given with forward slashes keeps them in the parts isotrail adds
+pub fn shown(path: &Path) -> String {
+    let text = path.display().to_string();
+    if cfg!(windows) && text.contains('/') {
+        text.replace('\\', "/")
+    } else {
+        text
+    }
+}
+
 macro_rules! say {
     ($($arg:tt)*) => {
         $crate::report::print_line(format_args!($($arg)*))
@@ -30,9 +64,8 @@ pub(crate) use say;
 
 #[derive(Debug, Args)]
 pub struct ReportArgs {
-    /// Print one JSON object listing the files written, their sizes and the
-    /// credit for the caption, instead of the usual lines
-    #[arg(long)]
+    /// Print one JSON object with the files written and the caption credit, for scripts
+    #[arg(long, help_heading = crate::OUTPUT)]
     json: bool,
 }
 
@@ -52,7 +85,7 @@ pub struct Written {
 impl Written {
     pub fn file(path: &Path) -> Written {
         Written {
-            path: path.display().to_string(),
+            path: shown(path),
             bytes: fs::metadata(path).map_or(0, |meta| meta.len()),
             width: None,
             height: None,
@@ -129,5 +162,33 @@ impl Report {
             say!("Credit for the caption: {credit}");
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_download_line_names_what_is_fetched() {
+        assert_eq!(
+            download_line(true, true),
+            "Downloading elevation, map and weather data for this area (kept in the cache for next time)"
+        );
+        assert!(download_line(true, false).starts_with("Downloading elevation and map data "));
+        assert!(download_line(false, false).starts_with("Downloading elevation data "));
+    }
+
+    #[test]
+    fn paths_keep_the_separator_typed() {
+        let joined = Path::new("site/hikes/my-hike").join("hike.itb");
+        let expected = "site/hikes/my-hike/hike.itb";
+        assert_eq!(shown(&joined), expected);
+        assert_eq!(shown(Path::new("hike.png")), "hike.png");
+        if cfg!(windows) {
+            let typed = Path::new(r"C:\hikes").join("hike.itb");
+            assert_eq!(shown(&typed), r"C:\hikes\hike.itb");
+        }
+        assert_eq!(Written::file(&joined).path, expected);
     }
 }

@@ -35,18 +35,51 @@ use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
 use isotrail_track::{GpxReader, Track, TrackReader, Units};
 use tracing::level_filters::LevelFilter;
 
+/// Help headings, in the order `--help` shows them
+const OUTPUT: &str = "Output";
+const IMAGE: &str = "Image";
+const CAMERA: &str = "Camera";
+const LOOK: &str = "Terrain and look";
+const SCENE: &str = "Scene, light and route";
+const TEXT: &str = "Text and overlays";
+const ANIMATION: &str = "Animation";
+const PLAYBACK: &str = "Playback and controls";
+const ENCODING: &str = "Encoding";
+const DATA: &str = "Data";
+const GENERAL: &str = "General";
+
 /// Turn a recorded hike (GPX) into a pixel-art 3D diorama
 #[derive(Debug, Parser)]
-#[command(name = "isotrail", bin_name = "isotrail", version)]
+#[command(
+    name = "isotrail",
+    bin_name = "isotrail",
+    version,
+    disable_help_flag = true,
+    disable_version_flag = true,
+    after_help = "Example:\n  isotrail render hike.gpx    Make a picture of the hike, saved as hike.png"
+)]
 struct Cli {
     /// Show more log output (-v info, -vv debug, -vvv trace)
-    #[arg(short, long, action = ArgAction::Count, global = true)]
+    #[arg(short, long, action = ArgAction::Count, global = true, help_heading = GENERAL)]
     verbose: u8,
 
-    /// Print nothing but errors; a command's own output, such as the stats
-    /// table or --json, still prints
-    #[arg(short, long, global = true, conflicts_with = "verbose")]
+    /// Print only errors and the command's own output, such as --json
+    #[arg(
+        short,
+        long,
+        global = true,
+        conflicts_with = "verbose",
+        help_heading = GENERAL
+    )]
     quiet: bool,
+
+    /// Print help
+    #[arg(short, long, action = ArgAction::Help, global = true, help_heading = GENERAL)]
+    help: Option<bool>,
+
+    /// Print the version
+    #[arg(short = 'V', long, action = ArgAction::Version, help_heading = GENERAL)]
+    version: Option<bool>,
 
     #[command(subcommand)]
     command: Command,
@@ -54,26 +87,22 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Print distance, elevation and time statistics for a GPX file or scene
-    /// bundle
-    #[command(allow_negative_numbers = true)]
-    Stats(stats::StatsArgs),
-    /// Prepare the terrain around a GPX route and save it with the route as
-    /// a scene bundle (.itb)
-    #[command(allow_negative_numbers = true)]
-    Bundle(bundle::BundleArgs),
-    /// Render a GPX file or scene bundle as a diorama image
+    /// Render a GPX file or scene bundle as a still image, GIF or MP4
     #[command(allow_negative_numbers = true)]
     Render(Box<render::RenderArgs>),
-    /// Write a scene bundle, a poster image and an HTML snippet that put an
-    /// interactive diorama of the hike on a web page
+    /// Put an interactive diorama of the hike on a web page
     #[command(allow_negative_numbers = true)]
     Embed(Box<embed::EmbedArgs>),
-    /// Render a hike with every mesher, pixel scale and built-in palette, and
-    /// lay the images out on a labelled contact sheet
+    /// Save the terrain around a GPX route, with the route, as a scene bundle (.itb)
+    #[command(allow_negative_numbers = true)]
+    Bundle(bundle::BundleArgs),
+    /// Print distance, elevation and time statistics for a hike
+    #[command(allow_negative_numbers = true)]
+    Stats(stats::StatsArgs),
+    /// Compare meshers, pixel scales and palettes on one contact sheet
     #[command(allow_negative_numbers = true)]
     StyleLab(style_lab::StyleLabArgs),
-    /// Show or clear the cache of downloaded elevation and map data
+    /// Show or clear the cache of downloaded elevation, map and weather data
     #[command(allow_negative_numbers = true)]
     Cache(cache::CacheArgs),
     /// Write the built-in theme file, to start a theme of your own from
@@ -345,6 +374,199 @@ mod tests {
     #[test]
     fn cli_definition_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    const HEADINGS: [&str; 11] = [
+        OUTPUT, IMAGE, CAMERA, LOOK, SCENE, TEXT, ANIMATION, PLAYBACK, ENCODING, DATA, GENERAL,
+    ];
+    /// Value names of options that take a number, whose help names the range
+    const NUMERIC: [&str; 12] = [
+        "N",
+        "X",
+        "F",
+        "DEG",
+        "SECONDS",
+        "CELLS",
+        "PX",
+        "WxH",
+        "T,R,B,L",
+        "PERCENT[,METRES]",
+        "AZIMUTH,ELEVATION",
+        "forever|once|N",
+    ];
+
+    fn built() -> clap::Command {
+        let mut cli = Cli::command();
+        cli.build();
+        cli
+    }
+
+    /// Every command, with its name path, such as `cache clear`
+    fn commands(command: &clap::Command, path: String, all: &mut Vec<(String, clap::Command)>) {
+        all.push((path.clone(), command.clone()));
+        for sub in command.get_subcommands() {
+            commands(sub, format!("{path} {}", sub.get_name()), all);
+        }
+    }
+
+    fn every_command() -> Vec<(String, clap::Command)> {
+        let mut all = Vec::new();
+        commands(&built(), "isotrail".into(), &mut all);
+        all
+    }
+
+    fn options(command: &clap::Command) -> impl Iterator<Item = &clap::Arg> {
+        command.get_arguments().filter(|arg| !arg.is_positional())
+    }
+
+    /// The help line without a default written into it
+    fn words(help: &str) -> usize {
+        let text = match help.find(" [default: ") {
+            Some(at) => &help[..at],
+            None => help,
+        };
+        text.split_whitespace().count()
+    }
+
+    fn help(arg: &clap::Arg) -> String {
+        arg.get_help().map(ToString::to_string).unwrap_or_default()
+    }
+
+    #[test]
+    fn options_sit_under_the_usage_guides_headings() {
+        let cli = built();
+        for name in ["render", "embed", "bundle", "style-lab"] {
+            let command = cli.find_subcommand(name).unwrap();
+            for arg in options(command) {
+                let heading = arg.get_help_heading();
+                assert!(
+                    heading.is_some_and(|heading| HEADINGS.contains(&heading)),
+                    "{name} --{}: {heading:?}",
+                    arg.get_id()
+                );
+            }
+        }
+        let names: Vec<&str> = cli
+            .get_subcommands()
+            .map(clap::Command::get_name)
+            .filter(|&name| name != "help")
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "render",
+                "embed",
+                "bundle",
+                "stats",
+                "style-lab",
+                "cache",
+                "theme"
+            ]
+        );
+    }
+
+    #[test]
+    fn help_lines_are_short() {
+        let mut long = Vec::new();
+        for (path, command) in every_command() {
+            let about = command.get_about().map(ToString::to_string);
+            if let Some(about) = about.filter(|about| words(about) > 15) {
+                long.push(format!("{path}: {about}"));
+            }
+            for arg in options(&command).chain(command.get_positionals()) {
+                let help = help(arg);
+                if help.is_empty() || words(&help) > 15 || help.ends_with('.') {
+                    long.push(format!("{path} {}: {help:?}", arg.get_id()));
+                }
+            }
+        }
+        assert!(
+            long.is_empty(),
+            "{}",
+            long.join(
+                "
+"
+            )
+        );
+    }
+
+    #[test]
+    fn number_options_name_their_range() {
+        for (path, command) in every_command() {
+            for arg in options(&command) {
+                let names = arg.get_value_names().unwrap_or_default();
+                let numeric = names.iter().any(|name| NUMERIC.contains(&name.as_str()))
+                    || (arg.get_long() == Some("scale"));
+                let help = help(arg);
+                if numeric {
+                    assert!(
+                        help.contains("from ") && help.contains(" to "),
+                        "{path} --{}: {help}",
+                        arg.get_id()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn list_defaults_read_as_typed() {
+        for (path, command) in every_command() {
+            for arg in options(&command) {
+                assert!(
+                    arg.get_default_values().len() <= 1,
+                    "{path} --{}: a default of several values prints with spaces",
+                    arg.get_id()
+                );
+            }
+        }
+    }
+
+    /// Whether `text` names `--option`, not just a longer one that starts
+    /// with it
+    fn mentions(text: &str, option: &str) -> bool {
+        text.match_indices(option).any(|(at, _)| {
+            !text[at + option.len()..].starts_with(|c: char| c.is_ascii_alphanumeric() || c == '-')
+        })
+    }
+
+    #[test]
+    fn the_usage_guide_lists_every_option() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/usage.md");
+        let guide = fs::read_to_string(path).unwrap().replace("\r\n", "\n");
+        let mut known = std::collections::BTreeSet::new();
+        let mut missing = Vec::new();
+        for (path, command) in every_command() {
+            for arg in options(&command) {
+                let Some(long) = arg.get_long() else { continue };
+                if ["help", "version"].contains(&long) {
+                    continue;
+                }
+                let names =
+                    std::iter::once(long).chain(arg.get_visible_aliases().into_iter().flatten());
+                for name in names {
+                    let option = format!("--{name}");
+                    if !mentions(&guide, &option) {
+                        missing.push(format!("{path} {option}"));
+                    }
+                    known.insert(option);
+                }
+            }
+        }
+        assert!(missing.is_empty(), "not in the usage guide: {missing:?}");
+        for row in guide.lines().filter(|line| line.starts_with("| `-")) {
+            let cell = row[2..].split(" | ").next().unwrap_or_default();
+            for (at, _) in cell.match_indices("--") {
+                let option: String = cell[at..]
+                    .chars()
+                    .take_while(|&c| c == '-' || c.is_ascii_alphanumeric())
+                    .collect();
+                assert!(
+                    known.contains(&option),
+                    "the usage guide names {option}, which no command has"
+                );
+            }
+        }
     }
 
     #[test]

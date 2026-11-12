@@ -11,27 +11,25 @@ const MAX_GIF_DURATION_S: f32 = 60.0;
 const MAX_MP4_DURATION_S: f32 = 180.0;
 
 #[derive(Debug, Args)]
+#[command(next_help_heading = crate::ANIMATION)]
 pub struct AnimationArgs {
-    /// Length of an animation: 1s to 60s for a GIF, up to 180s for an MP4;
-    /// every 10 s is 0.5 s showing the scene, 8 s drawing the route and
-    /// 1.5 s on the finished hike, unless --intro or --hold say otherwise
+    /// Length in seconds, from 1 to 60 for GIFs and 180 for MP4s
     #[arg(long, value_name = "SECONDS", default_value = "10s", value_parser = parse_duration)]
     duration: f32,
 
-    /// Seconds showing the scene before the route starts to draw
+    /// Seconds on the scene before the route draws, from 0 to 180 [default: 5% of the clip]
     #[arg(long, value_name = "SECONDS", value_parser = parse_part)]
     intro: Option<f32>,
 
-    /// Seconds on the finished hike once the route is drawn
+    /// Seconds on the finished hike, from 0 to 180 [default: 15% of the clip]
     #[arg(long, value_name = "SECONDS", value_parser = parse_part)]
     hold: Option<f32>,
 
-    /// After the hold, undraw the route and turn the camera back, so a
-    /// looping animation runs on without a jump
+    /// After the hold, undraw the route and turn back, for a loop without a jump
     #[arg(long)]
     loop_back: bool,
 
-    /// Frames per second of an animation: up to 50 for a GIF, 60 for an MP4
+    /// Frames per second, from 1 to 50 for GIFs and 60 for MP4s
     #[arg(
         long,
         value_name = "N",
@@ -40,20 +38,17 @@ pub struct AnimationArgs {
     )]
     fps: u32,
 
-    /// Different images per second, at most --fps; fewer gives choppy,
-    /// game-like motion
+    /// Different images per second, from 1 to --fps; fewer gives choppy, game-like motion
     #[arg(long, value_name = "N", value_parser = parse_fps)]
     step_fps: Option<u32>,
 
-    /// How far the camera turns during an animation, in degrees, easing to
-    /// the still's view as the route finishes: 0 keeps it still, 360 makes a
-    /// full turn and a negative angle turns the other way
+    /// How far the camera turns, in degrees from -360 to 360; 0 keeps it still
     #[arg(long, value_name = "DEG", default_value_t = DEFAULT_ORBIT_DEG, value_parser = parse_orbit)]
     orbit: f32,
 
-    /// How fast the route draws itself: the same distance every frame, or
-    /// following the recorded times with stops cut to a minute
-    #[arg(long, value_enum, default_value_t = PaceArg::Distance)]
+    /// Draw the route at an even speed, or following the recorded times
+    #[arg(long, value_enum, value_name = "distance|time", default_value_t = PaceArg::Distance,
+          hide_possible_values = true)]
     pace: PaceArg,
 }
 
@@ -83,8 +78,8 @@ impl AnimationArgs {
             && step > self.fps
         {
             return Err(usage(format!(
-                "--step-fps {step} is more than --fps {}: it can only slow the motion down",
-                self.fps
+                "--step-fps {step} is more than --fps {fps}; use a value from 1 to {fps}",
+                fps = self.fps
             )));
         }
         let timeline = Timeline {

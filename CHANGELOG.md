@@ -8,6 +8,9 @@ All notable changes to `isotrail` are documented here.
 
 - The size example in `--help` and the usage guide, `--size 1200x800`, didn't work at the default `--scale 3`. It is now `1200x900`.
 - When `--scale` doesn't divide the image, the message lists the scales that do.
+- On Windows, a folder typed with forward slashes, as in `-o site/hikes`, keeps them in the paths isotrail prints, the JSON included, instead of mixing in backslashes.
+- A clip of one frame says `Rendered 1 frame`. A render at `--scale 1`, or a GIF at `--gif-scale 1`, no longer says it was enlarged from the same size.
+- The usage line under a mistake no longer lists options set through environment variables, such as `ISOTRAIL_CACHE_DIR`.
 
 ### Changed
 
@@ -17,6 +20,10 @@ All notable changes to `isotrail` are documented here.
 - Part of an option's name, such as `--colour`, points to the whole one, `--route-colour`.
 - A value out of range names the range, such as `expected a whole number from 1 to 60`, for every number option and in config files. Negative numbers get the same message instead of being taken for an option.
 - A config file saved as UTF-16 gets the same clear message as a theme file.
+- `--help` groups the options under the same headings as the usage guide, gives the range of every number option, and shows list defaults as you type them, such as `title,date,stats,profile`. The help lines are shorter and wrap to the terminal's width.
+- `isotrail --help` lists `render` first and ends with an example.
+- The first download of a run prints one line saying what it fetches. Runs that find everything in the cache stay quiet.
+- The messages for weather missing from the cache with `--offline`, a `--step-fps` above `--fps`, overlays that give way to fit, and characters the font can't draw are shorter and say what to do.
 - A palette file that is missing, can't be read or has a bad line is a usage mistake, with exit code 2, found before any download. `isotrail render hike.png`, where `hike.png` is a picture, now exits with 1 like any input that isn't a hike.
 
 ## [1.4.0] - 2026-11-12

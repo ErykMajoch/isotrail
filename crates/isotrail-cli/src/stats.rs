@@ -17,16 +17,16 @@ pub struct StatsArgs {
     /// GPX file or scene bundle (.itb) to read
     file: PathBuf,
 
-    /// Print machine-readable JSON (always metres and seconds)
+    /// Print JSON for scripts, always in metres and seconds
     #[arg(long)]
     json: bool,
 
-    /// Units for the human-readable table
-    #[arg(long, value_enum, default_value_t = UnitsArg::Metric)]
+    /// Units for the table
+    #[arg(long, value_enum, value_name = "metric|imperial", default_value_t = UnitsArg::Metric,
+          hide_possible_values = true)]
     units: UnitsArg,
 
-    /// Also show the weather hour by hour: from the bundle, or looked up on
-    /// Open-Meteo for a GPX file
+    /// Also show the weather hour by hour, from the bundle or from Open-Meteo
     #[arg(long)]
     weather: bool,
 

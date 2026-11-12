@@ -37,30 +37,25 @@ const WORDS: [&str; 17] = [
 
 /// How the embed plays the hike, and what it shows and says
 #[derive(Debug, Args)]
+#[command(next_help_heading = crate::PLAYBACK)]
 pub struct PlaybackArgs {
-    /// Length of one play of the embed, from 1s to 180s; every 10 s is 0.5 s
-    /// showing the scene and 8 s drawing the route, then 1.5 s on the
-    /// finished hike before it plays again, unless --intro or --hold say
-    /// otherwise
+    /// Length of one play in seconds, from 1 to 180
     #[arg(long, value_name = "SECONDS", default_value = "10s", value_parser = parse_duration)]
     duration: f32,
 
-    /// Seconds showing the scene before the route starts to draw
+    /// Seconds on the scene before the route draws, from 0 to 180 [default: 5% of a play]
     #[arg(long, value_name = "SECONDS", value_parser = parse_part)]
     intro: Option<f32>,
 
-    /// Seconds on the finished hike before the embed plays again
+    /// Seconds on the finished hike before the next play, from 0 to 180 [default: 15%]
     #[arg(long, value_name = "SECONDS", value_parser = parse_part)]
     hold: Option<f32>,
 
-    /// Between plays, undraw the route and turn the camera back, so a looping
-    /// embed runs on without a jump
+    /// Between plays, undraw the route and turn back, for a loop without a jump
     #[arg(long)]
     loop_back: bool,
 
-    /// How far the camera turns as the embed plays, in degrees, easing to the
-    /// starting view as the route finishes: 0 keeps it still and a negative
-    /// angle turns the other way
+    /// How far the camera turns while the route draws, in degrees from -360 to 360
     #[arg(
         long,
         value_name = "DEG",
@@ -69,36 +64,32 @@ pub struct PlaybackArgs {
     )]
     orbit: f32,
 
-    /// How fast the route draws itself: the same distance every frame, or
-    /// following the recorded times with stops cut to a minute
-    #[arg(long, value_enum, default_value_t = PaceArg::Distance)]
+    /// Draw the route at an even speed, or following the recorded times
+    #[arg(long, value_enum, value_name = "distance|time", default_value_t = PaceArg::Distance,
+          hide_possible_values = true)]
     pace: PaceArg,
 
-    /// How many times the embed plays: forever, once, or a number of times
+    /// How many times the embed plays: forever, once, or a number from 1 to 1000
     #[arg(long = "loop", id = "loop", value_name = "forever|once|N", default_value = "once", value_parser = parse_plays)]
     plays: Plays,
 
-    /// Play as soon as the diorama shows, unless the visitor prefers reduced
-    /// motion
+    /// Play as soon as the diorama shows, unless the visitor prefers reduced motion
     #[arg(long)]
     autoplay: bool,
 
-    /// The controls to show: play, zoom, reset and scrubber (the progress
-    /// line), or none; turning and zooming by hand and the keys stay
+    /// Controls to show: play, zoom, reset and scrubber, or none [default: all]
     #[arg(long, value_name = "LIST|none", value_parser = parse_controls)]
     controls: Option<Controls>,
 
-    /// The largest zoom the visitor can reach, from 1 to 6 (default 3)
+    /// The largest zoom a visitor can reach, from 1 to 6 [default: 3]
     #[arg(long, value_name = "X", value_parser = parse_max_zoom)]
     max_zoom: Option<f32>,
 
-    /// Language of the embed's buttons and messages, such as pl; English
-    /// unless it or the page names one the embed knows (en, pl)
+    /// Language of the buttons and messages, such as pl; en and pl are built in
     #[arg(long, value_name = "CODE", value_parser = parse_lang)]
     lang: Option<String>,
 
-    /// A JSON file of the embed's words to use instead of the built-in ones,
-    /// such as {"play": "Start"}
+    /// A JSON file of words to use instead of the built-in ones
     #[arg(long, value_name = "FILE")]
     strings: Option<PathBuf>,
 }

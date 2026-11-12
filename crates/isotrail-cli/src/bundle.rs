@@ -7,7 +7,7 @@ use anyhow::Context;
 use clap::{Args, ValueEnum};
 use isotrail_bundle::Route;
 use isotrail_geo::{
-    Cache, CachedFetcher, DEFAULT_DETAIL, DemSource, FeatureSource, FetchError, Footprint,
+    Cache, CachedFetcher, DEFAULT_DETAIL, DemSource, FeatureSource, FetchError, Fetcher, Footprint,
     FootprintOptions, Grid, Heightmap, HttpFetcher, Landcover, LandcoverMap, MIN_PADDING_M,
     OSM_ATTRIBUTION, OVERPASS_URL, Orientation, OsmFeatures, OverpassSource, PADDING_FRACTION,
     Provenance, RetryPolicy, SceneBundle, TERRARIUM_URL, TerrariumSource, line_mask, origin,
@@ -20,7 +20,7 @@ use tracing::{info, warn};
 
 use crate::config::Typed;
 use crate::output;
-use crate::report::{Report, ReportArgs, Written, say};
+use crate::report::{self, Report, ReportArgs, Written, say, shown};
 use crate::season::{self, SeasonArg};
 use crate::servers::{CacheDirArg, WeatherUrlArg, parse_template};
 use crate::weather;
@@ -47,34 +47,30 @@ pub struct BundleArgs {
     file: PathBuf,
 
     /// Where to write the scene bundle (.itb)
-    #[arg(short, long, value_name = "BUNDLE")]
+    #[arg(short, long, value_name = "BUNDLE", help_heading = crate::OUTPUT)]
     output: PathBuf,
 
-    /// Also write intermediate images (heightmap, hillshade, landcover, water
-    /// and path maps) to this directory
-    #[arg(long, value_name = "DIR")]
+    /// Also write images of the prepared terrain to this folder
+    #[arg(long, value_name = "DIR", help_heading = crate::OUTPUT)]
     debug_dir: Option<PathBuf>,
 
-    /// How many times taller than life to draw the terrain; chosen from the
-    /// slab's size and relief by default
-    #[arg(long, value_name = "X", value_parser = parse_exaggeration)]
+    #[command(flatten)]
+    report: ReportArgs,
+
+    /// How many times taller than life to draw the terrain, from 0.1 to 100 [default: automatic]
+    #[arg(long, value_name = "X", value_parser = parse_exaggeration, help_heading = crate::LOOK)]
     exaggeration: Option<f64>,
 
     /// Title to save instead of the hike's name
-    #[arg(long, value_name = "TEXT")]
+    #[arg(long, value_name = "TEXT", help_heading = crate::TEXT)]
     title: Option<String>,
-
-    /// Read settings from the [bundle] table of this TOML file, and those of
-    /// its [render] table that bundle shares; flags given here take
-    /// precedence over it, and it over the user config file
-    #[arg(long, value_name = "FILE")]
-    config: Option<PathBuf>,
 
     #[command(flatten)]
     data: DataArgs,
 
-    #[command(flatten)]
-    report: ReportArgs,
+    /// Read settings from the [bundle] and [render] tables of this TOML file
+    #[arg(long, value_name = "FILE", help_heading = crate::GENERAL)]
+    config: Option<PathBuf>,
 }
 
 pub fn parse_exaggeration(value: &str) -> Result<f64, String> {
@@ -92,21 +88,21 @@ fn parse_detail(value: &str) -> Result<u32, String> {
 
 /// How terrain and map data are fetched for a GPX file
 #[derive(Debug, Args)]
+#[command(next_help_heading = crate::DATA)]
 pub struct DataArgs {
-    /// Grid cells along the long side of the terrain slab
+    /// Grid cells along the slab's long side, from 8 to 1024
     #[arg(long, value_name = "N", default_value_t = DEFAULT_DETAIL.get(), value_parser = parse_detail)]
     detail: u32,
 
-    /// Only use elevation and map data that is already in the cache
+    /// Only use elevation, map and weather data already in the cache
     #[arg(long)]
     offline: bool,
 
-    /// Overpass API endpoint for OpenStreetMap data
+    /// Overpass API server for the OpenStreetMap data
     #[arg(long, value_name = "URL", env = "ISOTRAIL_OVERPASS_URL", default_value = OVERPASS_URL)]
     overpass_url: String,
 
-    /// Elevation tiles in the terrarium format from another server, such as
-    /// a mirror of the same data: an address with {z}, {x} and {y}
+    /// Elevation tiles from a mirror, as an address with {z}, {x} and {y}
     #[arg(long, value_name = "URL", env = "ISOTRAIL_TERRAIN_URL",
           default_value = TERRARIUM_URL, value_parser = parse_template)]
     terrain_url: String,
@@ -117,29 +113,27 @@ pub struct DataArgs {
     #[command(flatten)]
     cache_dir: CacheDirArg,
 
-    /// Build the diorama from the elevation alone, without OpenStreetMap's
-    /// lakes, woods and paths, when its server is busy or out of reach
+    /// Build the diorama from the elevation alone, without lakes, woods and paths
     #[arg(long)]
     no_map_data: bool,
 
-    /// Ground added round the route on each side: a percentage of its
-    /// length and width, and at least this many metres; 15,500 by default
-    #[arg(long, value_name = "PERCENT[,METRES]", value_parser = parse_padding, allow_hyphen_values = true)]
+    /// Ground round the route: percent from 0 to 100, metres from 0 to 10000 [default: 15,500]
+    #[arg(long, value_name = "PERCENT[,METRES]", value_parser = parse_padding,
+          allow_hyphen_values = true)]
     padding: Option<Padding>,
 
-    /// Which way the slab's sides run: along the route, or north-south and
-    /// east-west
-    #[arg(long, value_enum, value_name = "ALONG", default_value_t = FootprintArg::Route)]
+    /// Which way the slab's sides run: along the route, or north-south and east-west
+    #[arg(long, value_enum, value_name = "route|north", default_value_t = FootprintArg::Route,
+          hide_possible_values = true)]
     footprint: FootprintArg,
 
-    /// Leave the weather out: don't look it up, or draw what a bundle holds,
-    /// along with the snow and ice it brings
+    /// Leave out the weather, with the snow and ice it brings
     #[arg(long)]
     pub no_weather: bool,
 
-    /// Season to show: the hike's own, from its date, place and weather, or
-    /// spring, summer, autumn or winter (snow everywhere and frozen lakes)
-    #[arg(long, value_enum, value_name = "SEASON", default_value_t = SeasonArg::Auto)]
+    /// Season to show: the hike's own (auto), or a season you choose
+    #[arg(long, value_enum, value_name = "auto|spring|summer|autumn|winter",
+          default_value_t = SeasonArg::Auto, hide_possible_values = true)]
     pub season: SeasonArg,
 }
 
@@ -235,6 +229,41 @@ pub fn fetcher(
     Ok(CachedFetcher::new(HttpFetcher::new()?, cache).offline(offline))
 }
 
+/// Says that data is being downloaded before the run's first request that
+/// the cache can't answer
+struct Announced<F> {
+    inner: F,
+    line: String,
+}
+
+impl<F: Fetcher> Fetcher for Announced<F> {
+    fn get(&self, url: &str) -> Result<Vec<u8>, FetchError> {
+        report::downloading(&self.line);
+        self.inner.get(url)
+    }
+
+    fn post(&self, url: &str, body: &[u8]) -> Result<Vec<u8>, FetchError> {
+        report::downloading(&self.line);
+        self.inner.post(url, body)
+    }
+
+    fn forget(&self, url: &str, body: Option<&[u8]>) -> Result<(), FetchError> {
+        self.inner.forget(url, body)
+    }
+}
+
+impl DataArgs {
+    /// `http` behind the cache, announcing its first download
+    fn cached(&self, http: HttpFetcher) -> anyhow::Result<CachedFetcher<Announced<HttpFetcher>>> {
+        let cache = Cache::new(crate::cache::dir(self.cache_dir.get())?);
+        let announced = Announced {
+            inner: http,
+            line: report::download_line(!self.no_map_data, !self.no_weather),
+        };
+        Ok(CachedFetcher::new(announced, cache).offline(self.offline))
+    }
+}
+
 /// Map features from Overpass, which retries by itself, or none with
 /// --no-map-data
 fn map_data(grid: &Grid, data: &DataArgs) -> anyhow::Result<Option<OsmFeatures>> {
@@ -244,9 +273,7 @@ fn map_data(grid: &Grid, data: &DataArgs) -> anyhow::Result<Option<OsmFeatures>>
         );
         return Ok(None);
     }
-    let http = HttpFetcher::new()?.with_retry(RetryPolicy::once());
-    let cache = Cache::new(crate::cache::dir(data.cache_dir.get())?);
-    let fetcher = CachedFetcher::new(http, cache).offline(data.offline);
+    let fetcher = data.cached(HttpFetcher::new()?.with_retry(RetryPolicy::once()))?;
     let features = OverpassSource::new(&fetcher)
         .endpoint(&data.overpass_url)
         .features(grid)
@@ -301,7 +328,7 @@ pub fn prepare(track: &Track, file: &Path, data: &DataArgs) -> anyhow::Result<Pr
     let detail = NonZeroU32::new(data.detail).context("--detail must be positive")?;
     let grid = Grid::new(&footprint, detail);
 
-    let fetcher = fetcher(data.offline, data.cache_dir.get())?;
+    let fetcher = data.cached(HttpFetcher::new()?)?;
     let tiles = TerrariumSource::<HttpFetcher>::tiles(&grid).len();
     let mut heightmap = TerrariumSource::new(&fetcher)
         .template(&data.terrain_url)
@@ -473,8 +500,8 @@ pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
     );
     for (path, size) in written {
         match size {
-            Some(bytes) => say!("Wrote {} ({} KB)", path.display(), bytes.div_ceil(1024)),
-            None => say!("Wrote {}", path.display()),
+            Some(bytes) => say!("Wrote {} ({} KB)", shown(&path), bytes.div_ceil(1024)),
+            None => say!("Wrote {}", shown(&path)),
         }
         report.add(Written::file(&path));
     }

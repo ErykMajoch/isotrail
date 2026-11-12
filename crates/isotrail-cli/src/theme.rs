@@ -11,9 +11,8 @@ use crate::usage;
 /// A theme file for `render`, `embed` and `style-lab`
 #[derive(Debug, Args)]
 pub struct ThemeFileArg {
-    /// Colours, words and fine-tuning from a theme file (TOML); flags and
-    /// settings win over it, and isotrail theme print writes one to start from
-    #[arg(long, value_name = "FILE")]
+    /// Colours, words and fine-tuning from a theme file; isotrail theme print writes one
+    #[arg(long, value_name = "FILE", help_heading = crate::LOOK)]
     theme: Option<PathBuf>,
 }
 
@@ -44,10 +43,9 @@ pub struct ThemeArgs {
 
 #[derive(Debug, Subcommand)]
 enum ThemeCommand {
-    /// Print the built-in theme, with every key at its built-in value, to
-    /// start a theme of your own from
+    /// Print the built-in theme, with every key at its built-in value
     Print {
-        /// Write it to this file instead
+        /// Write it to this file instead of printing it
         #[arg(short, long, value_name = "FILE")]
         output: Option<PathBuf>,
     },
@@ -60,7 +58,7 @@ pub fn run(args: &ThemeArgs) -> anyhow::Result<()> {
         Some(path) => {
             output::plan([path.as_path()], &[])?;
             output::write(path, |file| Ok(file.write_all(text.as_bytes())?))?;
-            say!("Wrote {}", path.display());
+            say!("Wrote {}", crate::report::shown(path));
         }
         None => print!("{text}"),
     }

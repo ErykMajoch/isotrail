@@ -523,13 +523,12 @@ fn weather_is_left_out_when_it_cannot_be_found_or_is_not_wanted() {
         assert!(text(&output.stdout).contains("\nWeather: none\n"));
         let stderr = text(&output.stderr);
         assert_eq!(
-            stderr.contains("could not get the weather, so it is left out"),
+            stderr.contains(
+                "the weather for this hike isn't in the cache, so it is left out; run once without --offline to add it"
+            ),
             warning,
             "{stderr}"
         );
-        if warning {
-            assert!(stderr.contains("is not in the cache"), "{stderr}");
-        }
         let bundle = SceneBundle::from_bytes(&std::fs::read(&itb).unwrap()).unwrap();
         assert_eq!(bundle.weather, None);
         assert_eq!(bundle.meta.provenance.weather, None);
@@ -595,7 +594,7 @@ fn stats_show_the_weather_hour_by_hour() {
     let cold = tempfile::tempdir().unwrap();
     let output = isotrail(cold.path(), &["stats", &gpx(), "--weather", "--offline"]);
     assert!(output.status.success());
-    assert!(text(&output.stderr).contains("could not get the weather"));
+    assert!(text(&output.stderr).contains("the weather for this hike isn't in the cache"));
     assert!(text(&output.stdout).contains("Distance"));
     assert!(!text(&output.stdout).contains("Credit"));
 
@@ -787,4 +786,98 @@ fn server_addresses_are_checked() {
         let stderr = text(&output.stderr);
         assert!(stderr.contains(message), "{stderr}");
     }
+}
+
+/// Answers `count` Overpass requests with the recorded map data
+fn overpass_server(count: usize) -> (String, std::thread::JoinHandle<()>) {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let body = RecordedFetcher::new(fixtures().join("osm"))
+        .post(
+            OVERPASS_URL,
+            &OverpassSource::<RecordedFetcher>::request_body(&snowdon_grid()),
+        )
+        .unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!(
+        "http://127.0.0.1:{}/api/interpreter",
+        listener.local_addr().unwrap().port()
+    );
+    let server = std::thread::spawn(move || {
+        for _ in 0..count {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream);
+            let mut length = 0;
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let lower = line.to_ascii_lowercase();
+                if let Some(value) = lower.strip_prefix("content-length:") {
+                    length = value.trim().parse().unwrap();
+                }
+                if line == "\r\n" || line.is_empty() {
+                    break;
+                }
+            }
+            let mut request = vec![0; length];
+            reader.read_exact(&mut request).unwrap();
+            let mut stream = reader.into_inner();
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(head.as_bytes()).unwrap();
+            stream.write_all(&body).unwrap();
+        }
+    });
+    (url, server)
+}
+
+#[test]
+fn the_first_download_of_a_run_is_announced() {
+    const LINE: &str =
+        "Downloading elevation and map data for this area (kept in the cache for next time)";
+    let temp = tempfile::tempdir().unwrap();
+    let (url, server) = overpass_server(3);
+    let run = |cache: &str, extra: &[&str]| {
+        let cache_dir = temp.path().join(cache);
+        if !cache_dir.exists() {
+            warm(&cache_dir, false);
+        }
+        let itb = temp.path().join(format!("{cache}.itb"));
+        let args = [
+            "bundle",
+            &gpx(),
+            "-o",
+            itb.to_str().unwrap(),
+            "--detail",
+            "32",
+            "--no-weather",
+            "--overpass-url",
+            &url,
+        ];
+        let output = isotrail(&cache_dir, &[&args[..], extra].concat());
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        output
+    };
+    // The map data isn't cached yet: the line comes once, before it
+    let cold = run("cold", &[]);
+    let stderr = text(&cold.stderr);
+    assert_eq!(stderr.matches(LINE).count(), 1, "{stderr}");
+    assert!(!text(&cold.stdout).contains("Downloading"));
+    // Everything is cached now
+    let warm = run("cold", &[]);
+    assert!(
+        !text(&warm.stderr).contains("Downloading"),
+        "{}",
+        text(&warm.stderr)
+    );
+    for (cache, flag) in [("quiet", "-q"), ("json", "--json")] {
+        let output = run(cache, &[flag]);
+        assert!(
+            !text(&output.stderr).contains("Downloading"),
+            "{flag}: {}",
+            text(&output.stderr)
+        );
+    }
+    server.join().unwrap();
 }

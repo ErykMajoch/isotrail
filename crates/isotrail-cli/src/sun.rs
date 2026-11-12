@@ -39,7 +39,7 @@ pub fn hike_sun(
         .as_deref()
         .and_then(|name| name.parse().ok())
         .or_else(|| timezone_at(grid.origin_lat, grid.origin_lon))
-        .context("could not find the hike's time zone for --time")?;
+        .context("can't find the hike's time zone for --time")?;
     let local = date.and_time(time);
     let at = zone
         .from_local_datetime(&local)

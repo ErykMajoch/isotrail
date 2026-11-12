@@ -13,7 +13,7 @@ anyhow = "1.0.104"
 bytemuck = { version = "1.25.2", features = ["derive"] }
 chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 chrono-tz = "0.10.4"
-clap = { version = "4.6.7", features = ["derive", "env"] }
+clap = { version = "4.6.7", features = ["derive", "env", "wrap_help"] }
 ctrlc = "3.5.2"
 console_error_panic_hook = "0.1.7"
 directories = "6.0.0"

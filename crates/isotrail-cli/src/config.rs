@@ -99,7 +99,39 @@ fn explain(mut error: clap::Error, args: &[OsString]) -> clap::Error {
         }
         _ => {}
     }
+    // Clap's usage line names every option given, the environment's too
+    if error.get(ContextKind::Usage).is_some() {
+        error.insert(
+            ContextKind::Usage,
+            ContextValue::StyledStr(plain_usage(args)),
+        );
+    }
     error
+}
+
+/// The usage line of the command typed, such as `isotrail cache clear`,
+/// without the options given
+fn plain_usage(args: &[OsString]) -> clap::builder::StyledStr {
+    let mut cli = Cli::command();
+    cli.build();
+    let mut path = Vec::new();
+    let mut command = &cli;
+    for arg in args.iter().skip(1).filter_map(|arg| arg.to_str()) {
+        if let Some(sub) = command.find_subcommand(arg) {
+            path.push(sub.get_name().to_owned());
+            command = sub;
+        }
+    }
+    usage_of(&mut cli, &path)
+}
+
+fn usage_of(command: &mut Command, path: &[String]) -> clap::builder::StyledStr {
+    if let Some((name, rest)) = path.split_first()
+        && let Some(sub) = command.find_subcommand_mut(name)
+    {
+        return usage_of(sub, rest);
+    }
+    command.render_usage()
 }
 
 fn looks_like_a_hike(path: &Path) -> bool {

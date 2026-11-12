@@ -6,7 +6,8 @@ use isotrail_bundle::{
     Units, WEATHER_ATTRIBUTION, Weather, WeatherDataset, WeatherSample, weather_condition,
 };
 use isotrail_geo::{
-    Fetcher, MAX_TIMED_SPAN_DAYS, OpenMeteoSource, WeatherRequest, WeatherServer, WeatherSource,
+    Fetcher, MAX_TIMED_SPAN_DAYS, OpenMeteoSource, WeatherError, WeatherRequest, WeatherServer,
+    WeatherSource,
 };
 use isotrail_track::{Track, Tz};
 use serde::Serialize;
@@ -46,10 +47,16 @@ pub fn look_up(
             );
             Some((weather, provenance))
         }
+        Err(WeatherError::Offline { .. }) => {
+            warn!(
+                "the weather for this hike isn't in the cache, so it is left out; run once without --offline to add it"
+            );
+            None
+        }
         Err(err) => {
             warn!(
-                "could not get the weather, so it is left out: {:#}",
-                anyhow::Error::from(err)
+                "can't get the weather, so it is left out: {}",
+                crate::describe(&err.into())
             );
             None
         }

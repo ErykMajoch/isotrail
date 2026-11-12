@@ -10,39 +10,38 @@ use crate::{UnitsArg, usage};
 
 /// What the render prints over the diorama
 #[derive(Debug, Args)]
+#[command(next_help_heading = crate::TEXT)]
 pub struct OverlayArgs {
-    /// What to print over the render, or none for the diorama alone (the
-    /// data credit is then printed here, for the caption)
+    /// Parts to print over the diorama: title, date, stats and profile, or none
     #[arg(
         long,
         value_enum,
         value_delimiter = ',',
-        value_name = "PARTS",
-        default_values_t = [Part::Title, Part::Date, Part::Stats, Part::Profile]
+        value_name = "LIST|none",
+        default_value = "title,date,stats,profile",
+        hide_possible_values = true
     )]
     overlay: Vec<Part>,
 
-    /// Leave the map and elevation data credit off the image and print it
-    /// here instead, for the caption
+    /// Leave the data credit off the image, and print it for the caption
     #[arg(long)]
     no_attribution: bool,
 
-    /// Put the text on frosted panels, or with none straight on the scene
-    /// with a dark outline
-    #[arg(long, value_enum, default_value_t = PanelArg::Frosted)]
+    /// Text on frosted panels, or straight on the scene with a dark outline
+    #[arg(long, value_enum, value_name = "frosted|none", default_value_t = PanelArg::Frosted,
+          hide_possible_values = true)]
     panel: PanelArg,
 
     /// Title to print instead of the hike's name
     #[arg(long, value_name = "TEXT")]
     title: Option<String>,
 
-    /// Print the title large, or small like the subtitle and date
-    #[arg(long, value_enum, default_value_t = TitleSizeArg::Large)]
+    /// Print the title large, or small like the date
+    #[arg(long, value_enum, value_name = "large|small", default_value_t = TitleSizeArg::Large,
+          hide_possible_values = true)]
     title_size: TitleSizeArg,
 
-    /// Line to print under the title; by default, a name too long for two
-    /// lines is split there at its first " - " or " | ", and none never
-    /// splits it
+    /// Line under the title, or none to never split a long title into two
     #[arg(long, value_name = "TEXT|none")]
     subtitle: Option<String>,
 
@@ -50,29 +49,27 @@ pub struct OverlayArgs {
     #[arg(long, value_name = "TEXT", conflicts_with = "date_format")]
     date: Option<String>,
 
-    /// How to print the date: long (Saturday 14 June 2025), short
-    /// (14 Jun 2025) or iso (2025-06-14)
-    #[arg(long, value_enum, default_value_t = DateFormatArg::Long)]
+    /// The date as Saturday 14 June 2025 (long), 14 Jun 2025 (short) or 2025-06-14
+    #[arg(long, value_enum, value_name = "long|short|iso", default_value_t = DateFormatArg::Long,
+          hide_possible_values = true)]
     date_format: DateFormatArg,
 
-    /// Stats to print, in this order; time is the moving time, and speed and
-    /// pace are averaged over it
+    /// Stats to print, in this order; time is the moving time
     #[arg(
         long,
         value_enum,
         value_delimiter = ',',
-        value_name = "STATS",
-        default_values_t = [StatArg::Distance, StatArg::Gain, StatArg::Time, StatArg::High]
+        value_name = "LIST",
+        default_value = "distance,gain,time,high"
     )]
     stats: Vec<StatArg>,
 
     /// Units for the stats
-    #[arg(long, value_enum, default_value_t = UnitsArg::Metric)]
+    #[arg(long, value_enum, value_name = "metric|imperial", default_value_t = UnitsArg::Metric,
+          hide_possible_values = true)]
     units: UnitsArg,
 
-    /// Where the text goes: one column on the left for landscape images and
-    /// the title on top with the stats at the bottom otherwise (auto), or
-    /// either for every shape
+    /// Where the text goes: chosen by the image's shape (auto), or one layout for all
     #[arg(long, value_name = "auto|stacked|column", default_value = "auto",
           value_parser = parse_layout)]
     layout: Layout,
@@ -267,8 +264,7 @@ impl OverlayArgs {
         ] {
             let missing = font.missing(words);
             if !missing.is_empty() {
-                let missing: String = missing.iter().map(|c| format!(" {c:?}")).collect();
-                warn!("the {field} has characters the font can't draw, left out:{missing}");
+                warn!("{}", undrawable(field, &missing));
             }
         }
         Ok(text)
@@ -284,7 +280,6 @@ impl OverlayArgs {
         scale: u32,
         style: &OverlayStyle,
     ) -> anyhow::Result<Fitted> {
-        let frame = format!("the {shape} frame at --scale {scale}");
         let fit = Overlays::fit(text, style, framing).map_err(|_| {
             usage(format!(
                 "the text doesn't fit the {shape} image at --scale {scale}; try a lower \
@@ -294,7 +289,7 @@ impl OverlayArgs {
         if !fit.steps.is_empty() {
             let steps: Vec<String> = fit.steps.iter().map(describe).collect();
             warn!(
-                "the overlays don't fit {frame}, so it has {}",
+                "the text didn't fit the {shape} image at --scale {scale}, so it has {}",
                 and_list(&steps)
             );
         }
@@ -357,9 +352,24 @@ fn describe(step: &FitStep) -> String {
         FitStep::NoCredit => "no credit (it is printed below, for the caption)".into(),
         FitStep::LeftOutStats(labels) => {
             let noun = if labels.len() == 1 { "stat" } else { "stats" };
-            format!("no {noun} {}", and_list(labels))
+            format!("no {} {noun}", and_list(labels))
         }
     }
+}
+
+/// The warning for characters the font lacks in one part of the text
+fn undrawable(field: &str, missing: &[char]) -> String {
+    let missing: Vec<String> = missing.iter().map(|c| format!("{c:?}")).collect();
+    let has = if field.ends_with('s') { "have" } else { "has" };
+    let (noun, were) = if missing.len() == 1 {
+        ("a character", "it was")
+    } else {
+        ("characters", "they were")
+    };
+    format!(
+        "the {field} {has} {noun} the font can't draw, so {were} left out: {}",
+        missing.join(" ")
+    )
 }
 
 /// `a, b and c`
@@ -535,11 +545,19 @@ mod tests {
         let described: Vec<String> = steps.iter().map(describe).collect();
         assert_eq!(
             and_list(&described),
-            "no profile and no stats time and high point"
+            "no profile and no time and high point stats"
+        );
+        assert_eq!(
+            undrawable("stats", &['✓']),
+            "the stats have a character the font can't draw, so it was left out: '✓'"
+        );
+        assert_eq!(
+            undrawable("title", &['😀', '✓']),
+            "the title has characters the font can't draw, so they were left out: '😀' '✓'"
         );
         assert_eq!(
             describe(&FitStep::LeftOutStats(vec!["speed".into()])),
-            "no stat speed"
+            "no speed stat"
         );
     }
 

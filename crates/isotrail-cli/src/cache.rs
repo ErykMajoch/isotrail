@@ -22,16 +22,15 @@ pub struct CacheArgs {
 
 #[derive(Debug, Subcommand)]
 enum CacheCommand {
-    /// Print the cache directory (--cache-dir or ISOTRAIL_CACHE_DIR use
-    /// another one)
+    /// Print where the cache folder is
     Path,
-    /// Delete cached downloads; map data stays cached until cleared
+    /// Delete the downloaded data
     Clear {
-        /// Don't ask for confirmation
+        /// Delete without asking first
         #[arg(short, long)]
         yes: bool,
 
-        /// Only delete downloads made more than this many days ago
+        /// Only delete downloads older than this many days, such as 90
         #[arg(long, value_name = "DAYS", value_parser = parse_days)]
         older_than: Option<u32>,
     },

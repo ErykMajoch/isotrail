@@ -19,7 +19,7 @@ use crate::report::{Report, ReportArgs, Written};
 use crate::theme::ThemeFileArg;
 use crate::usage;
 
-const SCALES: [u32; 3] = [3, 5, 6];
+const SCALES_LIST: &str = "3,5,6";
 const BACKGROUND: [u8; 4] = [28, 28, 32, 255];
 const INK: [u8; 4] = [232, 232, 232, 255];
 const GUTTER: u32 = 24;
@@ -34,41 +34,37 @@ pub struct StyleLabArgs {
     /// GPX file or scene bundle (.itb) to render
     file: PathBuf,
 
-    /// Directory to write the contact sheet and the individual images to
-    #[arg(short, long, value_name = "DIR")]
+    /// Folder to write the contact sheet and the single images to
+    #[arg(short, long, value_name = "DIR", help_heading = crate::OUTPUT)]
     output: PathBuf,
 
-    /// Shape of the images: story or video (9:16), portrait (3:4), feed
-    /// (4:5), square or wide (16:9)
-    #[arg(long, value_enum, default_value_t = AspectArg::Story)]
+    #[command(flatten)]
+    report: ReportArgs,
+
+    /// Shape of the images: story, video, portrait, feed, square or wide
+    #[arg(long, value_enum, value_name = "SHAPE", default_value_t = AspectArg::Story,
+          hide_possible_values = true, help_heading = crate::IMAGE)]
     aspect: AspectArg,
 
-    /// Pixel scales to compare, each from 1 to 16 and dividing both sides of
-    /// the image
+    /// Pixel scales to compare, each from 1 to 16 and dividing both image sides
     #[arg(
         long,
         value_delimiter = ',',
-        value_name = "SCALES",
-        default_values_t = SCALES,
-        value_parser = parse_scale
+        value_name = "LIST",
+        default_value = SCALES_LIST,
+        value_parser = parse_scale,
+        help_heading = crate::IMAGE
     )]
     scale: Vec<u32>,
 
-    /// Palettes to compare: built-in palettes' names, Lospec .hex files or
-    /// none; every built-in palette by default
-    #[arg(long, value_delimiter = ',', value_name = "PALETTES")]
+    /// Palettes to compare: built-in names, .hex files or none [default: every built-in palette]
+    #[arg(long, value_delimiter = ',', value_name = "LIST", help_heading = crate::LOOK)]
     palette: Vec<String>,
 
-    /// How many times taller than life to draw the terrain; chosen from the
-    /// slab's size and relief by default
-    #[arg(long, value_name = "X", value_parser = crate::bundle::parse_exaggeration)]
+    /// How many times taller than life to draw the terrain, from 0.1 to 100 [default: automatic]
+    #[arg(long, value_name = "X", value_parser = crate::bundle::parse_exaggeration,
+          help_heading = crate::LOOK)]
     exaggeration: Option<f64>,
-
-    /// Read settings from the [style-lab] table of this TOML file, and the
-    /// data settings of its [render] table; flags given here take precedence
-    /// over it, and it over the user config file
-    #[arg(long, value_name = "FILE")]
-    config: Option<PathBuf>,
 
     #[command(flatten)]
     theme: ThemeFileArg,
@@ -76,8 +72,9 @@ pub struct StyleLabArgs {
     #[command(flatten)]
     data: DataArgs,
 
-    #[command(flatten)]
-    report: ReportArgs,
+    /// Read settings from the [style-lab] table of this TOML file, and data from [render]
+    #[arg(long, value_name = "FILE", help_heading = crate::GENERAL)]
+    config: Option<PathBuf>,
 }
 
 /// A palette on the sheet: its label and what `--palette` said

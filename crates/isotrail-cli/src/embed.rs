@@ -18,7 +18,7 @@ use crate::output;
 use crate::overlay::OverlayArgs;
 use crate::playback::PlaybackArgs;
 use crate::render::Source;
-use crate::report::{Report, ReportArgs, Written, say};
+use crate::report::{Report, ReportArgs, Written, say, shown};
 use crate::scene::SceneArgs;
 use crate::theme::ThemeFileArg;
 use crate::usage;
@@ -36,56 +36,49 @@ pub struct EmbedArgs {
     /// GPX file or scene bundle (.itb) to put on a web page
     file: PathBuf,
 
-    /// Directory to write the scene bundle, poster image and snippet.html to
-    #[arg(short, long, value_name = "DIR")]
+    /// Folder to write the scene bundle, poster image and snippet.html to
+    #[arg(short, long, value_name = "DIR", help_heading = crate::OUTPUT)]
     output: PathBuf,
 
-    /// Shape of the embed and its poster: story or video (9:16), portrait
-    /// (3:4), feed (4:5), square or wide (16:9)
-    #[arg(long, value_enum, default_value_t = AspectArg::Wide)]
-    aspect: AspectArg,
-
-    /// Poster pixels per drawn pixel, from 1 to 16, dividing both sides of
-    /// the poster; the live embed picks its own to suit the page
-    #[arg(long, value_name = "N", default_value_t = DEFAULT_SCALE, value_parser = parse_scale)]
-    scale: u32,
-
-    /// How many times taller than life to draw the terrain; chosen from the
-    /// slab's size and relief by default
-    #[arg(long, value_name = "X", value_parser = crate::bundle::parse_exaggeration)]
-    exaggeration: Option<f64>,
-
-    /// Also copy the web runtime (isotrail-embed.js and pkg/) into the
-    /// directory
-    #[arg(long)]
+    /// Also copy the web runtime (isotrail-embed.js and pkg/) into the folder
+    #[arg(long, help_heading = crate::OUTPUT)]
     with_runtime: bool,
 
-    /// Where to copy the web runtime from; by default the web folder next to
-    /// the isotrail executable
-    #[arg(long, value_name = "DIR", requires = "with_runtime")]
+    /// Where to copy the web runtime from [default: the web folder next to isotrail]
+    #[arg(long, value_name = "DIR", requires = "with_runtime", help_heading = crate::OUTPUT)]
     runtime_dir: Option<PathBuf>,
 
-    /// The address the directory will be served at, such as /hikes/derwent/;
-    /// by default the snippet uses bare file names
-    #[arg(long, value_name = "URL")]
+    /// The address the folder is served at, such as /hikes/derwent/ [default: bare names]
+    #[arg(long, value_name = "URL", help_heading = crate::OUTPUT)]
     base_url: Option<String>,
 
-    /// The address of isotrail-embed.js, when the site serves one copy for
-    /// all its hikes; by default it sits in the directory
-    #[arg(long, value_name = "URL")]
+    /// The address of isotrail-embed.js, when one copy serves every hike on the site
+    #[arg(long, value_name = "URL", help_heading = crate::OUTPUT)]
     runtime_url: Option<String>,
 
-    /// Read settings from the [embed] table of this TOML file, and those of
-    /// its [render] table that embed shares; flags given here take precedence
-    /// over it, and it over the user config file
-    #[arg(long, value_name = "FILE")]
-    config: Option<PathBuf>,
+    #[command(flatten)]
+    report: ReportArgs,
+
+    /// Shape of the embed and its poster: story, video, portrait, feed, square or wide
+    #[arg(long, value_enum, value_name = "SHAPE", default_value_t = AspectArg::Wide,
+          hide_possible_values = true, help_heading = crate::IMAGE)]
+    aspect: AspectArg,
+
+    /// Poster pixels per drawn pixel, from 1 to 16, dividing both sides of the poster
+    #[arg(long, value_name = "N", default_value_t = DEFAULT_SCALE, value_parser = parse_scale,
+          help_heading = crate::IMAGE)]
+    scale: u32,
 
     #[command(flatten)]
     frame: FrameArgs,
 
     #[command(flatten)]
     look: LookArgs,
+
+    /// How many times taller than life to draw the terrain, from 0.1 to 100 [default: automatic]
+    #[arg(long, value_name = "X", value_parser = crate::bundle::parse_exaggeration,
+          help_heading = crate::LOOK)]
+    exaggeration: Option<f64>,
 
     #[command(flatten)]
     theme: ThemeFileArg,
@@ -102,8 +95,9 @@ pub struct EmbedArgs {
     #[command(flatten)]
     data: DataArgs,
 
-    #[command(flatten)]
-    report: ReportArgs,
+    /// Read settings from the [embed] and [render] tables of this TOML file
+    #[arg(long, value_name = "FILE", help_heading = crate::GENERAL)]
+    config: Option<PathBuf>,
 }
 
 pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
@@ -237,7 +231,7 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
         output::write(&bundle_path, |file| Ok(file.write_all(&bytes)?))?;
         say!(
             "Wrote {} ({} KB)",
-            bundle_path.display(),
+            shown(&bundle_path),
             bytes.len().div_ceil(1024)
         );
         report.add(Written::file(&bundle_path));
@@ -284,7 +278,7 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
         attributes: &attributes,
     });
     output::write(&snippet_path, |file| Ok(file.write_all(html.as_bytes())?))?;
-    say!("Wrote {}\n\n{html}", snippet_path.display());
+    say!("Wrote {}\n\n{html}", shown(&snippet_path));
     report.add(Written::file(&snippet_path));
     report.finish(
         args.overlay

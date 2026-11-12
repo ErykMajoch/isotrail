@@ -38,34 +38,33 @@ impl From<AspectArg> for Aspect {
 /// The image's size and safe area, and where the camera looks from
 #[derive(Debug, Args)]
 pub struct FrameArgs {
-    /// Image size in pixels, such as 1200x900, instead of an aspect; each
-    /// side from 16 to 8192 and a multiple of --scale
-    #[arg(long, value_name = "WxH", value_parser = parse_size, conflicts_with = "aspect")]
+    /// Any size instead of an aspect, such as 1200x900, each side from 16 to 8192
+    #[arg(long, value_name = "WxH", value_parser = parse_size, conflicts_with = "aspect",
+          help_heading = crate::IMAGE)]
     pub size: Option<(u32, u32)>,
 
-    /// Margins the diorama and text keep clear of, in percent of the image:
-    /// TOP,RIGHT,BOTTOM,LEFT, or one number for every side; each aspect has
-    /// its own by default, and --size keeps 5
-    #[arg(long, value_name = "T,R,B,L", value_parser = parse_safe_area, allow_hyphen_values = true)]
+    /// Margins kept clear, in percent: top,right,bottom,left or one number, each from 0 to 45
+    #[arg(long, value_name = "T,R,B,L", value_parser = parse_safe_area, allow_hyphen_values = true,
+          help_heading = crate::IMAGE)]
     pub safe_area: Option<Insets>,
 
     /// How far the camera looks down, in degrees from 10 to 80
-    #[arg(long, value_name = "DEG", default_value_t = PITCH_DEG, value_parser = parse_pitch)]
+    #[arg(long, value_name = "DEG", default_value_t = PITCH_DEG, value_parser = parse_pitch,
+          help_heading = crate::CAMERA)]
     pub pitch: f32,
 
-    /// Moves the camera this many degrees anticlockwise round the slab, as
-    /// seen from above, from -360 to 360
-    #[arg(long, value_name = "DEG", default_value_t = 0.0, value_parser = parse_turn)]
+    /// Turns the camera anticlockwise round the slab, in degrees from -360 to 360
+    #[arg(long, value_name = "DEG", default_value_t = 0.0, value_parser = parse_turn,
+          help_heading = crate::CAMERA)]
     pub turn: f32,
 
-    /// Compass bearing the camera looks towards (0 north, 90 east), instead
-    /// of along the hike
-    #[arg(long, value_name = "DEG", value_parser = parse_heading)]
+    /// Compass bearing the camera looks towards, from 0 to 360 [default: along the hike]
+    #[arg(long, value_name = "DEG", value_parser = parse_heading, help_heading = crate::CAMERA)]
     pub heading: Option<f32>,
 
-    /// Draws the slab this many times the size that fits the safe area, from
-    /// 0.5 to 2; above 1 crops it
-    #[arg(long, value_name = "X", default_value_t = 1.0, value_parser = parse_zoom)]
+    /// The diorama's size, from 0.5 to 2 times what fits; above 1 crops it
+    #[arg(long, value_name = "X", default_value_t = 1.0, value_parser = parse_zoom,
+          help_heading = crate::CAMERA)]
     pub zoom: f32,
 }
 

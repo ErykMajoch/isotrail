@@ -1,8 +1,8 @@
 use clap::ValueEnum;
 use isotrail_bundle::{SceneBundle, Season};
 use isotrail_geo::{
-    Fetcher, OpenMeteoSource, SeasonKind, WeatherRequest, WeatherServer, WeatherSource,
-    forced_season, ice_line, snow_line, snow_readings,
+    Fetcher, OpenMeteoSource, SeasonKind, WeatherError, WeatherRequest, WeatherServer,
+    WeatherSource, forced_season, ice_line, snow_line, snow_readings,
 };
 use isotrail_render::foliage;
 use isotrail_track::Track;
@@ -10,7 +10,6 @@ use tracing::warn;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
 pub enum SeasonArg {
-    /// The hike's own, from its date, place and weather
     #[default]
     Auto,
     Spring,
@@ -38,10 +37,16 @@ pub fn estimate(
         .server(server)
         .days_before(&request)
         .unwrap_or_else(|err| {
-            warn!(
-                "could not get the weather before the hike, so lakes are left open: {:#}",
-                anyhow::Error::from(err)
-            );
+            if matches!(err, WeatherError::Offline { .. }) {
+                warn!(
+                    "the weather before the hike isn't in the cache, so lakes are left open; run once without --offline to add it"
+                );
+            } else {
+                warn!(
+                    "can't get the weather before the hike, so lakes are left open: {}",
+                    crate::describe(&err.into())
+                );
+            }
             Vec::new()
         });
     let route = &bundle.route.points;

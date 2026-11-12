@@ -14,18 +14,17 @@ const MAX_PLAYS: u16 = 1000;
 
 /// How an animation is written to its file
 #[derive(Debug, Args)]
+#[command(next_help_heading = crate::ENCODING)]
 pub struct EncodingArgs {
-    /// Output pixels per drawn pixel in a GIF, from 1 (the drawn size, for
-    /// small files on a website) up to --scale, the default
+    /// Output pixels per drawn pixel in a GIF, from 1 to --scale [default: --scale]
     #[arg(long, value_name = "N", value_parser = parse_gif_scale)]
     gif_scale: Option<u32>,
 
-    /// How many times a GIF plays: forever, once, or a number of times
+    /// How many times a GIF plays: forever, once, or a number from 1 to 1000
     #[arg(long = "loop", id = "loop", value_name = "forever|once|N", default_value = "forever", value_parser = parse_plays)]
     plays: Plays,
 
-    /// MP4 quality, from 0 (lossless, which many players can't play) to 51;
-    /// lower is better and larger
+    /// MP4 quality, from 0 (lossless) to 51; lower is better and larger
     #[arg(
         long,
         value_name = "N",
@@ -34,8 +33,7 @@ pub struct EncodingArgs {
     )]
     crf: u8,
 
-    /// How hard the MP4 encoder works: slower presets make smaller files at
-    /// the same quality; x264's own default (medium) if not given
+    /// How hard the MP4 encoder works; slower makes smaller files [default: medium]
     #[arg(long, value_name = "NAME", value_parser = PossibleValuesParser::new(X264_PRESETS))]
     preset: Option<String>,
 

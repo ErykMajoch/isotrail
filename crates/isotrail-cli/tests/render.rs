@@ -1297,7 +1297,7 @@ fn a_coarse_scale_gives_parts_up_and_moves_the_credit_to_the_caption() {
     assert!(output.status.success(), "{}", text(&output.stderr));
     let stderr = text(&output.stderr);
     for frame in ["story", "wide"] {
-        let warning = format!("the overlays don't fit the {frame} frame at --scale 10, so it has");
+        let warning = format!("the text didn't fit the {frame} image at --scale 10, so it has");
         assert!(stderr.contains(&warning), "{stderr}");
     }
     assert!(stderr.contains("no profile"), "{stderr}");
@@ -1342,7 +1342,7 @@ fn clips_take_an_intro_a_hold_a_loop_count_and_a_smaller_gif() {
         "once",
     ]);
     assert!(
-        stdout.starts_with("Rendered 5 frames of 108 × 108 from 108 × 108 pixels\n"),
+        stdout.starts_with("Rendered 5 frames of 108 × 108\n"),
         "{stdout}"
     );
     let bytes = fs::read(temp.path().join("small.gif")).unwrap();

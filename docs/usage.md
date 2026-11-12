@@ -1,6 +1,6 @@
 # Usage
 
-isotrail has seven commands. Each one prints its options with `--help`, for example `isotrail render --help`. The global flag `-v` (repeatable, up to `-vvv`) shows more log output, and `-q` (`--quiet`) shows only errors.
+isotrail has seven commands. Each one prints its options with `--help`, for example `isotrail render --help`, grouped under the same headings as this page. The global flag `-v` (`--verbose`, repeatable up to `-vvv`) shows more log output, and `-q` (`--quiet`) shows only errors.
 
 - [`render`](#render): render a hike as a PNG, an animated GIF or an MP4 video
 - [`bundle`](#bundle): save a hike's scene as a `.itb` file
@@ -256,6 +256,8 @@ With an Open-Meteo API key in `ISOTRAIL_OPEN_METEO_KEY`, the weather comes from 
 `--terrain-url` is meant for mirrors of the same elevation data, so the drawn credit still names Terrain Tiles. If your server has other data, credit it yourself, for example with `--credit-extra`. A key in the address (`key=`, `apikey=`, `token=`…) is masked in the bundle and in messages.
 
 The public Overpass server is sometimes busy. isotrail then tries again six times over about two minutes, printing a line before each wait. If it still can't get the map data, it stops and suggests trying later, another server with `--overpass-url`, or `--no-map-data`, which makes the diorama from the slope and height of the ground alone: no lakes, woods, fields or paths, and no OpenStreetMap credit. A server that can't be reached at all, such as a mistyped `--overpass-url`, is given up on after a few seconds. Any download that takes longer than 10 seconds prints a line saying it is still waiting.
+
+Before its first download, a run prints one line saying what it fetches, such as `Downloading elevation, map and weather data for this area (kept in the cache for next time)`. A run that finds everything in the cache prints nothing, and neither does one with `-q` or `--json`.
 
 ## bundle
 

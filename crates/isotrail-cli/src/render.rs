@@ -34,44 +34,37 @@ pub struct RenderArgs {
     /// GPX file or scene bundle (.itb) to render
     file: PathBuf,
 
-    /// Where to write the image (.png) or animation (.gif or .mp4); defaults
-    /// to a PNG named after the input in the current directory. With several
-    /// aspects, each name gets the aspect added: hike-story.png, hike-feed.png
-    #[arg(short, long, value_name = "FILE")]
+    /// The file to write: .png for an image, .gif or .mp4 for an animation [default: <input>.png]
+    #[arg(short, long, value_name = "FILE", help_heading = crate::OUTPUT)]
     output: Option<PathBuf>,
 
-    /// Image shapes to render: story or video (1080 × 1920), portrait
-    /// (1080 × 1440), feed (1080 × 1350), square (1080 × 1080) or wide
-    /// (1920 × 1080)
+    /// Image shapes, separated by commas: story, video, portrait, feed, square or wide
     #[arg(
         long,
         value_enum,
         value_delimiter = ',',
-        value_name = "ASPECTS",
-        default_values_t = [AspectArg::Story]
+        value_name = "LIST",
+        default_value = "story",
+        hide_possible_values = true,
+        help_heading = crate::IMAGE
     )]
     aspect: Vec<AspectArg>,
 
-    /// Output pixels per drawn pixel, from 1 to 16; it must divide both
-    /// sides of the image
-    #[arg(long, value_name = "N", default_value_t = DEFAULT_SCALE, value_parser = parse_scale)]
+    /// Output pixels per drawn pixel, from 1 to 16, dividing both sides of the image
+    #[arg(long, value_name = "N", default_value_t = DEFAULT_SCALE, value_parser = parse_scale,
+          help_heading = crate::IMAGE)]
     scale: u32,
-
-    /// Read settings from the [render] table of this TOML file; flags given
-    /// here take precedence over it, and it over the user config file
-    #[arg(long, value_name = "FILE")]
-    config: Option<PathBuf>,
-
-    /// How many times taller than life to draw the terrain; chosen from the
-    /// slab's size and relief by default
-    #[arg(long, value_name = "X", value_parser = crate::bundle::parse_exaggeration)]
-    exaggeration: Option<f64>,
 
     #[command(flatten)]
     frame: FrameArgs,
 
     #[command(flatten)]
     look: LookArgs,
+
+    /// How many times taller than life to draw the terrain, from 0.1 to 100 [default: automatic]
+    #[arg(long, value_name = "X", value_parser = crate::bundle::parse_exaggeration,
+          help_heading = crate::LOOK)]
+    exaggeration: Option<f64>,
 
     #[command(flatten)]
     theme: ThemeFileArg,
@@ -93,6 +86,10 @@ pub struct RenderArgs {
 
     #[command(flatten)]
     report: ReportArgs,
+
+    /// Read settings from the [render] table of this TOML file
+    #[arg(long, value_name = "FILE", help_heading = crate::GENERAL)]
+    config: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -202,10 +199,7 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
     for ((framing, fit), output) in framings.iter().zip(&fitted).zip(&outputs) {
         let overlays = &fit.overlays;
         let (width, height) = (framing.width * args.scale, framing.height * args.scale);
-        let size = format!(
-            "{width} × {height} from {} × {} pixels",
-            framing.width, framing.height
-        );
+        let drawn = (framing.width, framing.height);
         if let Some(motion) = &motion {
             let clip = Clip {
                 gpu: &gpu,
@@ -219,24 +213,34 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
             let frames = write_clip(args, &clip, output, ffmpeg.as_ref())?;
             let scale = clip_scale(args, motion, ffmpeg.is_some());
             let size = (framing.width * scale, framing.height * scale);
-            say!(
-                "Rendered {frames} frames of {} × {} from {} × {} pixels",
-                size.0,
-                size.1,
-                framing.width,
-                framing.height
-            );
+            say!("{}", rendered(Some(frames), size, drawn));
             report.wrote(Written::clip(output, size, frames));
         } else {
             let frame = still(&gpu, &bundle, mesher.as_ref(), overlays, &aim, &sun, &look)?;
             let image = upscale(&frame, args.scale)?;
             output::write(output, |file| Ok(encode_png(&image, file)?))?;
-            say!("Rendered {size}");
+            say!("{}", rendered(None, (width, height), drawn));
             report.wrote(Written::image(output, (width, height)));
         }
     }
     let dropped = fitted.iter().any(Fitted::credit_dropped);
     report.finish(args.overlay.caption_credit(&bundle, dropped).as_deref())
+}
+
+/// `Rendered 300 frames of 1080 × 1920 from 360 × 640 pixels`, without the
+/// frames for a still or the drawn size when nothing was enlarged
+fn rendered(frames: Option<u32>, size: (u32, u32), drawn: (u32, u32)) -> String {
+    let frames = match frames {
+        Some(1) => "1 frame of ".to_owned(),
+        Some(frames) => format!("{frames} frames of "),
+        None => String::new(),
+    };
+    let from = if size == drawn {
+        String::new()
+    } else {
+        format!(" from {} × {} pixels", drawn.0, drawn.1)
+    };
+    format!("Rendered {frames}{} × {}{from}", size.0, size.1)
 }
 
 /// Output pixels per drawn pixel in the clip: a GIF may be smaller
@@ -499,6 +503,23 @@ mod tests {
     struct Cli {
         #[command(flatten)]
         render: RenderArgs,
+    }
+
+    #[test]
+    fn rendered_lines_count_frames_and_name_the_drawn_size_when_enlarged() {
+        assert_eq!(
+            rendered(None, (1080, 1920), (360, 640)),
+            "Rendered 1080 × 1920 from 360 × 640 pixels"
+        );
+        assert_eq!(rendered(None, (360, 640), (360, 640)), "Rendered 360 × 640");
+        assert_eq!(
+            rendered(Some(1), (1080, 1080), (108, 108)),
+            "Rendered 1 frame of 1080 × 1080 from 108 × 108 pixels"
+        );
+        assert_eq!(
+            rendered(Some(300), (360, 640), (360, 640)),
+            "Rendered 300 frames of 360 × 640"
+        );
     }
 
     #[test]

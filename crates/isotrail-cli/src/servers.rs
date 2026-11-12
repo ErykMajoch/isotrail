@@ -9,8 +9,7 @@ const KEY_ENV: &str = "ISOTRAIL_OPEN_METEO_KEY";
 /// Where downloads are cached
 #[derive(Debug, Args)]
 pub struct CacheDirArg {
-    /// Folder for the cache of downloaded elevation, map and weather data,
-    /// instead of the usual one for this user
+    /// Folder for the downloaded data, instead of the usual cache folder
     #[arg(long, value_name = "DIR", env = "ISOTRAIL_CACHE_DIR", global = true)]
     cache_dir: Option<PathBuf>,
 }
@@ -26,9 +25,7 @@ impl CacheDirArg {
 /// Where the weather is looked up
 #[derive(Debug, Args)]
 pub struct WeatherUrlArg {
-    /// Another server with Open-Meteo's API, answering at /v1/archive and
-    /// /v1/forecast; with ISOTRAIL_OPEN_METEO_KEY set and no server given,
-    /// Open-Meteo's servers for customers
+    /// Another server with Open-Meteo's API, for the weather
     #[arg(long, value_name = "URL", env = "ISOTRAIL_WEATHER_URL", value_parser = parse_server)]
     weather_url: Option<String>,
 }

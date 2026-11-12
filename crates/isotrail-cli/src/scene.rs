@@ -9,9 +9,9 @@ use isotrail_render::{
 /// Which parts of the scene show, how it is lit and how the route is drawn,
 /// for `render` and `embed`
 #[derive(Debug, Args)]
+#[command(next_help_heading = crate::SCENE)]
 pub struct SceneArgs {
-    /// How many trees, bushes and boulders stand on the terrain, as a share
-    /// of the usual number from 0 (none) to 2
+    /// Trees, bushes and boulders, as a share of the usual number from 0 to 2
     #[arg(long, value_name = "X", default_value_t = 1.0, value_parser = parse_density)]
     prop_density: f32,
 
@@ -30,8 +30,7 @@ pub struct SceneArgs {
           action = ArgAction::Set)]
     strata: bool,
 
-    /// How far the slab's base sits below the lowest ground, in blocks, from
-    /// 1 to 24
+    /// Depth of the slab's base below the lowest ground, in blocks, from 1 to 24
     #[arg(long, value_name = "N", default_value_t = BASE_BLOCKS, value_parser = parse_base_blocks)]
     base_blocks: u32,
 
@@ -49,8 +48,7 @@ pub struct SceneArgs {
           action = ArgAction::Set)]
     night_sky: bool,
 
-    /// Which of the weather's effects to draw: clouds (with the dimming under
-    /// them), shade (cloud shadows on the ground), rain, snow and haze, or none
+    /// Weather effects to draw: clouds, shade, rain, snow and haze, or none
     #[arg(long, value_name = "LIST|none", default_value = "clouds,shade,rain,snow,haze",
           value_parser = parse_effects)]
     weather_effects: WeatherEffects,
@@ -59,30 +57,26 @@ pub struct SceneArgs {
     #[arg(long, value_name = "clear|cloudy|overcast|rain|snow|fog", value_parser = parse_weather)]
     weather: Option<ForcedWeather>,
 
-    /// Set the sun by hand, as its compass bearing and its elevation in
-    /// degrees, such as 200,25
+    /// Set the sun by hand: bearing from 0 to 360, elevation from -90 to 90
     #[arg(long, value_name = "AZIMUTH,ELEVATION", value_parser = parse_sun,
           allow_hyphen_values = true, conflicts_with = "time")]
     sun: Option<[f64; 2]>,
 
-    /// The route's colour (default #d64834, or the theme's)
+    /// The route's colour [default: #d64834, or the theme's]
     #[arg(long, visible_alias = "route-color", value_name = "#RRGGBB",
           value_parser = parse_colour)]
     route_colour: Option<[u8; 3]>,
 
-    /// The route's width in pixels of the image before it is enlarged, from 1
-    /// to 4 (default 2, or the theme's)
+    /// The route's width in drawn pixels, from 1 to 4 [default: 2, or the theme's]
     #[arg(long, value_name = "PX", value_parser = parse_route_width)]
     route_width: Option<u32>,
 
-    /// How the parts of the route behind ridges show: faded and dashed,
-    /// faded, like the rest, or not at all
+    /// The route behind ridges: faded and dashed, faded, like the rest, or hidden
     #[arg(long, value_name = "dashed|dim|solid|off", default_value = "dashed",
           value_parser = parse_hidden)]
     route_hidden: HiddenRoute,
 
-    /// Which markers to draw: the start and finish flags and, in clips, the
-    /// route's head, or none
+    /// Markers to draw: start, finish and, in animations, the route's head, or none
     #[arg(long, value_name = "LIST|none", default_value = "start,finish,head",
           value_parser = parse_markers)]
     markers: Markers,
