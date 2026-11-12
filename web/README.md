@@ -22,7 +22,7 @@ static/hikes/derwent/
 `snippet.html` holds the two lines that show the hike. The command prints them too:
 
 ```html
-<script type="module" src="/hikes/derwent/isotrail-embed.js?v=1.4.0"></script>
+<script type="module" src="/hikes/derwent/isotrail-embed.js?v=1.4.1"></script>
 <isotrail-hike src="/hikes/derwent/derwent-edge.itb" poster="/hikes/derwent/derwent-edge.png" aspect="wide" style="display:block;aspect-ratio:16/9"><img src="/hikes/derwent/derwent-edge.png" alt="Diorama of Derwent Edge" style="display:block;width:100%"></isotrail-hike>
 ```
 
@@ -49,7 +49,7 @@ isotrail embed derwent-edge.gpx -o static/hikes/derwent --base-url /hikes/derwen
 Put the files under `static/`, with the runtime in `static/isotrail/`. Then add a shortcode in `layouts/shortcodes/hike.html`:
 
 ```go-html-template
-{{- $version := "1.4.0" -}}
+{{- $version := "1.4.1" -}}
 {{- $aspect := .Get "aspect" | default "wide" -}}
 {{- $ratios := dict "story" "9/16" "video" "9/16" "portrait" "3/4" "feed" "4/5" "square" "1/1" "wide" "16/9" -}}
 {{- $ratio := index $ratios $aspect | default (replace $aspect ":" "/") -}}
@@ -72,7 +72,7 @@ Put the files under `public/`, with the runtime in `public/isotrail/`. Then add 
 ```astro
 ---
 const { src, poster, alt = 'Hike diorama', aspect = 'wide', autoplay = false } = Astro.props;
-const version = '1.4.0';
+const version = '1.4.1';
 const ratios = { story: '9/16', video: '9/16', portrait: '3/4', feed: '4/5', square: '1/1', wide: '16/9' };
 const ratio = ratios[aspect] ?? aspect.replace(':', '/');
 ---

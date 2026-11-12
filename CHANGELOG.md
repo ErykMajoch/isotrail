@@ -4,6 +4,10 @@ All notable changes to `isotrail` are documented here.
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-11-12
+
+Plain error messages, grouped help and rewritten docs. No new options, and everything that worked in 1.4.0 still works.
+
 ### Fixed
 
 - The size example in `--help` and the usage guide, `--size 1200x800`, didn't work at the default `--scale 3`. It is now `1200x900`.
@@ -21,6 +25,8 @@ All notable changes to `isotrail` are documented here.
 - `route-color` works as an attribute of the web embed, and `routeColor` in the `Viewer` script API, next to `route-colour` and `routeColour`.
 - The web embed's console warnings name the attribute as you wrote it, such as `max-zoom`. An `aspect`, `credit` or `backend` value it can't read now gets a warning too.
 - The Hugo and Astro examples for the web embed load the current runtime and show the poster while it loads. The link to wasm-pack works again.
+- The docs no longer say that isotrail can't use an Open-Meteo API key. For commercial work, set `ISOTRAIL_OPEN_METEO_KEY` to a paid key, use your own server with `--weather-url`, or leave the weather out with `--no-weather`.
+- Nine rows of the usage guide's option tables, such as the one for `--paths`, lost their description on GitHub. They show in full again.
 
 ### Changed
 
@@ -216,7 +222,8 @@ The first release: render any recorded hike as a pixel-art diorama PNG.
 - **Style lab:** `isotrail style-lab` renders every mesher, scale and palette on one labelled contact sheet.
 - Prebuilt binaries for Windows, Linux and macOS.
 
-[Unreleased]: https://github.com/ErykMajoch/isotrail/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/ErykMajoch/isotrail/compare/v1.4.1...HEAD
+[1.4.1]: https://github.com/ErykMajoch/isotrail/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/ErykMajoch/isotrail/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/ErykMajoch/isotrail/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/ErykMajoch/isotrail/compare/v1.2.0...v1.3.0
