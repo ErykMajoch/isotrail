@@ -420,7 +420,7 @@ mod tests {
 
     #[test]
     fn the_words_match_the_embeds() {
-        let script = include_str!("../../../web/isotrail-embed.js");
+        let script = include_str!("../../../web/isotrail-embed.js").replace("\r\n", "\n");
         let english = script
             .split_once("  en: {\n")
             .and_then(|(_, rest)| rest.split_once("\n  },"))
