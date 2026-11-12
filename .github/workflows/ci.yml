@@ -1,7 +1,9 @@
 name: CI
 
 on:
+  # Tags go through the release workflow, which runs the same checks
   push:
+    branches: ["**"]
   pull_request:
 
 permissions:

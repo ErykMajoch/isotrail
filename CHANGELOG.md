@@ -33,6 +33,7 @@ All notable changes to `isotrail` are documented here.
 - The first download of a run prints one line saying what it fetches. Runs that find everything in the cache stay quiet.
 - The messages for weather missing from the cache with `--offline`, a `--step-fps` above `--fps`, overlays that give way to fit, and characters the font can't draw are shorter and say what to do.
 - A palette file that is missing, can't be read or has a bad line is a usage mistake, with exit code 2, found before any download. `isotrail render hike.png`, where `hike.png` is a picture, now exits with 1 like any input that isn't a hike.
+- Release archives include the usage guide, the configuration and how-it-works pages, the example theme and the web embed's README, as text. The pictures are in the repository.
 
 ## [1.4.0] - 2026-11-12
 

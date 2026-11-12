@@ -145,6 +145,11 @@ jobs:
           cp assets/README.md "dist/$name/assets/"
           # Next to the executable, where `isotrail embed --with-runtime` looks
           cp -r runtime "dist/$name/web"
+          # The reference docs as text; the pictures stay in the repository
+          mkdir -p "dist/$name/docs"
+          cp docs/*.md "dist/$name/docs/"
+          cp -r docs/themes "dist/$name/docs/"
+          cp web/README.md "dist/$name/web/"
           cd dist
           if [ "${{ runner.os }}" = "Windows" ]; then
             cp "../target/${{ matrix.target }}/release/isotrail.exe" "$name/"
