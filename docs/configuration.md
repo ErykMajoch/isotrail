@@ -133,6 +133,19 @@ subtext = "#f2c879"
 ambient = 0.5
 ```
 
+A fuller example is [`docs/themes/moorland-dusk.toml`](themes/moorland-dusk.toml), here next to the built-in look:
+
+<table>
+  <tr>
+    <td width="50%"><img src="images/theme-built-in.png" alt="Derwent Edge in the built-in colours: green woods, brown moorland, a red route and slate panels under a pale sky"></td>
+    <td width="50%"><img src="images/theme-moorland-dusk.png" alt="The same render in the example theme: warmer moorland, a dusky sky, a gold route and plum panels"></td>
+  </tr>
+  <tr>
+    <td align="center">built-in</td>
+    <td align="center"><code>--theme docs/themes/moorland-dusk.toml</code></td>
+  </tr>
+</table>
+
 | Table | What it holds |
 | --- | --- |
 | `[landcover]` | One colour per kind of ground: `water`, `snow`, `rock`, `scree`, `grassland`, `heath`, `scrub`, `coniferous`, `broadleaf`, `mixed-forest`, `wetland`, `farmland`, `built-up` |

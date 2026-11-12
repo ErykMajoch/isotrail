@@ -37,7 +37,8 @@
 - **Light, weather and seasons**: lit by the sun or moon as they stood during the hike, under its real weather (clouds, rain, snow, fog and sunbeams breaking through), in its season (blossom, autumn colours, snow and frozen lakes)
 - **On your website**: an interactive `<isotrail-hike>` element that visitors can turn, zoom and play, on any static site
 - **Ready to share**: story, video, portrait, feed, square and wide presets or any size, with the title, date, stats and elevation profile laid out clear of social apps' buttons and captions, and a camera you can turn and tilt
-- **Your style**: choose the stats, units, date format and panels, or use a transparent background to place the diorama over a photo
+- **Your style**: choose the stats, units, date format and panels, the route's colour and width, which parts of the scene are drawn, or use a transparent background to place the diorama over a photo
+- **Your theme, your language**: a theme file sets the colours of the ground, sky, light, route and panels, and translates every word on the image
 - **Offline and repeatable**: map data is cached, and a scene bundle (`.itb`) re-renders a hike without the network
 <!-- 
 ## Gallery
@@ -107,6 +108,19 @@ isotrail render hike.gpx --title "Derwent Edge" --stats distance,gain,elapsed --
 isotrail render hike.gpx --time 20:30
 isotrail render hike.gpx --season winter
 
+# Look down more steeply, from the side
+isotrail render hike.gpx --pitch 45 --turn 90
+
+# A gold route over bare ground: no trees, bushes or boulders
+isotrail render hike.gpx --route-colour "#ffd23f" --prop-density 0
+
+# A small GIF for a web page that loops without a jump
+isotrail render hike.gpx -o hike.gif --gif-scale 1 --loop-back
+
+# Your own colours and words
+isotrail theme print -o my-theme.toml
+isotrail render hike.gpx --theme my-theme.toml
+
 # Prepare the scene once, then render it as often as you like, offline
 isotrail bundle hike.gpx -o hike.itb
 isotrail render hike.itb --palette aap-64 --mesher smooth
@@ -135,9 +149,9 @@ isotrail render hike.gpx --no-map-data
 
 | Command | What it does |
 | --- | --- |
-| [`render`](docs/usage.md#render) | Render a GPX file or scene bundle as a PNG, an animated GIF or an MP4 video |
+| [`render`](docs/usage.md#render) | Render a GPX file or scene bundle as a PNG, an animated GIF or an MP4 video, at any size and from any angle |
 | [`bundle`](docs/usage.md#bundle) | Download the terrain around a route and save everything the render needs as a `.itb` file |
-| [`embed`](docs/usage.md#embed) | Write a bundle, a poster and an HTML snippet that put an interactive diorama on a web page |
+| [`embed`](docs/usage.md#embed) | Write a bundle, a poster and an HTML snippet that put an interactive diorama on a web page, with its look, playback and controls |
 | [`stats`](docs/usage.md#stats) | Print distance, elevation gain and loss, moving and elapsed time, and the weather during the hike |
 | [`style-lab`](docs/usage.md#style-lab) | Render every mesher, pixel scale and palette on one contact sheet |
 | [`cache`](docs/usage.md#cache) | Show or clear the cache of downloaded data |
@@ -160,6 +174,17 @@ units = "imperial"
 `embed`, `bundle` and `style-lab` read the same files, and can have tables of their own. See [Configuration](docs/configuration.md) for file locations, precedence and environment variables.
 
 A [theme file](docs/configuration.md#theme-files) (`--theme FILE`) changes isotrail's own colours and the words printed on the image, so a story can be in your language.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/theme-built-in.png" alt="Derwent Edge in the built-in colours: green woods, brown moorland, a red route and slate panels under a pale sky"></td>
+    <td width="50%"><img src="docs/images/theme-moorland-dusk.png" alt="The same render in an example theme: warmer moorland, a dusky sky, a gold route and plum panels"></td>
+  </tr>
+  <tr>
+    <td align="center">built-in</td>
+    <td align="center"><code>--theme <a href="docs/themes/moorland-dusk.toml">docs/themes/moorland-dusk.toml</a></code></td>
+  </tr>
+</table>
 
 ## Contributing
 

@@ -1,0 +1,30 @@
+# An example theme: warm moorland, a dusky sky, a gold route and plum panels
+
+[landcover]
+grassland = "#b5c25a"
+heath = "#7d6a4f"
+water = "#2e5f8a"
+farmland = "#d9c27a"
+coniferous = "#2f4f3a"
+
+[strata]
+dirt = "#8a5a3c"
+stone = "#6e6a78"
+
+[sky]
+top = "#3b4d7a"
+bottom = "#e8b88a"
+
+[light]
+colour = [1.0, 0.9, 0.75]
+ambient = 0.45
+
+[route]
+colour = "#ffd23f"
+width = 3
+
+[overlay]
+text = "#fff4e0"
+subtext = "#f2c879"
+panel-tint = "#2b1d3a"
+panel-edge = "#c28f5a"

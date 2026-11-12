@@ -4,6 +4,10 @@ All notable changes to `isotrail` are documented here.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-12
+
+Full control: any size and camera angle, switches for every part of the scene, the light and the route, animations shaped your way, theme files for your own colours and language, and a web embed that plays as you choose and answers to scripts.
+
 ### Added
 
 - **Any size, and two new shapes for social media.** `--aspect video` is 9:16 with the top 14%, bottom 35% and 6% at each side kept clear of the caption and buttons laid over short videos; `--aspect portrait` is a tall 3:4 post (1080 × 1440). `--size WxH` renders any size instead, and `--safe-area TOP,RIGHT,BOTTOM,LEFT` sets the margins the diorama and text keep clear of.
@@ -21,7 +25,6 @@ All notable changes to `isotrail` are documented here.
 - **Smaller GIFs and tuned MP4s.** `--gif-scale 1` writes a GIF at the drawn size, about a quarter of the bytes, for web pages; `--loop once` or `--loop N` stops a GIF after one or `N` plays. `--crf` and `--preset` set the MP4's quality and encoding speed, and `--ffmpeg` (or `ISOTRAIL_FFMPEG`) picks the ffmpeg program.
 - **Output for scripts.** `--json` on `render`, `embed`, `bundle` and `style-lab` prints one JSON object with the files written, their sizes and the credit for the caption. `-q` (`--quiet`) prints only errors.
 - **Other servers.** `--terrain-url` takes elevation tiles from a mirror, `--weather-url` the weather from another server with Open-Meteo's API, and an Open-Meteo API key in `ISOTRAIL_OPEN_METEO_KEY` uses their servers for customers; the key never reaches the cache, the bundle or a message. `--cache-dir` sets the cache folder for one run, like `ISOTRAIL_CACHE_DIR`.
-
 - **Theme files.** One TOML file sets isotrail's own colours, words and fine-tuning: the ground, rock layers, trees, water, seasons, sky and light, the route, the text and panels. `--theme FILE` works on `render`, `embed` and `style-lab`, and as the `theme` key in a config file; options you type still win over it. `isotrail theme print` writes the built-in theme to start from.
 - **Overlays in your language.** A theme's `[labels]` table translates every word printed on the image, with patterns for times and dates and the decimal separator, so a story can read `sobota, 14 czerwca 2025` and `7,4 km`.
 - `embed --theme` copies the theme beside the bundle and names it in the snippet's `theme` attribute, and the web embed draws the live diorama in it.
@@ -177,7 +180,8 @@ The first release: render any recorded hike as a pixel-art diorama PNG.
 - **Style lab:** `isotrail style-lab` renders every mesher, scale and palette on one labelled contact sheet.
 - Prebuilt binaries for Windows, Linux and macOS.
 
-[Unreleased]: https://github.com/ErykMajoch/isotrail/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/ErykMajoch/isotrail/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/ErykMajoch/isotrail/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/ErykMajoch/isotrail/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/ErykMajoch/isotrail/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/ErykMajoch/isotrail/compare/v1.1.0...v1.2.0

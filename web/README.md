@@ -49,7 +49,7 @@ static/hikes/derwent/
 `snippet.html` holds the two lines that show the hike, also printed by the command:
 
 ```html
-<script type="module" src="/hikes/derwent/isotrail-embed.js?v=1.3.1"></script>
+<script type="module" src="/hikes/derwent/isotrail-embed.js?v=1.4.0"></script>
 <isotrail-hike src="/hikes/derwent/derwent-edge.itb" poster="/hikes/derwent/derwent-edge.png" aspect="wide" style="display:block;aspect-ratio:16/9"><img src="/hikes/derwent/derwent-edge.png" alt="Diorama of Derwent Edge" style="display:block;width:100%"></isotrail-hike>
 ```
 
