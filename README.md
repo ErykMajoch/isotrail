@@ -2,10 +2,6 @@
   <img src="docs/images/banner.png" alt="isotrail: your hikes as pixel-art dioramas" width="100%">
 </p>
 
-<!-- <p align="center">
-  <strong>Turn a recorded hike into a pixel-art diorama of the real terrain.</strong>
-</p> -->
-
 <p align="center">
   <a href="https://github.com/ErykMajoch/isotrail/actions/workflows/ci.yml"><img src="https://github.com/ErykMajoch/isotrail/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/ErykMajoch/isotrail/releases/latest"><img src="https://img.shields.io/github/v/release/ErykMajoch/isotrail" alt="Latest release"></a>
@@ -22,7 +18,7 @@
 
 ---
 
-`isotrail` takes a GPX file any route tracking app and cuts the surrounding landscape out of the world as a floating slab.
+isotrail turns a recorded hike into a small pixel-art model of the real landscape, with your route drawn on it.
 
 <p align="center">
   <img src="docs/images/hero.png" alt="A diorama of a hike along Derwent Edge, with the title, stats and elevation profile in a panel on the left">
@@ -30,53 +26,59 @@
 
 ## Features
 
-- **Real terrain**: elevation from open terrain tiles, with forests, moorland, rock, lakes, rivers, the sea and paths from OpenStreetMap
-- **Diorama look**: stepped voxel or smooth low-poly terrain, layered cut faces, cel shading with shadows, and outlines
-- **Pixel-art finish**: every pixel snapped to a hand-made palette (three built in, or any Lospec `.hex` file)
-- **Animated**: looping GIFs and MP4 videos where the route draws itself, the camera turns and the stats count up
-- **Light, weather and seasons**: lit by the sun or moon as they stood during the hike, under its real weather (clouds, rain, snow, fog and sunbeams breaking through), in its season (blossom, autumn colours, snow and frozen lakes)
-- **On your website**: an interactive `<isotrail-hike>` element that visitors can turn, zoom and play, on any static site
-- **Ready to share**: story, video, portrait, feed, square and wide presets or any size, with the title, date, stats and elevation profile laid out clear of social apps' buttons and captions, and a camera you can turn and tilt
-- **Your style**: choose the stats, units, date format and panels, the route's colour and width, which parts of the scene are drawn, or use a transparent background to place the diorama over a photo
-- **Your theme, your language**: a theme file sets the colours of the ground, sky, light, route and panels, and translates every word on the image
-- **Offline and repeatable**: map data is cached, and a scene bundle (`.itb`) re-renders a hike without the network
-<!-- 
+- The actual terrain around your route, with its woods, lakes and paths
+- The light, weather and season of the day you walked
+- A still image, an animation or a diorama visitors can turn on your website
+- Presets for stories, posts and short videos, or any size you like
+- A scene file that renders the hike again without the network
+- Fully customisable to your liking!
+
 ## Gallery
 
 <table>
   <tr>
-    <td width="33%"><img src="docs/images/story.png" alt="Story render of a hike to Morskie Oko and Rysy in the Tatras"></td>
-    <td width="33%"><img src="docs/images/feed.png" alt="Feed render of a 100 km trek across the Peak District"></td>
-    <td width="33%"><img src="docs/images/square.png" alt="Square render of Derwent Edge"></td>
+    <td width="33%"><img src="docs/images/gallery-coast.png" alt="A coast walk seen from the sea: green cliffs, a cove with surf and a red route along the clifftops under broken cloud and sunbeams"></td>
+    <td width="33%"><img src="docs/images/gallery-evening.png" alt="Derwent Edge in the evening: dark moorland under a peach sky with slanting beams of light"></td>
+    <td width="33%"><img src="docs/images/gallery-night.png" alt="A Tatra valley at night: dark forest under a starry sky with the moon low on the left"></td>
   </tr>
   <tr>
-    <td align="center"><code>--aspect story</code></td>
-    <td align="center"><code>--aspect feed</code></td>
-    <td align="center"><code>--aspect square</code></td>
+    <td align="center">The sea and passing cloud<br><code>--heading 340 --weather cloudy</code></td>
+    <td align="center">A spring evening<br><code>--time 19:30 --weather cloudy</code></td>
+    <td align="center">Stars and the moon<br><code>--time 21:45</code></td>
+  </tr>
+  <tr>
+    <td width="33%"><img src="docs/images/gallery-snow.png" alt="A 100 km trek across the Peak District under snow, seen from higher up, with snowflakes falling"></td>
+    <td width="33%"><img src="docs/images/gallery-autumn.gif" alt="An animation of a Tatra hike in autumn colours: the route draws itself and the stats count up while the camera turns"></td>
+    <td width="33%"><img src="docs/images/gallery-smooth.png" alt="Derwent Edge drawn with smooth low-poly terrain instead of blocks"></td>
+  </tr>
+  <tr>
+    <td align="center">A long trek in winter<br><code>--season winter --weather snow</code><br><code>--pitch 45</code></td>
+    <td align="center">An animation in autumn<br><code>-o hike.gif --season autumn</code></td>
+    <td align="center">Smooth terrain<br><code>--mesher smooth</code></td>
   </tr>
 </table>
 
-More looks are shown in [How it works](docs/how-it-works.md#styles). -->
+More looks are shown in [how it works](docs/how-it-works.md#styles).
 
 ## Installation
 
-**Prebuilt binaries** for Windows, Linux and macOS are attached to every [release](https://github.com/ErykMajoch/isotrail/releases/latest). Download the archive for your system, unpack it and put `isotrail` (`isotrail.exe` on Windows) somewhere on your `PATH`. Keep the `web` folder next to it: [`embed`](docs/usage.md#embed) copies the web runtime from there.
+Every [release](https://github.com/ErykMajoch/isotrail/releases/latest) has ready-made downloads for Windows, Linux and macOS. Download the archive for your system, unpack it and put `isotrail` in a folder on your `PATH`. Keep the `web` folder next to it, because [`embed`](docs/usage.md#embed) copies the web runtime from there.
 
-The binaries aren't signed, so your system may warn you the first time you run one:
+The programs aren't signed, so your system may warn you the first time you run one:
 
-- **Windows:** if SmartScreen says it protected your PC, choose **More info**, then **Run anyway**.
-- **macOS:** Gatekeeper blocks programs downloaded from the internet. Remove the download flag from the binary with `xattr -d com.apple.quarantine path/to/isotrail`.
-- **Linux:** the binary needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 or later). On older systems, install it with Cargo.
+- **Windows**: if SmartScreen says it protected your PC, choose More info, then Run anyway.
+- **macOS**: Gatekeeper blocks programs downloaded from the internet. Remove the download flag with `xattr -d com.apple.quarantine path/to/isotrail`.
+- **Linux**: the program needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 or later). On older systems, install it with Cargo.
 
-**With Cargo**, if you have [Rust](https://rustup.rs/) installed:
+If you have [Rust](https://rustup.rs/) installed, you can build it with Cargo instead:
 
 ```bash
 cargo install --git https://github.com/ErykMajoch/isotrail isotrail-cli
 ```
 
-`isotrail` renders on the GPU through Vulkan, Metal or Direct3D 12. When no GPU is available, it falls back to a software renderer. On Linux, this needs a Vulkan driver, such as `mesa-vulkan-drivers`.
+isotrail draws on the graphics card through Vulkan, Metal or Direct3D 12. Without one, it draws in software. On Linux, that needs a Vulkan driver such as `mesa-vulkan-drivers`.
 
-MP4 videos are encoded by [ffmpeg](https://ffmpeg.org/download.html), which needs to be on your `PATH` (`winget install Gyan.FFmpeg`, `brew install ffmpeg` or `sudo apt install ffmpeg`). PNGs and GIFs don't need it.
+MP4 videos need [ffmpeg](https://ffmpeg.org/download.html) on your `PATH`. Install it with `winget install Gyan.FFmpeg`, `brew install ffmpeg` or `sudo apt install ffmpeg`. PNG and GIF files don't need it.
 
 ## Quick start
 
@@ -86,94 +88,97 @@ Export your hike as a GPX file and run:
 isotrail render hike.gpx
 ```
 
-This writes `hike.png`, a 1080 x 1920 story. The first run downloads elevation and map data for the area, and later runs use the cache.
+This writes `hike.png`, a 1080 x 1920 story. The first run downloads elevation and map data for the area, so it takes longer. Later runs use the cache.
+
+Share it:
 
 ```bash
-# A story, a feed post and a website banner in one go
+# A story, a feed post and a website banner
 isotrail render hike.gpx --aspect story,feed,wide
 
-# An animated story: the route draws itself while the stats count up
-isotrail render hike.gpx -o hike.gif
-
-# The same as a video, ready to post as a story
+# A video where the route draws itself and the stats count up
 isotrail render hike.gpx -o hike.mp4
 
 # The diorama alone on a transparent background, to place over a photo
 isotrail render hike.gpx --background transparent --overlay none
+```
 
+Change the look:
+
+```bash
 # Your own title and stats, in miles and feet
 isotrail render hike.gpx --title "Derwent Edge" --stats distance,gain,elapsed --units imperial
 
-# The same hike at sunset, or in winter
-isotrail render hike.gpx --time 20:30
+# The same hike in winter
 isotrail render hike.gpx --season winter
 
-# Look down more steeply, from the side
-isotrail render hike.gpx --pitch 45 --turn 90
+# Another palette and smooth terrain
+isotrail render hike.gpx --palette aap-64 --mesher smooth
+```
 
-# A gold route over bare ground: no trees, bushes or boulders
-isotrail render hike.gpx --route-colour "#ffd23f" --prop-density 0
+Put it on a website:
 
-# A small GIF for a web page that loops without a jump
-isotrail render hike.gpx -o hike.gif --gif-scale 1 --loop-back
-
-# Your own colours and words
-isotrail theme print -o my-theme.toml
-isotrail render hike.gpx --theme my-theme.toml
-
-# Prepare the scene once, then render it as often as you like, offline
-isotrail bundle hike.gpx -o hike.itb
-isotrail render hike.itb --palette aap-64 --mesher smooth
-
-# An interactive diorama for your website: the bundle, a poster and the HTML to paste
+```bash
+# A diorama visitors can turn: the scene file, a poster and the HTML to paste
 isotrail embed hike.gpx -o site/hikes/my-hike --with-runtime
 
-# The same in another look: the poster and the live diorama both follow it
+# The same in another look, for the poster and the live diorama
 isotrail embed hike.gpx -o site/hikes/my-hike --palette resurrect-64 --mesher smooth
 
-# Build the diorama from the elevation alone when the map server is busy
-isotrail render hike.gpx --no-map-data
+# A small GIF that loops without a jump
+isotrail render hike.gpx -o hike.gif --gif-scale 1 --loop-back
 ```
+
+The [usage guide](docs/usage.md) goes over a lot more options to play around with.
 
 ### Which format for where
 
-| Where | Output | Why |
-| --- | --- | --- |
-| A story | `--aspect story -o hike.mp4`, or a PNG | Social apps animate videos, not GIF files |
-| A short video | `--aspect video -o hike.mp4` | Keeps the diorama and text clear of the caption and buttons laid over short videos |
-| A post | `--aspect feed` or `--aspect portrait`, as a PNG or `.mp4` | Tall 4:5 and 3:4 posts take up the most room in a feed |
-| Your website | [`isotrail embed`](docs/usage.md#embed), or `--aspect wide` as a PNG | The bundle is about 100 KB and the runtime (about 1.2 MB gzipped) is shared by every hike; a PNG is a few dozen KB |
-| Chats, forums, READMEs | `.gif` | Plays anywhere, but a 10-second story is several MB, often over 10 MB. `--gif-scale 1` makes it about a quarter of that, for pages that enlarge it; a shorter `--duration` or a lower `--fps` helps too |
+| Where | Output |
+| --- | --- |
+| A story | `--aspect story -o hike.mp4`, or a PNG |
+| A short video | `--aspect video -o hike.mp4` |
+| A post | `--aspect feed` or `--aspect portrait` |
+| Your website | [`isotrail embed`](docs/usage.md#embed), or `--aspect wide` as a PNG |
+| Chats, forums, READMEs | `.gif` |
+
+A scene file for the web is ~100KB and every hike on a site shares one runtime of ~1.2MB. A 10-second GIF story is several MB, often over 10MB. `--gif-scale 1` makes it about a quarter of that, and a shorter `--duration` or a lower `--fps` helps too.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| [`render`](docs/usage.md#render) | Render a GPX file or scene bundle as a PNG, an animated GIF or an MP4 video, at any size and from any angle |
-| [`bundle`](docs/usage.md#bundle) | Download the terrain around a route and save everything the render needs as a `.itb` file |
-| [`embed`](docs/usage.md#embed) | Write a bundle, a poster and an HTML snippet that put an interactive diorama on a web page, with its look, playback and controls |
-| [`stats`](docs/usage.md#stats) | Print distance, elevation gain and loss, moving and elapsed time, and the weather during the hike |
-| [`style-lab`](docs/usage.md#style-lab) | Render every mesher, pixel scale and palette on one contact sheet |
-| [`cache`](docs/usage.md#cache) | Show or clear the cache of downloaded data |
-| [`theme`](docs/usage.md#theme) | Write the built-in theme file, to start your own colours and words from |
+| [`render`](docs/usage.md#render) | Makes a PNG, GIF or MP4 of a hike |
+| [`bundle`](docs/usage.md#bundle) | Downloads the terrain and saves the scene as an `.itb` file |
+| [`embed`](docs/usage.md#embed) | Writes what a web page needs to show a diorama visitors can turn |
+| [`stats`](docs/usage.md#stats) | Prints the distance, climb, times and weather of a hike |
+| [`style-lab`](docs/usage.md#style-lab) | Renders every terrain style, pixel scale and palette on one sheet |
+| [`cache`](docs/usage.md#cache) | Shows or clears the downloaded data |
+| [`theme`](docs/usage.md#theme) | Writes the built-in theme, to start your own from |
 
-Run `isotrail <command> --help` for every option, or see the [usage guide](docs/usage.md).
+More information about the commands can be found in the [usage guide](docs/usage.md).
 
 ## Configuration
 
 Settings you use every time can go in a config file instead of on the command line:
 
 ```toml
-# %APPDATA%\isotrail\config.toml on Windows, ~/.config/isotrail/config.toml on Linux
 [render]
 aspect = ["story", "feed"]
 palette = "resurrect-64"
 units = "imperial"
 ```
 
-`embed`, `bundle` and `style-lab` read the same files, and can have tables of their own. See [Configuration](docs/configuration.md) for file locations, precedence and environment variables.
+isotrail reads it from here:
 
-A [theme file](docs/configuration.md#theme-files) (`--theme FILE`) changes isotrail's own colours and the words printed on the image, so a story can be in your language.
+| System | Config file |
+| --- | --- |
+| Windows | `%APPDATA%\isotrail\config.toml` |
+| Linux | `~/.config/isotrail/config.toml` |
+| macOS | `~/Library/Application Support/isotrail/config.toml` |
+
+`embed`, `bundle` and `style-lab` read the same file, and can have tables of their own. [Configuration](docs/configuration.md) has the details.
+
+A [theme file](docs/configuration.md#theme-files) changes isotrail's own colours and the words on the image, so a story can be in your language.
 
 <table>
   <tr>
@@ -188,20 +193,21 @@ A [theme file](docs/configuration.md#theme-files) (`--theme FILE`) changes isotr
 
 ## Contributing
 
-Bug reports, ideas and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test and update the reference images.
+Bug reports, ideas and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) explains how to build, test and update the reference images.
 
 ## Credits
 
-- Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), available under the [ODbL](https://opendatacommons.org/licenses/odbl/), fetched through the [Overpass API](https://overpass-api.de/)
-- Elevation data from [Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) on AWS Open Data, assembled by [Tilezen joerd](https://github.com/tilezen/joerd) from sources including SRTM, GMTED2010 and 3DEP (courtesy of the U.S. Geological Survey), ETOPO1 (NOAA), EU-DEM (produced using Copernicus data and information funded by the European Union) and national datasets such as © Environment Agency copyright and/or database right 2015 (see the [full attribution list](https://github.com/tilezen/joerd/blob/master/docs/attribution.md))
-- Weather data by [Open-Meteo.com](https://open-meteo.com/), available under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
-- Time zones from [tzf-rs](https://github.com/ringsaturn/tzf-rs), using [timezone-boundary-builder](https://github.com/evansiroky/timezone-boundary-builder) data © OpenStreetMap contributors (ODbL)
-- Palettes by AdamCYounis, Kerrie Lake and Adigun A. Polack, and the [monogram](https://datagoblin.itch.io/monogram) font by Vinícius Menézio (CC0); see [assets/README.md](assets/README.md)
+- Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), under the [ODbL](https://opendatacommons.org/licenses/odbl/), through the [Overpass API](https://overpass-api.de/)
+- Elevation from [Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) on AWS Open Data, built by [Tilezen joerd](https://github.com/tilezen/joerd) from [these sources](https://github.com/tilezen/joerd/blob/master/docs/attribution.md)
+- Weather by [Open-Meteo.com](https://open-meteo.com/), under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+- Time zones from [tzf-rs](https://github.com/ringsaturn/tzf-rs), with [timezone-boundary-builder](https://github.com/evansiroky/timezone-boundary-builder) data © OpenStreetMap contributors (ODbL)
+- Palettes by AdamCYounis, Kerrie Lake and Adigun A. Polack, listed in [assets/README.md](assets/README.md)
+- The [monogram](https://datagoblin.itch.io/monogram) font by Vinícius Menézio (CC0)
 
-Every render and every web embed carries a small data credit by default. If you leave it off with `--no-attribution` (or `credit="none"` on the embed), please put the printed credit in your post's caption, or near the embed on your page, instead.
+Every image and web embed carries a small data credit. If you turn it off (with `--no-attribution` or with `credit="none"` on the embed) please put the printed credit in your caption or near the embed instead.
 
-The elevation, map and weather services are free and shared by everyone. [Data sources and fair use](docs/how-it-works.md#data-sources-and-fair-use) explains what isotrail downloads, how the cache keeps that to a minimum, and the services' terms: in particular, Open-Meteo's free weather API is for non-commercial use only.
+The elevation, map and weather services are free and shared by everyone. [Data sources and fair use](docs/how-it-works.md#data-sources-and-fair-use) explains what isotrail downloads and how the cache keeps that small. Open-Meteo's free weather service is for non-commercial use. For commercial work, set `ISOTRAIL_OPEN_METEO_KEY` to a paid Open-Meteo key, or leave the weather out with `--no-weather`.
 
 ## Licence
 
-`isotrail` is released under the [MIT licence](LICENSE).
+isotrail is released under the [MIT licence](LICENSE).

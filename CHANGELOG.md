@@ -8,8 +8,9 @@ All notable changes to `isotrail` are documented here.
 
 - The size example in `--help` and the usage guide, `--size 1200x800`, didn't work at the default `--scale 3`. It is now `1200x900`.
 - When `--scale` doesn't divide the image, the message lists the scales that do.
-- On Windows, a folder typed with forward slashes, as in `-o site/hikes`, keeps them in the paths isotrail prints, the JSON included, instead of mixing in backslashes.
-- A clip of one frame says `Rendered 1 frame`. A render at `--scale 1`, or a GIF at `--gif-scale 1`, no longer says it was enlarged from the same size.
+- On Windows, a folder typed with forward slashes, such as `-o site/hikes`, keeps them in the paths isotrail prints and in the JSON.
+- A clip of one frame says `Rendered 1 frame`, not `1 frames`.
+- A render at `--scale 1`, or a GIF at `--gif-scale 1`, no longer says it was enlarged from the same size.
 - The usage line under a mistake no longer lists options set through environment variables, such as `ISOTRAIL_CACHE_DIR`.
 - `route-color` works in config files, as it does on the command line.
 - `size` and `aspect` in the same config file get a message that names the file. In two different files, the one that takes precedence wins.
@@ -28,16 +29,18 @@ All notable changes to `isotrail` are documented here.
 - Part of an option's name, such as `--colour`, points to the whole one, `--route-colour`.
 - A value out of range names the range, such as `expected a whole number from 1 to 60`, for every number option and in config files. Negative numbers get the same message instead of being taken for an option.
 - A config file saved as UTF-16 gets the same clear message as a theme file.
-- `--help` groups the options under the same headings as the usage guide, gives the range of every number option, and shows list defaults as you type them, such as `title,date,stats,profile`. The help lines are shorter and wrap to the terminal's width.
+- `--help` groups the options under the same headings as the usage guide and gives the range of every number option.
+- `--help` shows list defaults as you type them, such as `title,date,stats,profile`, and its lines are shorter and wrap to the terminal's width.
 - `isotrail --help` lists `render` first and ends with an example.
 - The first download of a run prints one line saying what it fetches. Runs that find everything in the cache stay quiet.
-- The messages for weather missing from the cache with `--offline`, a `--step-fps` above `--fps`, overlays that give way to fit, and characters the font can't draw are shorter and say what to do.
-- A palette file that is missing, can't be read or has a bad line is a usage mistake, with exit code 2, found before any download. `isotrail render hike.png`, where `hike.png` is a picture, now exits with 1 like any input that isn't a hike.
+- Some messages are shorter and say what to do. They cover weather missing from the cache with `--offline`, a `--step-fps` above `--fps`, overlays that give way, and characters the font can't draw.
+- A palette file that is missing, can't be read or has a bad line is a usage mistake, with exit code 2, found before any download.
+- `isotrail render hike.png`, where `hike.png` is a picture, now exits with 1 like any other input that isn't a hike.
 - Release archives include the usage guide, the configuration and how-it-works pages, the example theme and the web embed's README, as text. The pictures are in the repository.
 
 ## [1.4.0] - 2026-11-12
 
-Full control: any size and camera angle, switches for every part of the scene, the light and the route, animations shaped your way, theme files for your own colours and language, and a web embed that plays as you choose and answers to scripts.
+New options for size, camera, scene and animation, theme files, and playback controls for the web embed.
 
 ### Added
 
@@ -71,7 +74,7 @@ Full control: any size and camera angle, switches for every part of the scene, t
 
 ## [1.3.1] - 2026-11-11
 
-Sturdier everywhere: safe outputs, forgiving GPX reading, patient map downloads, the sea on coastal hikes, and a web embed that credits its data and takes the look of your choice.
+Many fixes, the sea on coastal hikes, and the data credit and look options in the web embed.
 
 ### Fixed
 
@@ -144,7 +147,7 @@ Sturdier everywhere: safe outputs, forgiving GPX reading, patient map downloads,
 
 ## [1.3.0] - 2026-11-10
 
-Light, weather and seasons: every hike is lit by the sun and moon of its day, in the weather it had and the season it was in.
+Light, weather and season from the day of the hike.
 
 ### Added
 
@@ -173,7 +176,7 @@ Light, weather and seasons: every hike is lit by the sun and moon of its day, in
 
 ## [1.2.0] - 2026-11-10
 
-Hikes on the web: put an interactive diorama of any hike on your own site, with one command.
+An interactive diorama for your website, made with the new `embed` command.
 
 ### Added
 
@@ -184,7 +187,7 @@ Hikes on the web: put an interactive diorama of any hike on your own site, with 
 
 ## [1.1.0] - 2026-10-26
 
-Hikes come to life: render any hike as a looping GIF or an MP4 video for stories.
+Animated GIFs and MP4 videos.
 
 ### Added
 
@@ -205,7 +208,7 @@ The first release: render any recorded hike as a pixel-art diorama PNG.
 - **Diorama renderer:** a GPU renderer (wgpu) that runs without a window, with a software fallback. The slab is turned to the route, and the camera follows the hike's direction. Terrain comes from the `voxel` (stepped) or `smooth` (low-poly) mesher, with stratified slab sides, cel lighting with shadows, outlines, trees and boulders, levelled water, and a draped route that shows through ridges as a dashed line.
 - **Pixel-art look:** palette quantisation in OKLab with three built-in palettes (`apollo`, `resurrect-64`, `aap-64`) or any Lospec `.hex` file. Pixel scales 2, 3, 5, 6 and 10 with crisp nearest-neighbour enlargement. Sky, transparent or solid-colour backgrounds.
 - **Overlays:** title, subtitle, date, stats and an elevation profile in the monogram pixel font (with Polish and other Latin Extended-A characters), on frosted panels. Choose which parts appear, which stats, the units, and the date format.
-- **Presets:** `story` (1080 × 1920), `feed` (1080 × 1350), `square` (1080 × 1080) and `wide` (1920 × 1080), with Instagram safe areas, rendered one at a time or all at once.
+- **Presets:** `story` (1080 × 1920), `feed` (1080 × 1350), `square` (1080 × 1080) and `wide` (1920 × 1080), with safe areas for social media, rendered one at a time or all at once.
 - **Attribution:** a data credit on every render, or printed for the caption with `--no-attribution`.
 - **Config files:** a `[render]` table in a user config file or a `--config` file, with flags taking precedence.
 - **Style lab:** `isotrail style-lab` renders every mesher, scale and palette on one labelled contact sheet.
