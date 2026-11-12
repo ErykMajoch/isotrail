@@ -177,8 +177,10 @@ fn a_missing_runtime_is_refused_before_any_work() {
     );
     assert!(!output.status.success());
     let stderr = text(&output.stderr);
-    assert!(stderr.contains("isotrail_web_bg.wasm"), "{stderr}");
-    assert!(stderr.contains("--runtime-dir"), "{stderr}");
+    assert!(
+        stderr.contains("can't find the web runtime in runtime; it needs isotrail-embed.js"),
+        "{stderr}"
+    );
     assert!(!temp.path().join("site").exists());
 
     let output = isotrail(

@@ -227,7 +227,14 @@ impl<'a> Parser<'a> {
                         self.text.push(';');
                     }
                 }
-                Event::Eof if self.stack.is_empty() => return Err(TrackError::EmptyInput),
+                Event::Eof if self.stack.is_empty() => {
+                    let text = !self.src.trim().is_empty() && !self.src.contains('<');
+                    return Err(if text {
+                        TrackError::PlainText
+                    } else {
+                        TrackError::EmptyInput
+                    });
+                }
                 Event::Eof => {
                     return Err(TrackError::Truncated {
                         line: self.line(pos),
@@ -656,13 +663,17 @@ mod tests {
             parse(r#"<?xml version="1.0"?><!-- nothing -->"#),
             Err(TrackError::EmptyInput)
         ));
+        assert!(matches!(
+            parse("Notes from the walk\nMet a dog\n"),
+            Err(TrackError::PlainText)
+        ));
     }
 
     #[test]
     fn rejects_other_root_elements() {
         let err = parse(r#"<kml xmlns="http://www.opengis.net/kml/2.2"></kml>"#).unwrap_err();
         assert!(matches!(&err, TrackError::NotGpx { root } if root == "kml"));
-        assert_eq!(err.to_string(), "not a GPX file: the root element is <kml>");
+        assert_eq!(err.to_string(), "it is a <kml> file, not GPX");
     }
 
     #[test]

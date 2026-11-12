@@ -3,7 +3,7 @@ use std::ops::RangeInclusive;
 use clap::{Args, ValueEnum};
 use isotrail_render::{
     Aim, Aspect, Canvas, Framing, HEADING_RANGE, Insets, PITCH_DEG, PITCH_RANGE, TURN_RANGE,
-    ZOOM_RANGE, parse_within,
+    ZOOM_RANGE, parse_count, parse_within,
 };
 
 use crate::usage;
@@ -38,7 +38,7 @@ impl From<AspectArg> for Aspect {
 /// The image's size and safe area, and where the camera looks from
 #[derive(Debug, Args)]
 pub struct FrameArgs {
-    /// Image size in pixels, such as 1200x800, instead of an aspect; each
+    /// Image size in pixels, such as 1200x900, instead of an aspect; each
     /// side from 16 to 8192 and a multiple of --scale
     #[arg(long, value_name = "WxH", value_parser = parse_size, conflicts_with = "aspect")]
     pub size: Option<(u32, u32)>,
@@ -46,7 +46,7 @@ pub struct FrameArgs {
     /// Margins the diorama and text keep clear of, in percent of the image:
     /// TOP,RIGHT,BOTTOM,LEFT, or one number for every side; each aspect has
     /// its own by default, and --size keeps 5
-    #[arg(long, value_name = "T,R,B,L", value_parser = parse_safe_area)]
+    #[arg(long, value_name = "T,R,B,L", value_parser = parse_safe_area, allow_hyphen_values = true)]
     pub safe_area: Option<Insets>,
 
     /// How far the camera looks down, in degrees from 10 to 80
@@ -55,13 +55,7 @@ pub struct FrameArgs {
 
     /// Moves the camera this many degrees anticlockwise round the slab, as
     /// seen from above, from -360 to 360
-    #[arg(
-        long,
-        value_name = "DEG",
-        default_value_t = 0.0,
-        allow_negative_numbers = true,
-        value_parser = parse_turn
-    )]
+    #[arg(long, value_name = "DEG", default_value_t = 0.0, value_parser = parse_turn)]
     pub turn: f32,
 
     /// Compass bearing the camera looks towards (0 north, 90 east), instead
@@ -140,37 +134,49 @@ impl FrameArgs {
             .map(|&shape| {
                 let canvas = self.canvas(shape);
                 canvas.framing(scale).ok_or_else(|| {
-                    usage(format!(
-                        "--scale {scale} doesn't divide the {} × {} image{}; use a scale that \
-                         divides both sides",
-                        canvas.width,
-                        canvas.height,
-                        match shape {
-                            Shape::Aspect(aspect) => format!(" ({})", aspect.name()),
-                            Shape::Size(..) => String::new(),
-                        }
-                    ))
+                    let name = match shape {
+                        Shape::Aspect(aspect) => Some(aspect.name()),
+                        Shape::Size(..) => None,
+                    };
+                    usage(scale_mismatch(scale, canvas.width, canvas.height, name))
                 })
             })
             .collect()
     }
 }
 
-pub(crate) fn parse_scale(value: &str) -> Result<u32, String> {
-    let scale: u32 = value.trim().parse().map_err(|e| format!("{e}"))?;
-    if SCALE_RANGE.contains(&scale) {
-        Ok(scale)
-    } else {
-        Err(format!(
-            "must be a whole number from {} to {}",
-            SCALE_RANGE.start(),
-            SCALE_RANGE.end()
-        ))
+/// Why `scale` can't make a `width` × `height` image, and the scales that can
+pub(crate) fn scale_mismatch(scale: u32, width: u32, height: u32, aspect: Option<&str>) -> String {
+    let fits: Vec<String> = SCALE_RANGE
+        .filter(|s| width.is_multiple_of(*s) && height.is_multiple_of(*s))
+        .map(|s| s.to_string())
+        .collect();
+    let image = match aspect {
+        Some(name) => format!("the {name} image ({width} × {height})"),
+        None => format!("{width} × {height}"),
+    };
+    let size_hint = match aspect {
+        Some(_) => String::new(),
+        None => format!(", or a size that is a multiple of {scale}"),
+    };
+    match fits.split_last() {
+        Some((last, [])) => {
+            format!("--scale {scale} doesn't divide {image}; use --scale {last}{size_hint}")
+        }
+        Some((last, rest)) => format!(
+            "--scale {scale} doesn't divide {image}; use --scale {} or {last}{size_hint}",
+            rest.join(", ")
+        ),
+        None => format!("--scale {scale} doesn't divide {image}{size_hint}"),
     }
 }
 
+pub(crate) fn parse_scale(value: &str) -> Result<u32, String> {
+    parse_count(value, &SCALE_RANGE)
+}
+
 fn parse_size(value: &str) -> Result<(u32, u32), String> {
-    let error = || "expected WIDTHxHEIGHT in pixels, such as 1200x800".to_owned();
+    let error = || "expected WIDTHxHEIGHT in pixels, such as 1200x900".to_owned();
     let (width, height) = value.trim().split_once(['x', 'X', '×']).ok_or_else(error)?;
     let side = |text: &str| -> Result<u32, String> {
         let side: u32 = text.trim().parse().map_err(|_| error())?;
@@ -178,7 +184,7 @@ fn parse_size(value: &str) -> Result<(u32, u32), String> {
             Ok(side)
         } else {
             Err(format!(
-                "each side must be from {} to {} pixels",
+                "expected each side from {} to {} pixels",
                 SIDE_RANGE.start(),
                 SIDE_RANGE.end()
             ))
@@ -194,12 +200,12 @@ fn parse_safe_area(value: &str) -> Result<Insets, String> {
             let percent: f32 = part
                 .trim()
                 .parse()
-                .map_err(|_| format!("{:?} is not a number", part.trim()))?;
-            if (0.0..=MAX_SAFE_SHARE).contains(&percent) {
-                Ok(percent / 100.0)
-            } else {
-                Err(format!("each margin must be from 0 to {MAX_SAFE_SHARE}%"))
-            }
+                .ok()
+                .filter(|percent| (0.0..=MAX_SAFE_SHARE).contains(percent))
+                .ok_or_else(|| {
+                    format!("expected each margin from 0 to {MAX_SAFE_SHARE} percent")
+                })?;
+            Ok(percent / 100.0)
         })
         .collect::<Result<Vec<f32>, String>>()?;
     match shares[..] {
@@ -236,7 +242,7 @@ mod tests {
 
     #[test]
     fn sizes_are_width_by_height() {
-        assert_eq!(parse_size("1200x800"), Ok((1200, 800)));
+        assert_eq!(parse_size("1200x900"), Ok((1200, 900)));
         assert_eq!(parse_size(" 1080 × 1440 "), Ok((1080, 1440)));
         assert_eq!(parse_size("16X8192"), Ok((16, 8192)));
         for bad in [
@@ -274,9 +280,31 @@ mod tests {
         for scale in [1, 4, 7, 16] {
             assert_eq!(parse_scale(&scale.to_string()), Ok(scale));
         }
-        for bad in ["0", "17", "2.5", "x"] {
-            assert!(parse_scale(bad).is_err(), "{bad}");
+        for bad in ["0", "17", "2.5", "x", "-1"] {
+            assert_eq!(
+                parse_scale(bad),
+                Err("expected a whole number from 1 to 16".to_owned()),
+                "{bad}"
+            );
         }
+    }
+
+    #[test]
+    fn a_scale_that_doesnt_divide_names_those_that_do() {
+        assert_eq!(
+            scale_mismatch(3, 1200, 800, None),
+            "--scale 3 doesn't divide 1200 × 800; use --scale 1, 2, 4, 5, 8, 10 or 16, \
+             or a size that is a multiple of 3"
+        );
+        assert_eq!(
+            scale_mismatch(7, 1080, 1920, Some("story")),
+            "--scale 7 doesn't divide the story image (1080 × 1920); use --scale 1, 2, 3, 4, 5, \
+             6, 8, 10, 12 or 15"
+        );
+        assert_eq!(
+            scale_mismatch(2, 17, 17, None),
+            "--scale 2 doesn't divide 17 × 17; use --scale 1, or a size that is a multiple of 2"
+        );
     }
 
     #[test]

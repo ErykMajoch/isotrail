@@ -1,11 +1,10 @@
 use std::collections::{BTreeMap, HashSet};
 use std::env;
 use std::ffi::OsString;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
-use clap::error::ErrorKind;
+use clap::error::{ContextKind, ContextValue, ErrorKind};
 use clap::parser::ValueSource;
 use clap::{Arg, ArgAction, ArgMatches, Command, CommandFactory, FromArgMatches};
 use directories::BaseDirs;
@@ -65,7 +64,79 @@ pub fn parse() -> Result<(Cli, Typed), (anyhow::Error, Typed)> {
 fn matches(args: &[OsString]) -> ArgMatches {
     Cli::command()
         .try_get_matches_from(args)
-        .unwrap_or_else(|e| e.exit())
+        .unwrap_or_else(|e| explain(e, args).exit())
+}
+
+/// Clap's error, with advice for two common slips: a hike file given without
+/// a command, and part of an option's name
+fn explain(mut error: clap::Error, args: &[OsString]) -> clap::Error {
+    let text = |kind| match error.get(kind) {
+        Some(ContextValue::String(text)) => Some(text.clone()),
+        _ => None,
+    };
+    match error.kind() {
+        ErrorKind::InvalidSubcommand => {
+            if let Some(name) = text(ContextKind::InvalidSubcommand)
+                .filter(|name| looks_like_a_hike(Path::new(name)))
+            {
+                let mut cli = Cli::command();
+                cli.build();
+                return cli.error(
+                    ErrorKind::InvalidSubcommand,
+                    format!("{name} isn't a command; to make a picture of it, type: isotrail render {name}"),
+                );
+            }
+        }
+        ErrorKind::UnknownArgument if error.get(ContextKind::SuggestedArg).is_none() => {
+            let typed = text(ContextKind::InvalidArg).unwrap_or_default();
+            if let Some(flag) = typed_command(args).and_then(|name| longer_option(&typed, name)) {
+                error.insert(ContextKind::SuggestedArg, ContextValue::String(flag));
+            }
+            // Clap's tip to pass an unknown option as a value never helps here
+            if typed.starts_with("--") {
+                error.remove(ContextKind::Suggested);
+            }
+        }
+        _ => {}
+    }
+    error
+}
+
+fn looks_like_a_hike(path: &Path) -> bool {
+    path.is_file()
+        || path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("gpx") || ext.eq_ignore_ascii_case("itb"))
+}
+
+/// The command named on the command line
+fn typed_command(args: &[OsString]) -> Option<String> {
+    let cli = Cli::command();
+    args.iter()
+        .skip(1)
+        .filter_map(|arg| arg.to_str())
+        .find(|arg| cli.find_subcommand(arg).is_some())
+        .map(str::to_owned)
+}
+
+/// The option of `command` whose name holds every word of `typed`, such as
+/// --route-colour for --colour
+fn longer_option(typed: &str, command: String) -> Option<String> {
+    let typed = typed.strip_prefix("--")?.split('=').next()?;
+    let words: Vec<&str> = typed.split('-').filter(|word| !word.is_empty()).collect();
+    if words.is_empty() {
+        return None;
+    }
+    let cli = Cli::command();
+    cli.find_subcommand(&command)?
+        .get_arguments()
+        .chain(cli.get_arguments())
+        .filter_map(Arg::get_long)
+        .find(|long| {
+            let parts: Vec<&str> = long.split('-').collect();
+            words.iter().all(|word| parts.contains(word))
+        })
+        .map(|long| format!("--{long}"))
 }
 
 fn parse_args(args: Vec<OsString>) -> Cli {
@@ -211,9 +282,16 @@ fn with_config(
         if let Err(error) = command.clone().try_get_matches_from(alone)
             && error.kind() != ErrorKind::MissingRequiredArgument
         {
-            let message = error.to_string();
-            let first = message.lines().next().unwrap_or_default();
-            bail!("{}: {}", in_file(), first.trim_start_matches("error: "));
+            // A value our own parser refused says why; clap's text names the flag
+            let reason = match std::error::Error::source(&error) {
+                Some(reason) if error.kind() == ErrorKind::ValueValidation => reason.to_string(),
+                _ => {
+                    let message = error.to_string();
+                    let first = message.lines().next().unwrap_or_default();
+                    first.trim_start_matches("error: ").to_owned()
+                }
+            };
+            bail!("{}: {reason}", in_file());
         }
         flags.push(OsString::from(flag));
     }
@@ -270,11 +348,10 @@ fn conflicting<'a>(command: &'a Command, arg: &Arg) -> Vec<&'a Arg> {
 /// A config file's tables by command, each key checked against that
 /// command's flags
 fn read_tables(path: &Path, cli: &Command) -> anyhow::Result<BTreeMap<String, Table>> {
-    let text =
-        fs::read_to_string(path).with_context(|| format!("could not open {}", path.display()))?;
+    let text = crate::read_text(path, "the config file ").map_err(anyhow::Error::msg)?;
     let file: Table = text
         .parse()
-        .with_context(|| format!("could not read {}", path.display()))?;
+        .with_context(|| format!("can't read the config file {}", path.display()))?;
     let mut tables = BTreeMap::new();
     for (name, value) in file {
         let Some(command) = COMMANDS
@@ -345,6 +422,8 @@ fn clock_time(datetime: &Datetime) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
     fn args(line: &str) -> Vec<OsString> {
@@ -535,7 +614,7 @@ cache-dir = \"cache\"
         let message = error("[render]\nscale = 17\n");
         assert!(message.starts_with("scale in "), "{message}");
         assert!(
-            message.contains("must be a whole number from 1 to 16"),
+            message.contains("expected a whole number from 1 to 16"),
             "{message}"
         );
         let message = error("[render]\noffline = \"yes\"\n");
@@ -553,7 +632,7 @@ cache-dir = \"cache\"
         let message = error("[bundle]\npalette = \"apollo\"\n");
         assert!(message.contains("[bundle] table"), "{message}");
         let message = error("[render\n");
-        assert!(message.contains("could not read"), "{message}");
+        assert!(message.contains("can't read the config file"), "{message}");
     }
 
     #[test]
@@ -598,6 +677,25 @@ date = \"June\"
         let line = args("isotrail render hike.gpx --date-format iso");
         let result = with_config(line.clone(), found(user)).unwrap();
         assert_eq!(result, line);
+    }
+
+    #[test]
+    fn part_of_an_option_name_finds_the_whole_one() {
+        let render = || Some("render".to_owned());
+        assert_eq!(
+            longer_option("--colour", render().unwrap()),
+            Some("--route-colour".to_owned())
+        );
+        assert_eq!(
+            longer_option("--colour=red", render().unwrap()),
+            Some("--route-colour".to_owned())
+        );
+        assert_eq!(longer_option("--frobnicate", render().unwrap()), None);
+        assert_eq!(
+            typed_command(&args("isotrail -v render hike.gpx")),
+            render()
+        );
+        assert_eq!(typed_command(&args("isotrail hike.gpx")), None);
     }
 
     #[test]
@@ -818,7 +916,7 @@ aspect = [\"story\", \"wide\"]
         );
         assert!(message.starts_with("scale in "), "{message}");
         assert!(
-            message.contains("must be a whole number from 1 to 16"),
+            message.contains("expected a whole number from 1 to 16"),
             "{message}"
         );
     }

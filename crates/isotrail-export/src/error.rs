@@ -36,7 +36,7 @@ pub enum ExportError {
     )]
     FfmpegMissing,
 
-    #[error("could not run ffmpeg at {}; check --ffmpeg or ISOTRAIL_FFMPEG", path.display())]
+    #[error("can't run ffmpeg at {}; check --ffmpeg or ISOTRAIL_FFMPEG", path.display())]
     FfmpegAt { path: PathBuf },
 
     #[error("ffmpeg failed ({status}): {stderr}")]

@@ -2,7 +2,7 @@ use clap::{Args, ValueEnum};
 use isotrail_export::{MAX_GIF_FPS, MAX_MP4_FPS};
 use isotrail_render::{
     Aim, Conditions, DEFAULT_FPS, DEFAULT_ORBIT_DEG, MIN_DRAW_S, Motion, Orbit, Pace, Pacing,
-    Timeline,
+    Timeline, parse_count, parse_within,
 };
 
 use crate::usage;
@@ -36,29 +36,19 @@ pub struct AnimationArgs {
         long,
         value_name = "N",
         default_value_t = DEFAULT_FPS,
-        value_parser = clap::value_parser!(u32).range(1..=i64::from(MAX_MP4_FPS))
+        value_parser = parse_fps
     )]
     fps: u32,
 
     /// Different images per second, at most --fps; fewer gives choppy,
     /// game-like motion
-    #[arg(
-        long,
-        value_name = "N",
-        value_parser = clap::value_parser!(u32).range(1..=i64::from(MAX_MP4_FPS))
-    )]
+    #[arg(long, value_name = "N", value_parser = parse_fps)]
     step_fps: Option<u32>,
 
     /// How far the camera turns during an animation, in degrees, easing to
     /// the still's view as the route finishes: 0 keeps it still, 360 makes a
     /// full turn and a negative angle turns the other way
-    #[arg(
-        long,
-        value_name = "DEG",
-        default_value_t = DEFAULT_ORBIT_DEG,
-        value_parser = parse_orbit,
-        allow_negative_numbers = true
-    )]
+    #[arg(long, value_name = "DEG", default_value_t = DEFAULT_ORBIT_DEG, value_parser = parse_orbit)]
     orbit: f32,
 
     /// How fast the route draws itself: the same distance every frame, or
@@ -142,30 +132,27 @@ fn seconds(value: &str) -> Result<f32, String> {
 }
 
 pub(crate) fn parse_duration(value: &str) -> Result<f32, String> {
-    let seconds = seconds(value)?;
-    if (1.0..=MAX_MP4_DURATION_S).contains(&seconds) {
-        Ok(seconds)
-    } else {
-        Err("must be between 1s and 180s (60s for a GIF)".into())
-    }
+    seconds(value)
+        .ok()
+        .filter(|seconds| (1.0..=MAX_MP4_DURATION_S).contains(seconds))
+        .ok_or_else(|| {
+            "expected seconds from 1 to 180, such as 10s (a GIF can be at most 60)".to_owned()
+        })
 }
 
 pub(crate) fn parse_part(value: &str) -> Result<f32, String> {
-    let seconds = seconds(value)?;
-    if (0.0..=MAX_MP4_DURATION_S).contains(&seconds) {
-        Ok(seconds)
-    } else {
-        Err("must be between 0s and 180s".into())
-    }
+    seconds(value)
+        .ok()
+        .filter(|seconds| (0.0..=MAX_MP4_DURATION_S).contains(seconds))
+        .ok_or_else(|| "expected seconds from 0 to 180, such as 2s".to_owned())
 }
 
 pub(crate) fn parse_orbit(value: &str) -> Result<f32, String> {
-    let degrees: f32 = value.parse().map_err(|e| format!("{e}"))?;
-    if (-360.0..=360.0).contains(&degrees) {
-        Ok(degrees)
-    } else {
-        Err("must be between -360 and 360".into())
-    }
+    parse_within(value, &(-360.0..=360.0))
+}
+
+fn parse_fps(value: &str) -> Result<u32, String> {
+    parse_count(value, &(1..=MAX_MP4_FPS))
 }
 
 #[cfg(test)]
@@ -175,6 +162,7 @@ mod tests {
     use super::*;
 
     #[derive(Debug, Parser)]
+    #[command(allow_negative_numbers = true)]
     struct Cli {
         #[command(flatten)]
         animation: AnimationArgs,

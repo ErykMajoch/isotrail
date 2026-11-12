@@ -32,9 +32,16 @@ enum CacheCommand {
         yes: bool,
 
         /// Only delete downloads made more than this many days ago
-        #[arg(long, value_name = "DAYS")]
+        #[arg(long, value_name = "DAYS", value_parser = parse_days)]
         older_than: Option<u32>,
     },
+}
+
+fn parse_days(value: &str) -> Result<u32, String> {
+    value
+        .trim()
+        .parse()
+        .map_err(|_| "expected a whole number of days, such as 30".to_owned())
 }
 
 pub fn run(args: &CacheArgs) -> anyhow::Result<()> {
@@ -52,9 +59,7 @@ pub fn dir(given: Option<&Path>) -> anyhow::Result<PathBuf> {
         .map(Path::to_owned)
         .or_else(Cache::default_dir)
         .with_context(|| {
-            format!(
-                "could not find a cache directory for this user; set {DIR_ENV} or pass --cache-dir"
-            )
+            format!("can't find a cache folder for this user; set {DIR_ENV} or use --cache-dir")
         })
 }
 

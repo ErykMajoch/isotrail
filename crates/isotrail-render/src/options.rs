@@ -23,18 +23,18 @@ pub const SUN_ELEVATION_RANGE: RangeInclusive<f32> = -90.0..=90.0;
 
 /// A whole number within `range`, or why not
 pub fn parse_count(value: &str, range: &RangeInclusive<u32>) -> Result<u32, String> {
-    let number: u32 = value
-        .trim()
-        .parse()
-        .map_err(|_| "expected a whole number".to_owned())?;
+    let error = || {
+        format!(
+            "expected a whole number from {} to {}",
+            range.start(),
+            range.end()
+        )
+    };
+    let number: u32 = value.trim().parse().map_err(|_| error())?;
     if range.contains(&number) {
         Ok(number)
     } else {
-        Err(format!(
-            "must be between {} and {}",
-            range.start(),
-            range.end()
-        ))
+        Err(error())
     }
 }
 
@@ -56,9 +56,10 @@ pub fn parse_sun(value: &str) -> Result<[f64; 2], String> {
     let (azimuth, elevation) = value
         .split_once(',')
         .ok_or_else(|| "expected AZIMUTH,ELEVATION in degrees, such as 200,25".to_owned())?;
-    let azimuth = parse_within(azimuth, &SUN_AZIMUTH_RANGE).map_err(|e| format!("azimuth {e}"))?;
-    let elevation =
-        parse_within(elevation, &SUN_ELEVATION_RANGE).map_err(|e| format!("elevation {e}"))?;
+    let azimuth =
+        parse_within(azimuth, &SUN_AZIMUTH_RANGE).map_err(|e| format!("{e} for the azimuth"))?;
+    let elevation = parse_within(elevation, &SUN_ELEVATION_RANGE)
+        .map_err(|e| format!("{e} for the elevation"))?;
     Ok([azimuth.into(), elevation.into()])
 }
 
@@ -248,15 +249,18 @@ impl fmt::Display for Layout {
 
 /// A number within `range`, or why not
 pub fn parse_within(value: &str, range: &RangeInclusive<f32>) -> Result<f32, String> {
-    let number: f32 = value.trim().parse().map_err(|e| format!("{e}"))?;
+    let error = || {
+        format!(
+            "expected a number from {} to {}",
+            range.start(),
+            range.end()
+        )
+    };
+    let number: f32 = value.trim().parse().map_err(|_| error())?;
     if range.contains(&number) {
         Ok(number)
     } else {
-        Err(format!(
-            "must be between {} and {}",
-            range.start(),
-            range.end()
-        ))
+        Err(error())
     }
 }
 
@@ -384,9 +388,12 @@ mod tests {
         assert_eq!(parse_within(" 4 ", &SOFT_SHADOWS_RANGE), Ok(4.0));
         assert_eq!(
             parse_within("0.2", &BLOCK_HEIGHT_RANGE),
-            Err("must be between 0.25 and 4".to_owned())
+            Err("expected a number from 0.25 to 4".to_owned())
         );
-        assert!(parse_within("x", &OCCLUSION_RANGE).is_err());
+        assert_eq!(
+            parse_within("x", &OCCLUSION_RANGE),
+            Err("expected a number from 0 to 1".to_owned())
+        );
         assert!(parse_within("NaN", &OCCLUSION_RANGE).is_err());
     }
 
@@ -424,13 +431,24 @@ mod tests {
         assert_eq!(parse_count("6", &BASE_BLOCKS_RANGE), Ok(6));
         assert_eq!(
             parse_count("25", &BASE_BLOCKS_RANGE),
-            Err("must be between 1 and 24".to_owned())
+            Err("expected a whole number from 1 to 24".to_owned())
         );
-        assert!(parse_count("2.5", &ROUTE_WIDTH_RANGE).is_err());
+        assert_eq!(
+            parse_count("2.5", &ROUTE_WIDTH_RANGE),
+            Err("expected a whole number from 1 to 4".to_owned())
+        );
         assert_eq!(parse_sun("200, -10"), Ok([200.0, -10.0]));
         assert!(parse_sun("200").unwrap_err().contains("AZIMUTH,ELEVATION"));
-        assert!(parse_sun("400,10").unwrap_err().starts_with("azimuth"));
-        assert!(parse_sun("10,91").unwrap_err().starts_with("elevation"));
+        assert!(
+            parse_sun("400,10")
+                .unwrap_err()
+                .ends_with("for the azimuth")
+        );
+        assert!(
+            parse_sun("10,91")
+                .unwrap_err()
+                .ends_with("for the elevation")
+        );
         assert_eq!(parse_colour("#D64834"), Ok([214, 72, 52]));
         assert!(parse_colour("sky").is_err());
         assert_eq!(colour_name([214, 72, 52]), "#d64834");

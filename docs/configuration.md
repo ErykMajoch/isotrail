@@ -93,7 +93,7 @@ An option you type also wins over settings it can't be combined with: with `date
 
 - Only the `[render]`, `[embed]`, `[bundle]` and `[style-lab]` tables are allowed, so typos don't go unnoticed.
 - Each table only takes its command's options: an unknown key is an error, and so are `output`, `config`, `debug-dir`, `verbose`, `quiet`, `json`, `help` and `version`, which only make sense for one run.
-- A bad value is reported with the name of the file it came from, for example `scale in hike.toml: must be a whole number from 1 to 16`.
+- A bad value is reported with the name of the file it came from, for example `scale in hike.toml: expected a whole number from 1 to 16`.
 - `--background` in a config file keeps its exact colour, just as it does on the command line.
 - `time` can be a string (`"07:30"`) or a TOML time (`07:30:00`).
 - Options that take `on` or `off`, such as `paths` or `shadows`, take `true` or `false` too.

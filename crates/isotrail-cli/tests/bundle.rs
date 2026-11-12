@@ -199,10 +199,11 @@ fn offline_bundle_without_cached_tiles_explains_why() {
     assert!(!output.status.success());
     let stderr = text(&output.stderr);
     assert!(
-        stderr.contains("could not fetch elevation tile"),
+        stderr.contains(
+            "the elevation data for this area isn't in the cache yet; run once without --offline"
+        ),
         "{stderr}"
     );
-    assert!(stderr.contains("offline mode is on"), "{stderr}");
     assert!(!itb.exists());
     // The folder is made before any download, but nothing is written into it
     assert_eq!(std::fs::read_dir(&debug).unwrap().count(), 0);
@@ -232,10 +233,10 @@ fn offline_bundle_without_cached_map_data_explains_why() {
     assert!(!output.status.success());
     let stderr = text(&output.stderr);
     assert!(
-        stderr.contains("could not fetch OpenStreetMap features"),
+        stderr.contains("the map data for this area isn't in the cache yet"),
         "{stderr}"
     );
-    assert!(stderr.contains("offline mode is on"), "{stderr}");
+    assert!(stderr.contains("--no-map-data"), "{stderr}");
     assert!(!itb.exists());
     // The folder is made before any download, but nothing is written into it
     assert_eq!(std::fs::read_dir(&debug).unwrap().count(), 0);
@@ -391,7 +392,7 @@ fn overpass_endpoint_comes_from_the_flag_or_the_environment() {
         assert!(!output.status.success());
         let stderr = text(&output.stderr);
         assert!(
-            stderr.contains(&format!("{MIRROR} is not in the cache")),
+            stderr.contains("the map data from https://overpass.example.invalid for this area"),
             "{stderr}"
         );
     }
@@ -473,7 +474,7 @@ fn stats_of_a_damaged_bundle_explains_why() {
         let output = isotrail(temp.path(), &["stats", path.to_str().unwrap()]);
         assert!(!output.status.success());
         let stderr = text(&output.stderr);
-        assert!(stderr.contains("could not read"), "{stderr}");
+        assert!(stderr.contains("can't read"), "{stderr}");
         assert!(stderr.contains(reason), "{stderr}");
     }
 }
@@ -635,7 +636,7 @@ fn exaggeration_can_be_set_by_hand() {
         &["bundle", &gpx(), "-o", "x.itb", "--exaggeration", "0"],
     );
     assert!(!output.status.success());
-    assert!(text(&output.stderr).contains("must be between 0.1 and 100"));
+    assert!(text(&output.stderr).contains("expected a number from 0.1 to 100"));
 }
 
 /// Answers for one server with the recordings of another

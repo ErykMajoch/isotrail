@@ -62,7 +62,7 @@ pub struct SceneArgs {
     /// Set the sun by hand, as its compass bearing and its elevation in
     /// degrees, such as 200,25
     #[arg(long, value_name = "AZIMUTH,ELEVATION", value_parser = parse_sun,
-          allow_negative_numbers = true, conflicts_with = "time")]
+          allow_hyphen_values = true, conflicts_with = "time")]
     sun: Option<[f64; 2]>,
 
     /// The route's colour (default #d64834, or the theme's)
@@ -238,6 +238,7 @@ mod tests {
     use super::*;
 
     #[derive(Debug, Parser)]
+    #[command(allow_negative_numbers = true)]
     struct Cli {
         #[command(flatten)]
         scene: SceneArgs,
@@ -368,9 +369,9 @@ mod tests {
     fn bad_values_name_what_is_expected() {
         let message = |line: &[&str]| parse(line).unwrap_err().to_string();
         assert!(message(&["--paths", "maybe"]).contains("expected on or off"));
-        assert!(message(&["--prop-density", "3"]).contains("between 0 and 2"));
-        assert!(message(&["--base-blocks", "0"]).contains("between 1 and 24"));
-        assert!(message(&["--route-width", "5"]).contains("between 1 and 4"));
+        assert!(message(&["--prop-density", "3"]).contains("from 0 to 2"));
+        assert!(message(&["--base-blocks", "0"]).contains("from 1 to 24"));
+        assert!(message(&["--route-width", "5"]).contains("from 1 to 4"));
         assert!(message(&["--route-colour", "red"]).contains("#d64834"));
         assert!(message(&["--weather", "sunny"]).contains("clear, cloudy"));
         assert!(message(&["--markers", "start,start"]).contains("twice"));

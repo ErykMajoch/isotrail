@@ -115,6 +115,7 @@ impl RenderArgs {
 }
 
 pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
+    crate::check_input(&args.file)?;
     let mut report = Report::new(&args.report);
     let shapes = args.shapes()?;
     let framings = args.frame.framings(&shapes, args.scale)?;
@@ -348,7 +349,7 @@ fn write_clip(
         pending.commit()?;
         Ok(frames)
     };
-    write().with_context(|| format!("could not write {}", output.display()))
+    write().with_context(|| format!("can't write {}", output.display()))
 }
 
 /// Draws each frame of the animation with its stats counting up, hands it
@@ -397,7 +398,7 @@ impl Source {
         let bytes = crate::read_file(path)?;
         if crate::is_bundle_file(path, &bytes) {
             let bundle = SceneBundle::from_bytes(&bytes)
-                .with_context(|| format!("could not read {}", path.display()))?;
+                .with_context(|| format!("can't read {}", path.display()))?;
             Ok(Source::Bundle(Box::new(bundle)))
         } else {
             Ok(Source::Track(crate::parse_track(&bytes, path)?))
@@ -460,7 +461,7 @@ fn output_paths(
         Format::Mp4
     } else {
         return Err(usage(format!(
-            "cannot write {}: only .png, .gif and .mp4 output are supported",
+            "can't write {}: the name must end in .png, .gif or .mp4",
             output.display()
         )));
     };
@@ -494,6 +495,7 @@ mod tests {
     use super::*;
 
     #[derive(Debug, Parser)]
+    #[command(allow_negative_numbers = true)]
     struct Cli {
         #[command(flatten)]
         render: RenderArgs,
@@ -595,7 +597,10 @@ mod tests {
         assert_eq!(paths, [Path::new("a-story.Gif"), Path::new("a-wide.Gif")]);
         for bad in ["a.webm", "a"] {
             let message = format(bad).unwrap_err().to_string();
-            assert!(message.contains("only .png, .gif and .mp4"), "{message}");
+            assert!(
+                message.contains("must end in .png, .gif or .mp4"),
+                "{message}"
+            );
         }
     }
 }

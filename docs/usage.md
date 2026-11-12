@@ -57,7 +57,7 @@ Without `-o`, the image is a PNG named after the input and written to the curren
 | --- | --- | --- |
 | `-o, --output FILE` | `<input>.png` | Where to write the image: `.png` for a still image, `.gif` or `.mp4` for an [animation](#animation) |
 | `--aspect LIST` | `story` | One or more of `story` (1080 x 1920), `video` (1080 x 1920), `portrait` (1080 x 1440), `feed` (1080 x 1350), `square` (1080 x 1080) and `wide` (1920 x 1080), separated by commas |
-| `--size WxH` | none | Any size instead of an aspect, such as `1200x800`, each side from 16 to 8192 pixels. It can't be typed with `--aspect`, and it replaces an aspect from a config file |
+| `--size WxH` | none | Any size instead of an aspect, such as `1200x900`, each side from 16 to 8192 pixels. It can't be typed with `--aspect`, and it replaces an aspect from a config file |
 | `--safe-area T,R,B,L` | the aspect's | Margins the diorama and text keep clear of, in percent of the image: top, right, bottom and left, or one number for all four, each up to 45 |
 | `--scale N` | `3` | Output pixels per drawn pixel, any whole number from `1` to `16` that divides both sides of the image (`2`, `3`, `5`, `6` and `10` divide every aspect). Lower values give finer detail; higher values give chunkier pixels |
 | `--background VALUE` | `sky` | `sky` for a dithered gradient, `transparent` to place the diorama over a photo, or an exact colour such as `#1e2a33` to match a web page |
@@ -337,7 +337,7 @@ The image inside the element shows the poster, at the element's size, on pages w
 | --- | --- | --- |
 | `-o`, `--output DIR` | required | The directory to write to, created if needed |
 | `--aspect SHAPE` | `wide` | `story` or `video` (9:16), `portrait` (3:4), `feed` (4:5), `square` or `wide` (16:9), for the element and its poster |
-| `--size WxH` | none | The poster's size instead of an aspect; the element takes its shape, as in `aspect="3:2"` for `1200x800` |
+| `--size WxH` | none | The poster's size instead of an aspect; the element takes its shape, as in `aspect="4:3"` for `1200x900` |
 | `--safe-area T,R,B,L` | the aspect's | The poster's margins, as for [`render`](#image) |
 | `--scale N` | `3` | The poster's pixel scale, as for [`render`](#image). The live diorama picks its own to suit the page |
 | `--with-runtime` | off | Also copy the web runtime into `DIR` |
@@ -502,6 +502,6 @@ Before any download or render, isotrail checks where it will write:
 | Code | Meaning |
 | --- | --- |
 | `0` | Success |
-| `1` | The command failed: a file couldn't be read or written, data couldn't be downloaded, the render failed |
-| `2` | The command line or a config file asks for something isotrail can't do, such as an unknown option, a bad value, options that can't go together or an output that would overwrite an input. Nothing has been downloaded or written. Overlays that don't fit the frame at all are found once the hike is prepared, so a GPX file's data may have been downloaded (and cached), but nothing is written |
+| `1` | The command failed: the input is missing or isn't a GPX file or scene bundle, a file couldn't be written, data couldn't be downloaded, the render failed |
+| `2` | The command line or a config file asks for something isotrail can't do, such as an unknown option, a bad value, a palette, theme, config or strings file that is missing or can't be read, options that can't go together or an output that would overwrite an input. Nothing has been downloaded or written. Overlays that don't fit the frame at all are found once the hike is prepared, so a GPX file's data may have been downloaded (and cached), but nothing is written |
 | `130` | Stopped with Ctrl+C |

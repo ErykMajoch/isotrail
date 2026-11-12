@@ -11,7 +11,7 @@ use tracing::info;
 
 use crate::bundle::DataArgs;
 use crate::config::Typed;
-use crate::frame::{AspectArg, parse_scale};
+use crate::frame::{AspectArg, parse_scale, scale_mismatch};
 use crate::look::{palette_file, read_palette};
 use crate::output;
 use crate::render::Source;
@@ -119,9 +119,11 @@ impl StyleLabArgs {
             }
             if aspect.framing(scale).is_none() {
                 let (width, height) = aspect.output_size();
-                return Err(usage(format!(
-                    "--scale {scale} doesn't divide the {width} × {height} image ({}); use                      scales that divide both sides",
-                    aspect.name()
+                return Err(usage(scale_mismatch(
+                    scale,
+                    width,
+                    height,
+                    Some(aspect.name()),
                 )));
             }
         }
@@ -130,6 +132,7 @@ impl StyleLabArgs {
 }
 
 pub fn run(args: &StyleLabArgs, typed: &Typed) -> anyhow::Result<()> {
+    crate::check_input(&args.file)?;
     let mut report = Report::new(&args.report);
     let dir = &args.output;
     let theme_file = args.theme.path().filter(|path| path.is_file());

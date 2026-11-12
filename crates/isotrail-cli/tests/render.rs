@@ -243,7 +243,7 @@ fn other_image_formats_are_refused_before_any_work() {
     assert!(!output.status.success());
     let stderr = text(&output.stderr);
     assert!(
-        stderr.contains("only .png, .gif and .mp4 output are supported"),
+        stderr.contains("the name must end in .png, .gif or .mp4"),
         "{stderr}"
     );
     assert!(!temp.path().join("hike.webm").exists());
@@ -371,13 +371,13 @@ fn animation_settings_are_checked_before_any_work() {
     );
     let stderr = refused(&["--duration", "0.5s"]);
     assert!(
-        stderr.contains("between 1s and 180s (60s for a GIF)"),
+        stderr.contains("expected seconds from 1 to 180"),
         "{stderr}"
     );
     let stderr = refused(&["--fps", "60"]);
     assert!(stderr.contains("60"), "{stderr}");
     let stderr = refused(&["--orbit", "400"]);
-    assert!(stderr.contains("between -360 and 360"), "{stderr}");
+    assert!(stderr.contains("from -360 to 360"), "{stderr}");
     let stderr = refused(&["--palette", "none"]);
     assert!(stderr.contains("GIF output needs a palette"), "{stderr}");
     assert!(!temp.path().join("hike.gif").exists());
@@ -587,7 +587,7 @@ fn the_scale_must_divide_both_sides() {
     assert_eq!(output.status.code(), Some(2));
     let stderr = text(&output.stderr);
     assert!(
-        stderr.contains("--scale 7 doesn't divide the 1080 × 1920 image (story)"),
+        stderr.contains("--scale 7 doesn't divide the story image (1080 × 1920); use --scale 1, 2"),
         "{stderr}"
     );
     let output = isotrail(
@@ -597,7 +597,7 @@ fn the_scale_must_divide_both_sides() {
     );
     let stderr = text(&output.stderr);
     assert!(
-        stderr.contains("must be a whole number from 1 to 16"),
+        stderr.contains("expected a whole number from 1 to 16"),
         "{stderr}"
     );
 }
@@ -614,7 +614,10 @@ fn any_size_renders_with_its_own_safe_area() {
         ],
     );
     assert_eq!(output.status.code(), Some(2), "{}", text(&output.stderr));
-    assert!(text(&output.stderr).contains("--scale 3 doesn't divide the 1000 × 700 image"));
+    assert!(
+        text(&output.stderr)
+            .contains("--scale 3 doesn't divide 1000 × 700; use --scale 1, 2, 4, 5 or 10")
+    );
 
     let output = isotrail(
         &cache,
@@ -738,10 +741,10 @@ fn the_camera_can_turn_tilt_and_zoom() {
     );
 
     for (flag, value, reason) in [
-        ("--pitch", "85", "between 10 and 80"),
-        ("--turn", "400", "between -360 and 360"),
-        ("--heading", "400", "between 0 and 360"),
-        ("--zoom", "3", "between 0.5 and 2"),
+        ("--pitch", "85", "from 10 to 80"),
+        ("--turn", "400", "from -360 to 360"),
+        ("--heading", "400", "from 0 to 360"),
+        ("--zoom", "3", "from 0.5 to 2"),
     ] {
         let output = render("bad.png", &[flag, value]);
         assert_eq!(output.status.code(), Some(2), "{flag} {value}");
@@ -859,10 +862,10 @@ fn parts_of_the_scene_light_and_route_can_be_changed() {
     fs::remove_file(temp.path().join("user-config.toml")).unwrap();
 
     for (args, reason) in [
-        (&["--prop-density", "3"][..], "between 0 and 2"),
+        (&["--prop-density", "3"][..], "from 0 to 2"),
         (&["--paths", "maybe"][..], "expected on or off"),
-        (&["--base-blocks", "30"][..], "between 1 and 24"),
-        (&["--outlines", "3"][..], "between 0 and 2"),
+        (&["--base-blocks", "30"][..], "from 1 to 24"),
+        (&["--outlines", "3"][..], "from 0 to 2"),
         (
             &["--weather-effects", "wind"][..],
             "clouds, shade, rain, snow, haze",
@@ -874,7 +877,7 @@ fn parts_of_the_scene_light_and_route_can_be_changed() {
             "cannot be used with",
         ),
         (&["--route-colour", "red"][..], "#d64834"),
-        (&["--route-width", "5"][..], "between 1 and 4"),
+        (&["--route-width", "5"][..], "from 1 to 4"),
         (
             &["--route-hidden", "faint"][..],
             "dashed, dim, solid or off",
@@ -1159,8 +1162,8 @@ god-rays = \"off\"
     assert_ne!(render("rays.png", &["--god-rays", "on"]), full);
 
     for (flag, value, reason) in [
-        ("--occlusion", "1.5", "between 0 and 1"),
-        ("--soft-shadows", "5", "between 0 and 4"),
+        ("--occlusion", "1.5", "from 0 to 1"),
+        ("--soft-shadows", "5", "from 0 to 4"),
         ("--god-rays", "always", "auto, on, off"),
     ] {
         let output = isotrail(&cache, temp.path(), &["render", "hill.itb", flag, value]);

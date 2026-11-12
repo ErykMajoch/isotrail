@@ -25,11 +25,11 @@ mod weather;
 
 use std::fmt;
 use std::fs;
-use std::io::IsTerminal;
+use std::io::{self, IsTerminal, Read};
 use std::path::Path;
 use std::process::ExitCode;
 
-use anyhow::Context;
+use anyhow::{Context, anyhow, bail};
 use clap::error::ErrorKind;
 use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
 use isotrail_track::{GpxReader, Track, TrackReader, Units};
@@ -56,19 +56,25 @@ struct Cli {
 enum Command {
     /// Print distance, elevation and time statistics for a GPX file or scene
     /// bundle
+    #[command(allow_negative_numbers = true)]
     Stats(stats::StatsArgs),
     /// Prepare the terrain around a GPX route and save it with the route as
     /// a scene bundle (.itb)
+    #[command(allow_negative_numbers = true)]
     Bundle(bundle::BundleArgs),
     /// Render a GPX file or scene bundle as a diorama image
+    #[command(allow_negative_numbers = true)]
     Render(Box<render::RenderArgs>),
     /// Write a scene bundle, a poster image and an HTML snippet that put an
     /// interactive diorama of the hike on a web page
+    #[command(allow_negative_numbers = true)]
     Embed(Box<embed::EmbedArgs>),
     /// Render a hike with every mesher, pixel scale and built-in palette, and
     /// lay the images out on a labelled contact sheet
+    #[command(allow_negative_numbers = true)]
     StyleLab(style_lab::StyleLabArgs),
     /// Show or clear the cache of downloaded elevation and map data
+    #[command(allow_negative_numbers = true)]
     Cache(cache::CacheArgs),
     /// Write the built-in theme file, to start a theme of your own from
     Theme(theme::ThemeArgs),
@@ -129,8 +135,112 @@ fn report(error: &anyhow::Error, command: Option<&str>) -> ExitCode {
         };
         clap_error.exit();
     }
-    eprintln!("Error: {error:?}");
+    let _ = clap::Error::raw(ErrorKind::Io, format!("{}\n", describe(error))).print();
     ExitCode::FAILURE
+}
+
+/// The error and its causes on one line, with file errors in words and no
+/// cause repeated
+fn describe(error: &anyhow::Error) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for cause in error.chain() {
+        let text = match cause.downcast_ref::<io::Error>() {
+            Some(io) => io_words(io),
+            None => plain(&cause.to_string()),
+        };
+        if !text.is_empty() && !parts.iter().any(|part| part.contains(&text)) {
+            parts.push(text);
+        }
+    }
+    parts.join(": ")
+}
+
+/// What an I/O error means, in words
+fn io_words(error: &io::Error) -> String {
+    match error.kind() {
+        io::ErrorKind::NotFound => "the file doesn't exist".into(),
+        io::ErrorKind::PermissionDenied => "permission denied".into(),
+        io::ErrorKind::IsADirectory => "it is a folder".into(),
+        io::ErrorKind::NotADirectory => "part of the path is a file, not a folder".into(),
+        io::ErrorKind::StorageFull => "the disk is full".into(),
+        io::ErrorKind::ReadOnlyFilesystem => "the disk is read-only".into(),
+        io::ErrorKind::InvalidFilename => "the name can't be used for a file here".into(),
+        _ => plain(&error.to_string()),
+    }
+}
+
+/// A message without the operating system's error number, its full stop or
+/// a capital letter at the start of a sentence
+fn plain(text: &str) -> String {
+    let text = match text.rfind(" (os error ") {
+        Some(at) if text.ends_with(')') => &text[..at],
+        _ => text,
+    };
+    let text = text.trim().trim_end_matches('.');
+    let mut chars = text.chars();
+    match (chars.next(), chars.next()) {
+        (Some(first), Some(second)) if first.is_uppercase() && second.is_lowercase() => first
+            .to_lowercase()
+            .chain(text[first.len_utf8()..].chars())
+            .collect(),
+        _ => text.to_owned(),
+    }
+}
+
+/// Why a file couldn't be read or written, in words
+fn file_problem(path: &Path, error: &io::Error) -> String {
+    if path.is_dir() {
+        "it is a folder".into()
+    } else {
+        io_words(error)
+    }
+}
+
+/// Checks the hike file given to a command before anything else: it must be
+/// a file, and not a picture or a video
+fn check_input(path: &Path) -> anyhow::Result<()> {
+    let shown = path.display();
+    match fs::metadata(path) {
+        // Reading it says why
+        Err(_) => return Ok(()),
+        Ok(meta) if meta.is_dir() => {
+            bail!("{shown} is a folder; give a GPX file or a scene bundle (.itb)")
+        }
+        Ok(_) => {}
+    }
+    if let Some(kind) = media(path) {
+        bail!("{shown} is {kind}, not a GPX file or a scene bundle (.itb)");
+    }
+    Ok(())
+}
+
+/// A picture or a video by its first bytes, whatever its name: a bundle
+/// may be called hike.png
+fn media(path: &Path) -> Option<&'static str> {
+    let mut start = [0u8; 12];
+    let read = fs::File::open(path)
+        .and_then(|mut file| file.read(&mut start))
+        .ok()?;
+    let start = &start[..read];
+    let image = start.starts_with(&[0x89, b'P', b'N', b'G'])
+        || start.starts_with(&[0xff, 0xd8, 0xff])
+        || start.starts_with(b"GIF8")
+        || (start.starts_with(b"RIFF") && start.get(8..12) == Some(b"WEBP"));
+    if image {
+        return Some("an image");
+    }
+    // MP4, MOV and HEIC files open with an ftyp box naming their brand
+    if start.get(4..8) == Some(b"ftyp") {
+        let still = matches!(
+            start.get(8..12),
+            Some(b"heic" | b"heix" | b"mif1" | b"avif")
+        );
+        return Some(if still { "an image" } else { "a video" });
+    }
+    // WebM and Matroska
+    start
+        .starts_with(&[0x1a, 0x45, 0xdf, 0xa3])
+        .then_some("a video")
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -160,7 +270,31 @@ fn read_track(path: &Path) -> anyhow::Result<Track> {
 }
 
 fn read_file(path: &Path) -> anyhow::Result<Vec<u8>> {
-    fs::read(path).with_context(|| format!("could not open {}", path.display()))
+    read_named(path, "")
+}
+
+/// The file's bytes, or one message naming `what` it is and the file, such
+/// as `can't open the theme dusk.toml: the file doesn't exist`
+fn read_named(path: &Path, what: &str) -> anyhow::Result<Vec<u8>> {
+    fs::read(path).map_err(|error| {
+        anyhow!(
+            "can't open {what}{}: {}",
+            path.display(),
+            file_problem(path, &error)
+        )
+    })
+}
+
+/// A settings file's text, or why it can't be read, naming `what` it is
+fn read_text(path: &Path, what: &str) -> Result<String, String> {
+    let bytes = read_named(path, what).map_err(|error| error.to_string())?;
+    let shown = path.display();
+    if bytes.starts_with(&[0xff, 0xfe]) || bytes.starts_with(&[0xfe, 0xff]) {
+        return Err(format!(
+            "{what}{shown} is saved as UTF-16 (as PowerShell's > writes it); save it as UTF-8"
+        ));
+    }
+    String::from_utf8(bytes).map_err(|_| format!("{what}{shown} isn't UTF-8 text"))
 }
 
 /// A scene bundle by its extension or its first bytes, otherwise GPX
@@ -174,7 +308,7 @@ fn parse_track(bytes: &[u8], path: &Path) -> anyhow::Result<Track> {
     GpxReader
         .parse(bytes)
         .and_then(Track::clean)
-        .with_context(|| format!("could not read {}", path.display()))
+        .with_context(|| format!("can't read {}", path.display()))
 }
 
 /// The track's name, or the file name without its extension
@@ -211,5 +345,24 @@ mod tests {
     #[test]
     fn cli_definition_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn errors_read_as_one_line_of_plain_words() {
+        let missing = io::Error::from(io::ErrorKind::NotFound);
+        let error = anyhow::Error::new(missing).context("can't open hike.gpx");
+        assert_eq!(
+            describe(&error),
+            "can't open hike.gpx: the file doesn't exist"
+        );
+        let os = io::Error::other("Access is denied. (os error 5)");
+        let error = anyhow::Error::new(os).context("can't write a.png");
+        assert_eq!(describe(&error), "can't write a.png: access is denied");
+        let error = anyhow!("can't write a.png").context("can't write a.png");
+        assert_eq!(describe(&error), "can't write a.png");
+        assert_eq!(
+            plain("GPU did not finish rendering"),
+            "GPU did not finish rendering"
+        );
     }
 }

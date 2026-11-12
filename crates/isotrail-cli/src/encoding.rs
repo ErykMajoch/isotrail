@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use clap::Args;
 use clap::builder::PossibleValuesParser;
 use isotrail_export::{DEFAULT_CRF, Ffmpeg, GifOptions, MAX_CRF, Mp4Options, Plays, X264_PRESETS};
+use isotrail_render::parse_count;
 use tracing::warn;
 
 use crate::config::Typed;
@@ -16,7 +17,7 @@ const MAX_PLAYS: u16 = 1000;
 pub struct EncodingArgs {
     /// Output pixels per drawn pixel in a GIF, from 1 (the drawn size, for
     /// small files on a website) up to --scale, the default
-    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=16))]
+    #[arg(long, value_name = "N", value_parser = parse_gif_scale)]
     gif_scale: Option<u32>,
 
     /// How many times a GIF plays: forever, once, or a number of times
@@ -29,7 +30,7 @@ pub struct EncodingArgs {
         long,
         value_name = "N",
         default_value_t = DEFAULT_CRF,
-        value_parser = clap::value_parser!(u8).range(0..=i64::from(MAX_CRF))
+        value_parser = parse_crf
     )]
     crf: u8,
 
@@ -41,6 +42,14 @@ pub struct EncodingArgs {
     /// The ffmpeg program to make MP4s with, instead of the one on PATH
     #[arg(long, value_name = "PATH", env = "ISOTRAIL_FFMPEG")]
     ffmpeg: Option<PathBuf>,
+}
+
+fn parse_gif_scale(value: &str) -> Result<u32, String> {
+    parse_count(value, &crate::frame::SCALE_RANGE)
+}
+
+fn parse_crf(value: &str) -> Result<u8, String> {
+    parse_count(value, &(0..=u32::from(MAX_CRF))).map(|crf| crf as u8)
 }
 
 pub(crate) fn parse_plays(value: &str) -> Result<Plays, String> {
@@ -133,6 +142,7 @@ mod tests {
     use super::*;
 
     #[derive(Debug, Parser)]
+    #[command(allow_negative_numbers = true)]
     struct Cli {
         #[command(flatten)]
         encoding: EncodingArgs,

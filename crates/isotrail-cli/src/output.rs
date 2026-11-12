@@ -72,13 +72,13 @@ pub fn plan<'a>(
     for &output in &outputs {
         if output.is_dir() {
             return Err(usage(format!(
-                "cannot write {}: it is a folder",
+                "can't write {}: it is a folder",
                 output.display()
             )));
         }
         if inputs.iter().any(|input| same_file(input, output)) {
             return Err(usage(format!(
-                "cannot write {}: it is one of the files being read; choose another name",
+                "can't write {}: it is one of the files being read; choose another name",
                 output.display()
             )));
         }
@@ -86,7 +86,7 @@ pub fn plan<'a>(
     for output in outputs {
         if let Some(parent) = output.parent().filter(|p| !p.as_os_str().is_empty()) {
             fs::create_dir_all(parent)
-                .with_context(|| format!("could not create {}", parent.display()))?;
+                .with_context(|| format!("can't create the folder {}", parent.display()))?;
         }
     }
     Ok(())
@@ -96,11 +96,11 @@ pub fn plan<'a>(
 pub fn folder(dir: &Path) -> anyhow::Result<()> {
     if dir.exists() && !dir.is_dir() {
         return Err(usage(format!(
-            "cannot write into {}: it is a file, not a folder",
+            "can't write into {}: it is a file, not a folder",
             dir.display()
         )));
     }
-    fs::create_dir_all(dir).with_context(|| format!("could not create {}", dir.display()))
+    fs::create_dir_all(dir).with_context(|| format!("can't create the folder {}", dir.display()))
 }
 
 /// Both paths name one existing file or folder, however they are spelt
@@ -120,7 +120,7 @@ pub fn write(
     let mut file = pending.open()?;
     contents(&mut file)
         .and_then(|()| Ok(file.flush()?))
-        .with_context(|| format!("could not write {}", target.display()))?;
+        .with_context(|| format!("can't write {}", target.display()))?;
     drop(file);
     pending.commit()
 }
@@ -154,7 +154,7 @@ impl Pending {
 
     pub fn open(&self) -> anyhow::Result<BufWriter<File>> {
         let file = File::create(&self.temp)
-            .with_context(|| format!("could not write {}", self.target.display()))?;
+            .with_context(|| format!("can't write {}", self.target.display()))?;
         Ok(BufWriter::new(file))
     }
 
@@ -162,7 +162,7 @@ impl Pending {
     pub fn commit(mut self) -> anyhow::Result<()> {
         check_interrupted()?;
         fs::rename(&self.temp, &self.target)
-            .with_context(|| format!("could not write {}", self.target.display()))?;
+            .with_context(|| format!("can't write {}", self.target.display()))?;
         self.committed = true;
         Ok(())
     }
@@ -218,7 +218,7 @@ mod tests {
             bail!("frame 3 failed")
         });
         let message = format!("{:#}", result.unwrap_err());
-        assert!(message.contains("could not write"), "{message}");
+        assert!(message.contains("can't write"), "{message}");
         assert!(message.contains("frame 3 failed"), "{message}");
         assert_eq!(fs::read(&target).unwrap(), b"good");
         assert_eq!(names(dir.path()), ["a.gif"]);

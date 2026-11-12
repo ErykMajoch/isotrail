@@ -65,8 +65,7 @@ pub struct PlaybackArgs {
         long,
         value_name = "DEG",
         default_value_t = DEFAULT_ORBIT_DEG,
-        value_parser = parse_orbit,
-        allow_negative_numbers = true
+        value_parser = parse_orbit
     )]
     orbit: f32,
 
@@ -190,9 +189,7 @@ impl PlaybackArgs {
         };
         let named =
             |message: String| usage(format!("the strings file {}: {message}", path.display()));
-        let bytes = crate::read_file(path).map_err(|error| named(format!("{error:#}")))?;
-        let text =
-            String::from_utf8(bytes).map_err(|_| named("the file is not UTF-8 text".into()))?;
+        let text = crate::read_text(path, "the strings file ").map_err(usage)?;
         let value: Value = serde_json::from_str(text.trim_start_matches('\u{feff}'))
             .map_err(|error| named(format!("not JSON: {error}")))?;
         let Value::Object(words) = value else {
@@ -274,6 +271,7 @@ mod tests {
     use super::*;
 
     #[derive(Debug, Parser)]
+    #[command(allow_negative_numbers = true)]
     struct Cli {
         #[command(flatten)]
         playback: PlaybackArgs,

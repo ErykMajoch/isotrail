@@ -71,10 +71,11 @@ struct Summary {
 impl Summary {
     /// `weather` is `Some(offline)` to include the weather
     fn read(path: &Path, weather: Option<bool>, args: &StatsArgs) -> anyhow::Result<Summary> {
+        crate::check_input(path)?;
         let bytes = crate::read_file(path)?;
         if crate::is_bundle_file(path, &bytes) {
             let bundle = SceneBundle::from_bytes(&bytes)
-                .with_context(|| format!("could not read {}", path.display()))?;
+                .with_context(|| format!("can't read {}", path.display()))?;
             if weather.is_some() && bundle.weather.is_none() {
                 warn!("the bundle has no weather");
             }

@@ -7,12 +7,13 @@ use anyhow::Context;
 use clap::{Args, ValueEnum};
 use isotrail_bundle::Route;
 use isotrail_geo::{
-    Cache, CachedFetcher, DEFAULT_DETAIL, DemSource, FeatureSource, Footprint, FootprintOptions,
-    Grid, Heightmap, HttpFetcher, Landcover, LandcoverMap, MIN_PADDING_M, OSM_ATTRIBUTION,
-    OVERPASS_URL, Orientation, OsmFeatures, OverpassSource, PADDING_FRACTION, Provenance,
-    RetryPolicy, SceneBundle, TERRARIUM_URL, TerrariumSource, line_mask, origin, redact,
-    scene_bundle,
+    Cache, CachedFetcher, DEFAULT_DETAIL, DemSource, FeatureSource, FetchError, Footprint,
+    FootprintOptions, Grid, Heightmap, HttpFetcher, Landcover, LandcoverMap, MIN_PADDING_M,
+    OSM_ATTRIBUTION, OVERPASS_URL, Orientation, OsmFeatures, OverpassSource, PADDING_FRACTION,
+    Provenance, RetryPolicy, SceneBundle, TERRARIUM_URL, TerrariumSource, line_mask, origin,
+    redact, scene_bundle,
 };
+use isotrail_render::parse_count;
 use isotrail_track::Track;
 use png::ColorType;
 use tracing::{info, warn};
@@ -77,20 +78,23 @@ pub struct BundleArgs {
 }
 
 pub fn parse_exaggeration(value: &str) -> Result<f64, String> {
-    let exaggeration: f64 = value.parse().map_err(|e| format!("{e}"))?;
-    if (0.1..=100.0).contains(&exaggeration) {
-        Ok(exaggeration)
-    } else {
-        Err("must be between 0.1 and 100".into())
-    }
+    value
+        .trim()
+        .parse()
+        .ok()
+        .filter(|exaggeration| (0.1..=100.0).contains(exaggeration))
+        .ok_or_else(|| "expected a number from 0.1 to 100".to_owned())
+}
+
+fn parse_detail(value: &str) -> Result<u32, String> {
+    parse_count(value, &(8..=isotrail_bundle::MAX_GRID_SIDE))
 }
 
 /// How terrain and map data are fetched for a GPX file
 #[derive(Debug, Args)]
 pub struct DataArgs {
     /// Grid cells along the long side of the terrain slab
-    #[arg(long, value_name = "N", default_value_t = DEFAULT_DETAIL.get(),
-          value_parser = clap::value_parser!(u32).range(8..=i64::from(isotrail_bundle::MAX_GRID_SIDE)))]
+    #[arg(long, value_name = "N", default_value_t = DEFAULT_DETAIL.get(), value_parser = parse_detail)]
     detail: u32,
 
     /// Only use elevation and map data that is already in the cache
@@ -120,7 +124,7 @@ pub struct DataArgs {
 
     /// Ground added round the route on each side: a percentage of its
     /// length and width, and at least this many metres; 15,500 by default
-    #[arg(long, value_name = "PERCENT[,METRES]", value_parser = parse_padding)]
+    #[arg(long, value_name = "PERCENT[,METRES]", value_parser = parse_padding, allow_hyphen_values = true)]
     padding: Option<Padding>,
 
     /// Which way the slab's sides run: along the route, or north-south and
@@ -157,15 +161,11 @@ fn parse_padding(value: &str) -> Result<Padding, String> {
         None => (value, None),
     };
     let number = |text: &str, max: f64, what: &str| -> Result<f64, String> {
-        let number: f64 = text
-            .trim()
+        text.trim()
             .parse()
-            .map_err(|_| format!("{:?} is not a number", text.trim()))?;
-        if (0.0..=max).contains(&number) {
-            Ok(number)
-        } else {
-            Err(format!("the {what} must be from 0 to {max}"))
-        }
+            .ok()
+            .filter(|number| (0.0..=max).contains(number))
+            .ok_or_else(|| format!("expected the {what} as a number from 0 to {max}"))
     };
     Ok(Padding {
         fraction: number(percent, 100.0, "percentage")? / 100.0,
@@ -252,7 +252,12 @@ fn map_data(grid: &Grid, data: &DataArgs) -> anyhow::Result<Option<OsmFeatures>>
         .features(grid)
         .map_err(|err| {
             if err.is_offline() {
-                anyhow::Error::new(err)
+                not_cached(
+                    "map data",
+                    &data.overpass_url,
+                    OVERPASS_URL,
+                    ", or add --no-map-data",
+                )
             } else {
                 anyhow::Error::new(err).context(MAP_DATA_WAYS_OUT)
             }
@@ -261,6 +266,32 @@ fn map_data(grid: &Grid, data: &DataArgs) -> anyhow::Result<Option<OsmFeatures>>
         info!("{count:>6}  {tag}");
     }
     Ok(Some(features))
+}
+
+/// The next step when --offline finds nothing cached; a server other than
+/// the usual one is named, without any key in its address
+fn not_cached(what: &str, url: &str, usual: &str, more: &str) -> anyhow::Error {
+    let from = if url == usual {
+        String::new()
+    } else {
+        format!(" from {}", origin(url))
+    };
+    anyhow::anyhow!(
+        "the {what}{from} for this area isn't in the cache yet; run once without --offline \
+         to download it{more}"
+    )
+}
+
+/// Whether a download failed only because it wasn't cached and --offline is on
+fn is_offline(error: &(dyn std::error::Error + 'static)) -> bool {
+    let mut cause = Some(error);
+    while let Some(error) = cause {
+        if matches!(error.downcast_ref(), Some(FetchError::Offline { .. })) {
+            return true;
+        }
+        cause = error.source();
+    }
+    false
 }
 
 /// Fetches terrain, map data and weather around the track read from `file`
@@ -274,7 +305,14 @@ pub fn prepare(track: &Track, file: &Path, data: &DataArgs) -> anyhow::Result<Pr
     let tiles = TerrariumSource::<HttpFetcher>::tiles(&grid).len();
     let mut heightmap = TerrariumSource::new(&fetcher)
         .template(&data.terrain_url)
-        .heightmap(&grid)?;
+        .heightmap(&grid)
+        .map_err(|err| {
+            if is_offline(&err) {
+                not_cached("elevation data", &data.terrain_url, TERRARIUM_URL, "")
+            } else {
+                anyhow::Error::new(err)
+            }
+        })?;
     let features = map_data(&grid, data)?;
     let elevation_range = heightmap.range();
     let landcover = LandcoverMap::classify(
@@ -336,6 +374,7 @@ pub fn prepare(track: &Track, file: &Path, data: &DataArgs) -> anyhow::Result<Pr
 }
 
 pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
+    crate::check_input(&args.file)?;
     let mut report = Report::new(&args.report);
     let debug: Vec<PathBuf> = args
         .debug_dir

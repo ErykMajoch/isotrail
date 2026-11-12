@@ -10,6 +10,10 @@ pub enum TrackError {
     #[error("the input is empty")]
     EmptyInput,
 
+    /// The input is text without any XML
+    #[error("it holds plain text, not GPX")]
+    PlainText,
+
     /// The input is not valid UTF-8, or UTF-16 after a byte-order mark
     #[error("line {line}: the input is not valid UTF-8 or UTF-16 text")]
     Encoding {
@@ -34,7 +38,7 @@ pub enum TrackError {
     },
 
     /// The root element is not `<gpx>`
-    #[error("not a GPX file: the root element is <{root}>")]
+    #[error("it is a <{root}> file, not GPX")]
     NotGpx {
         /// Local name of the root element that was found
         root: String,

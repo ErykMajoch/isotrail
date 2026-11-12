@@ -32,17 +32,8 @@ impl ThemeFileArg {
 }
 
 pub fn read(path: &Path) -> anyhow::Result<Theme> {
-    let named = |message: String| usage(format!("the theme {}: {message}", path.display()));
-    let bytes = crate::read_file(path).map_err(|error| named(format!("{error:#}")))?;
-    if bytes.starts_with(&[0xff, 0xfe]) || bytes.starts_with(&[0xfe, 0xff]) {
-        return Err(named(
-            "the file is UTF-16 (as PowerShell's > writes it); save it as UTF-8, or write it \
-             with isotrail theme print -o FILE"
-                .into(),
-        ));
-    }
-    let text = String::from_utf8(bytes).map_err(|_| named("the file is not UTF-8 text".into()))?;
-    Theme::parse(&text).map_err(|error| named(error.to_string()))
+    let text = crate::read_text(path, "the theme ").map_err(usage)?;
+    Theme::parse(&text).map_err(|error| usage(format!("the theme {}: {error}", path.display())))
 }
 
 #[derive(Debug, Args)]

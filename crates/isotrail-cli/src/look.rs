@@ -1,6 +1,5 @@
 use std::path::Path;
 
-use anyhow::Context;
 use chrono::NaiveTime;
 use clap::{Args, ValueEnum};
 use isotrail_render::{
@@ -175,10 +174,15 @@ pub fn read_palette(value: &str) -> anyhow::Result<Option<Palette>> {
             names.join(", ")
         )));
     }
-    let bytes = crate::read_file(path)?;
+    let bytes =
+        crate::read_named(path, "the palette ").map_err(|error| usage(error.to_string()))?;
     let text = String::from_utf8_lossy(&bytes);
-    let palette = Palette::parse_hex(&text)
-        .with_context(|| format!("could not read the palette {}", path.display()))?;
+    let palette = Palette::parse_hex(&text).map_err(|error| {
+        usage(format!(
+            "can't read the palette {}: {error}",
+            path.display()
+        ))
+    })?;
     Ok(Some(palette))
 }
 
@@ -205,6 +209,7 @@ mod tests {
     use super::*;
 
     #[derive(Debug, Parser)]
+    #[command(allow_negative_numbers = true)]
     struct Cli {
         #[command(flatten)]
         look: LookArgs,

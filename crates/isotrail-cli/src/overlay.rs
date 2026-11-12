@@ -287,9 +287,8 @@ impl OverlayArgs {
         let frame = format!("the {shape} frame at --scale {scale}");
         let fit = Overlays::fit(text, style, framing).map_err(|_| {
             usage(format!(
-                "the overlays don't fit {frame}, even with a small title, no subtitle, \
-                 no profile, no credit and one stat; use a lower --scale, a larger --size or \
-                 smaller --safe-area, fewer --stats, or fewer --overlay parts"
+                "the text doesn't fit the {shape} image at --scale {scale}; try a lower \
+                 --scale, a larger --size, fewer --stats or --overlay none"
             ))
         })?;
         if !fit.steps.is_empty() {
@@ -388,6 +387,7 @@ mod tests {
     use super::*;
 
     #[derive(Debug, Parser)]
+    #[command(allow_negative_numbers = true)]
     struct Cli {
         #[command(flatten)]
         overlay: OverlayArgs,
@@ -514,7 +514,7 @@ mod tests {
         assert!(refused.is::<crate::UsageError>());
         let message = refused.to_string();
         assert!(
-            message.contains("the square frame at --scale 10"),
+            message.contains("the square image at --scale 10"),
             "{message}"
         );
         assert!(message.contains("--stats"), "{message}");

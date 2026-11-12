@@ -4,6 +4,21 @@ All notable changes to `isotrail` are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- The size example in `--help` and the usage guide, `--size 1200x800`, didn't work at the default `--scale 3`. It is now `1200x900`.
+- When `--scale` doesn't divide the image, the message lists the scales that do.
+
+### Changed
+
+- Errors print on one line that starts with `error:`, like mistakes on the command line. File errors are in plain words, such as `can't open hike.gpx: the file doesn't exist`, without the system's error number.
+- A folder, a picture, a video or a plain text file given instead of a hike gets a message that says so. `isotrail hike.gpx` without a command shows the `render` command to type.
+- `--offline` with nothing cached for the area says to run once without it.
+- Part of an option's name, such as `--colour`, points to the whole one, `--route-colour`.
+- A value out of range names the range, such as `expected a whole number from 1 to 60`, for every number option and in config files. Negative numbers get the same message instead of being taken for an option.
+- A config file saved as UTF-16 gets the same clear message as a theme file.
+- A palette file that is missing, can't be read or has a bad line is a usage mistake, with exit code 2, found before any download. `isotrail render hike.png`, where `hike.png` is a picture, now exits with 1 like any input that isn't a hike.
+
 ## [1.4.0] - 2026-11-12
 
 Full control: any size and camera angle, switches for every part of the scene, the light and the route, animations shaped your way, theme files for your own colours and language, and a web embed that plays as you choose and answers to scripts.

@@ -104,14 +104,17 @@ fn unreadable_files_fail_with_context() {
     let output = isotrail(&["stats", missing.to_str().unwrap()]);
     assert!(!output.status.success());
     let err = String::from_utf8_lossy(&output.stderr);
-    assert!(err.contains("could not open"), "{err}");
+    assert!(
+        err.contains("can't open") && err.contains("the file doesn't exist"),
+        "{err}"
+    );
 
     let empty = fixture("empty.gpx");
     let output = isotrail(&["stats", empty.to_str().unwrap()]);
     assert!(!output.status.success());
     let err = String::from_utf8_lossy(&output.stderr);
     assert!(
-        err.contains("could not read") && err.contains("the input is empty"),
+        err.contains("can't read") && err.contains("the input is empty"),
         "{err}"
     );
 }

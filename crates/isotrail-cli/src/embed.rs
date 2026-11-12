@@ -107,6 +107,7 @@ pub struct EmbedArgs {
 }
 
 pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
+    crate::check_input(&args.file)?;
     let mut report = Report::new(&args.report);
     let shape = args.frame.shapes(&[Aspect::from(args.aspect)])[0];
     let framing = args.frame.framings(&[shape], args.scale)?[0];
@@ -261,7 +262,7 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
     for (from, to) in &copies {
         output::write(to, |file| {
             let mut source =
-                File::open(from).with_context(|| format!("could not copy {}", from.display()))?;
+                File::open(from).with_context(|| format!("can't copy {}", from.display()))?;
             io::copy(&mut source, file)?;
             Ok(())
         })?;
@@ -314,22 +315,21 @@ fn runtime_dir(given: Option<&Path>) -> anyhow::Result<PathBuf> {
     let dir = match given {
         Some(dir) => dir.to_owned(),
         None => std::env::current_exe()
-            .context("could not find the isotrail executable")?
+            .context("can't find the isotrail program")?
             .parent()
-            .context("could not find the isotrail executable's folder")?
+            .context("can't find the isotrail program's folder")?
             .join("web"),
     };
-    for file in RUNTIME_FILES {
-        let path = runtime_file(&dir, file);
-        if !path.is_file() {
-            let hint = if given.is_some() {
-                "point --runtime-dir at a folder holding isotrail-embed.js and pkg/"
-            } else {
-                "the release downloads have it in a web folder next to isotrail; or point \
-                 --runtime-dir at one, such as web/ in the repository after sh web/build.sh"
-            };
-            bail!("the web runtime has no {}: {hint}", path.display());
-        }
+    if RUNTIME_FILES
+        .iter()
+        .any(|file| !runtime_file(&dir, file).is_file())
+    {
+        let hint = if given.is_some() {
+            "it needs isotrail-embed.js and the pkg folder"
+        } else {
+            "keep the web folder next to isotrail, or name it with --runtime-dir"
+        };
+        bail!("can't find the web runtime in {}; {hint}", dir.display());
     }
     Ok(dir)
 }
