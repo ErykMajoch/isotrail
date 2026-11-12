@@ -460,7 +460,7 @@ A cached download that turns out to be damaged is dropped and fetched once more.
 | Linux | `~/.cache/isotrail` |
 | macOS | `~/Library/Caches/isotrail` |
 
-Pass `--cache-dir DIR` to any command that downloads, or set `ISOTRAIL_CACHE_DIR`, to use another directory. The flag wins over the variable.
+Pass `--cache-dir DIR` to any command that downloads, or set `ISOTRAIL_CACHE_DIR`, to use another directory. The flag wins over the variable. `cache path` and `cache clear` also follow a `cache-dir` set in the `[render]` table of your [user config file](configuration.md#config-files), below the flag and the variable.
 
 ## theme
 

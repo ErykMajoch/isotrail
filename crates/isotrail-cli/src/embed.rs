@@ -216,10 +216,12 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
         )));
     }
     let text = args.overlay.text(&bundle, &theme.labels)?;
+    let built_in = args.overlay.built_in_text(&bundle, &theme.labels);
+    let themed = built_in.as_ref().zip(args.theme.path());
     let style = args.overlay.style(&theme, look.route.colour);
     let fitted = args
         .overlay
-        .fit(&text, &shape.label(), &framing, args.scale, &style)?;
+        .fit(&text, themed, &shape.label(), &framing, args.scale, &style)?;
     let aim = args.frame.aim();
     let conditions = args.scene.conditions(&theme);
     let sun = crate::sun::hike_sun(&bundle, args.look.time, &conditions)?;

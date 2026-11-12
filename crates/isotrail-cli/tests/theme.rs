@@ -149,3 +149,87 @@ fn config_files_name_a_theme() {
     assert_eq!(output.status.code(), Some(2), "{}", text(&output.stderr));
     assert!(text(&output.stderr).contains("route.width"));
 }
+
+#[test]
+fn utf16_without_a_mark_and_a_folder_are_named() {
+    let temp = with_hike();
+    let dir = temp.path();
+    let little: Vec<u8> = "[route]\nwidth = 2\n"
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    let big: Vec<u8> = "[route]\nwidth = 2\n"
+        .encode_utf16()
+        .flat_map(u16::to_be_bytes)
+        .collect();
+    for (name, bytes) in [("little.toml", little), ("big.toml", big)] {
+        fs::write(dir.join(name), bytes).unwrap();
+        let output = render(dir, "out.png", &["--theme", name]);
+        assert_eq!(output.status.code(), Some(2), "{}", text(&output.stderr));
+        let message = text(&output.stderr);
+        assert!(
+            message.contains(name) && message.contains("saved as UTF-16"),
+            "{message}"
+        );
+    }
+    fs::create_dir(dir.join("themes")).unwrap();
+    let output = render(dir, "out.png", &["--theme", "themes"]);
+    assert_eq!(output.status.code(), Some(2), "{}", text(&output.stderr));
+    assert!(text(&output.stderr).contains("it is a folder"));
+}
+
+#[test]
+fn labels_too_long_for_the_image_are_blamed_on_the_theme() {
+    let temp = with_hike();
+    let dir = temp.path();
+    let long = "w".repeat(100);
+    let labels: String = [
+        "distance",
+        "gain",
+        "time",
+        "high-point",
+        "km",
+        "m",
+        "minutes",
+        "hours",
+        "days",
+    ]
+    .iter()
+    .map(|key| format!("{key} = \"{long}\"\n"))
+    .collect();
+    fs::write(dir.join("long.toml"), format!("[labels]\n{labels}")).unwrap();
+    let output = render(dir, "out.png", &["--theme", "long.toml"]);
+    assert_eq!(output.status.code(), Some(2), "{}", text(&output.stderr));
+    let message = text(&output.stderr);
+    assert!(
+        message.contains("[labels]") && message.contains("long.toml"),
+        "{message}"
+    );
+    // Without the theme the same image fits
+    let output = render(dir, "out.png", &[]);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+}
+
+#[test]
+fn a_date_left_empty_by_a_theme_is_not_shortened() {
+    let temp = with_hike();
+    let dir = temp.path();
+    fs::write(dir.join("dateless.toml"), "[labels]\ndate-long = \"\"\n").unwrap();
+    let output = isotrail(
+        dir,
+        &[
+            "render",
+            "hike.itb",
+            "-o",
+            "out.png",
+            "--aspect",
+            "wide",
+            "--theme",
+            "dateless.toml",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let message = text(&output.stderr);
+    assert!(!message.contains("short date"), "{message}");
+    assert!(!message.contains("didn't fit"), "{message}");
+}

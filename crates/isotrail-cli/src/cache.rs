@@ -44,7 +44,11 @@ fn parse_days(value: &str) -> Result<u32, String> {
 }
 
 pub fn run(args: &CacheArgs) -> anyhow::Result<()> {
-    let cache = Cache::new(dir(args.cache_dir.get())?);
+    let configured = match args.cache_dir.get() {
+        Some(given) => Some(given.to_owned()),
+        None => crate::config::user_cache_dir()?,
+    };
+    let cache = Cache::new(dir(configured.as_deref())?);
     match args.command {
         CacheCommand::Path => println!("{}", cache.dir().display()),
         CacheCommand::Clear { yes, older_than } => clear(&cache, yes, older_than)?,
@@ -52,7 +56,8 @@ pub fn run(args: &CacheArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// `given` by --cache-dir or the environment, or the user's cache folder
+/// `given` by --cache-dir, the environment or the user config file, or the
+/// user's cache folder
 pub fn dir(given: Option<&Path>) -> anyhow::Result<PathBuf> {
     given
         .map(Path::to_owned)

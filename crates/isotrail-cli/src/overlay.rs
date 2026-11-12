@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use clap::{Args, ValueEnum};
 use isotrail_bundle::{HikeStats, SceneBundle, WEATHER_ATTRIBUTION};
 use isotrail_render::{
@@ -192,55 +194,16 @@ impl OverlayArgs {
     /// leaving out the parts that weren't asked for
     pub fn text(&self, bundle: &SceneBundle, labels: &Labels) -> anyhow::Result<OverlayText> {
         self.check()?;
-        let show = |part| self.overlay.contains(&part);
-        let kinds: Vec<StatKind> = self.stats.iter().map(|&stat| stat.into()).collect();
-        let date_format = match self.date_format {
-            DateFormatArg::Long => DateFormat::Long,
-            DateFormatArg::Short => DateFormat::Short,
-            DateFormatArg::Iso => DateFormat::Iso,
-        };
-        let units = self.units.into();
-        let mut text = OverlayText::from_bundle_with(bundle, units, &kinds, date_format, labels);
-
-        if let Some(title) = &self.title {
-            text.title.clone_from(title);
-        }
-        text.subtitle = match self.subtitle.as_deref() {
-            None => Subtitle::Auto,
-            Some(none) if none.eq_ignore_ascii_case("none") => Subtitle::None,
-            Some(subtitle) => Subtitle::Text(subtitle.to_owned()),
-        };
-        if let Some(date) = &self.date {
-            text.date = Some(date.clone());
-            text.short_date = None;
-        }
-
-        if !show(Part::Title) {
-            text.title.clear();
-        }
-        if !show(Part::Date) {
-            text.date = None;
-        }
-        if show(Part::Stats) {
+        let text = self.compose(bundle, labels);
+        if self.overlay.contains(&Part::Stats) {
             for &stat in &self.stats {
                 if StatKind::from(stat)
-                    .stat(&bundle.meta.stats, units)
+                    .stat(&bundle.meta.stats, self.units.into())
                     .is_none()
                 {
                     warn!("the track has no {} to show", name(stat));
                 }
             }
-        } else {
-            text.stats.clear();
-        }
-        if !show(Part::Profile) {
-            text.profile.clear();
-        }
-        if !self.shows_attribution() {
-            text.attribution = None;
-        }
-        if !self.overlay.contains(&Part::None) {
-            text.credit_extra = self.credit_extra().map(str::to_owned);
         }
         let subtitle = match &text.subtitle {
             Subtitle::Text(subtitle) => subtitle.as_str(),
@@ -270,21 +233,83 @@ impl OverlayArgs {
         Ok(text)
     }
 
+    /// The text in isotrail's own words when a theme changes them, so text
+    /// that doesn't fit can be blamed on the theme's words
+    pub fn built_in_text(&self, bundle: &SceneBundle, labels: &Labels) -> Option<OverlayText> {
+        let built_in = Labels::built_in();
+        (labels != built_in).then(|| self.compose(bundle, built_in))
+    }
+
+    fn compose(&self, bundle: &SceneBundle, labels: &Labels) -> OverlayText {
+        let show = |part| self.overlay.contains(&part);
+        let kinds: Vec<StatKind> = self.stats.iter().map(|&stat| stat.into()).collect();
+        let date_format = match self.date_format {
+            DateFormatArg::Long => DateFormat::Long,
+            DateFormatArg::Short => DateFormat::Short,
+            DateFormatArg::Iso => DateFormat::Iso,
+        };
+        let units = self.units.into();
+        let mut text = OverlayText::from_bundle_with(bundle, units, &kinds, date_format, labels);
+
+        if let Some(title) = &self.title {
+            text.title.clone_from(title);
+        }
+        text.subtitle = match self.subtitle.as_deref() {
+            None => Subtitle::Auto,
+            Some(none) if none.eq_ignore_ascii_case("none") => Subtitle::None,
+            Some(subtitle) => Subtitle::Text(subtitle.to_owned()),
+        };
+        if let Some(date) = &self.date {
+            text.date = Some(date.clone());
+            text.short_date = None;
+        }
+
+        if !show(Part::Title) {
+            text.title.clear();
+        }
+        if !show(Part::Date) {
+            text.date = None;
+        }
+        if !show(Part::Stats) {
+            text.stats.clear();
+        }
+        if !show(Part::Profile) {
+            text.profile.clear();
+        }
+        if !self.shows_attribution() {
+            text.attribution = None;
+        }
+        if !self.overlay.contains(&Part::None) {
+            text.credit_extra = self.credit_extra().map(str::to_owned);
+        }
+        text
+    }
+
     /// The overlays laid out for a frame, with a warning if they had to give
-    /// something up to fit, or an error if they don't fit at all
+    /// something up to fit, or an error if they don't fit at all. `themed`
+    /// holds the text in isotrail's own words and the theme file whose
+    /// words replaced them, to say when only the theme's words don't fit
     pub fn fit(
         &self,
         text: &OverlayText,
+        themed: Option<(&OverlayText, &Path)>,
         shape: &str,
         framing: &Framing,
         scale: u32,
         style: &OverlayStyle,
     ) -> anyhow::Result<Fitted> {
         let fit = Overlays::fit(text, style, framing).map_err(|_| {
-            usage(format!(
-                "the text doesn't fit the {shape} image at --scale {scale}; try a lower \
-                 --scale, a larger --size, fewer --stats or --overlay none"
-            ))
+            match themed.filter(|(built_in, _)| Overlays::fit(built_in, style, framing).is_ok()) {
+                Some((_, theme)) => usage(format!(
+                    "the words in the [labels] table of the theme {} are too long for the \
+                     {shape} image at --scale {scale}; shorten them or try a lower --scale",
+                    theme.display()
+                )),
+                None => usage(format!(
+                    "the text doesn't fit the {shape} image at --scale {scale}; try a lower \
+                     --scale, a larger --size, fewer --stats or --overlay none"
+                )),
+            }
         })?;
         if !fit.steps.is_empty() {
             let steps: Vec<String> = fit.steps.iter().map(describe).collect();
@@ -501,6 +526,7 @@ mod tests {
         let fit = |aspect: Aspect, scale| {
             args.fit(
                 &text,
+                None,
                 aspect.name(),
                 &aspect.framing(scale).unwrap(),
                 scale,
@@ -519,7 +545,14 @@ mod tests {
         long.stats[0] = Stat::new("123456789012345 km", "distance");
         let framing = Aspect::Square.framing(10).unwrap();
         let refused = args
-            .fit(&long, "square", &framing, 10, &OverlayStyle::default())
+            .fit(
+                &long,
+                None,
+                "square",
+                &framing,
+                10,
+                &OverlayStyle::default(),
+            )
             .unwrap_err();
         assert!(refused.is::<crate::UsageError>());
         let message = refused.to_string();

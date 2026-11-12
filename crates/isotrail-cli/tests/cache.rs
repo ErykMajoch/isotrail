@@ -7,6 +7,7 @@ fn isotrail(cache_dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_isotrail"))
         .args(args)
         .env("ISOTRAIL_CACHE_DIR", cache_dir)
+        .env("ISOTRAIL_CONFIG", "")
         .stdin(Stdio::null())
         .output()
         .unwrap()
@@ -152,4 +153,63 @@ fn a_cache_folder_given_on_the_command_line_wins() {
     assert!(output.status.success(), "{}", text(&output.stderr));
     assert!(output.stdout.is_empty(), "{}", text(&output.stdout));
     assert_eq!(fs::read_dir(cache.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn the_cache_folder_follows_the_user_config_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let config = temp.path().join("config.toml");
+    let configured = temp.path().join("configured");
+    fs::write(
+        &config,
+        format!(
+            "[render]
+cache-dir = {:?}
+",
+            configured.to_str().unwrap().replace('\\', "/")
+        ),
+    )
+    .unwrap();
+    let run = |env_dir: Option<&Path>, args: &[&str]| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_isotrail"));
+        command
+            .args(args)
+            .env("ISOTRAIL_CONFIG", &config)
+            .env_remove("ISOTRAIL_CACHE_DIR")
+            .stdin(Stdio::null());
+        if let Some(dir) = env_dir {
+            command.env("ISOTRAIL_CACHE_DIR", dir);
+        }
+        let output = command.output().unwrap();
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        Path::new(text(&output.stdout).trim_end()).to_owned()
+    };
+    let slashes = |path: &Path| path.to_str().unwrap().replace('\\', "/");
+    let same = |a: &Path, b: &Path| slashes(a) == slashes(b);
+    assert!(same(&run(None, &["cache", "path"]), &configured));
+    let from_env = temp.path().join("from-env");
+    assert!(same(&run(Some(&from_env), &["cache", "path"]), &from_env));
+    let chosen = temp.path().join("chosen");
+    let typed = run(
+        None,
+        &["cache", "path", "--cache-dir", chosen.to_str().unwrap()],
+    );
+    assert!(same(&typed, &chosen));
+
+    // A mistake in the file stops the command, as it would stop a render
+    fs::write(
+        &config,
+        "[render]
+shade = 3
+",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_isotrail"))
+        .args(["cache", "path"])
+        .env("ISOTRAIL_CONFIG", &config)
+        .env_remove("ISOTRAIL_CACHE_DIR")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2), "{}", text(&output.stderr));
+    assert!(text(&output.stderr).contains("unknown setting"));
 }

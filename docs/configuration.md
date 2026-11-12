@@ -31,7 +31,11 @@ crf = 23
 cache-dir = "D:/isotrail-cache"
 ```
 
-A `size` typed on the command line replaces the `aspect` from a file, as the two can't be combined.
+`route-color` works as a key too, the same as `route-colour`.
+
+A `size` typed on the command line replaces the `aspect` from a file, as the two can't be combined. The same goes for two files: a `size` in the `--config` file replaces an `aspect` in your user file. One table can't hold both.
+
+The `cache-dir` in the `[render]` table of your user config file is also where `isotrail cache path` and `cache clear` look, so they name and empty the folder your renders use.
 
 ### The other commands
 

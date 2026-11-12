@@ -67,6 +67,6 @@ pub use season::{
 pub use weather::{
     ARCHIVE_LAG_S, ARCHIVE_START, ApiKey, DAYS_BEFORE, DaysBefore, FORECAST_DAYS,
     LOCATION_SPACING_M, MAX_LOCATIONS, OPEN_METEO_ARCHIVE_URL, OPEN_METEO_CUSTOMER_ARCHIVE_URL,
-    OPEN_METEO_CUSTOMER_FORECAST_URL, OPEN_METEO_FORECAST_URL, OpenMeteoSource, WeatherError,
-    WeatherLocation, WeatherRequest, WeatherServer, WeatherSource,
+    OPEN_METEO_CUSTOMER_FORECAST_URL, OPEN_METEO_FORECAST_URL, OpenMeteoSource, RequestError,
+    WeatherError, WeatherLocation, WeatherRequest, WeatherServer, WeatherSource,
 };

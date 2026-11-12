@@ -5,13 +5,13 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use clap::{Args, ValueEnum};
-use isotrail_bundle::Route;
+use isotrail_bundle::{BundleError, Route};
 use isotrail_geo::{
     Cache, CachedFetcher, DEFAULT_DETAIL, DemSource, FeatureSource, FetchError, Fetcher, Footprint,
-    FootprintOptions, Grid, Heightmap, HttpFetcher, Landcover, LandcoverMap, MIN_PADDING_M,
-    OSM_ATTRIBUTION, OVERPASS_URL, Orientation, OsmFeatures, OverpassSource, PADDING_FRACTION,
-    Provenance, RetryPolicy, SceneBundle, TERRARIUM_URL, TerrariumSource, line_mask, origin,
-    redact, scene_bundle,
+    FootprintOptions, GeoError, Grid, Heightmap, HttpFetcher, Landcover, LandcoverMap,
+    MIN_PADDING_M, OSM_ATTRIBUTION, OVERPASS_URL, Orientation, OsmFeatures, OverpassSource,
+    PADDING_FRACTION, Provenance, RetryPolicy, SceneBundle, TERRARIUM_URL, TerrariumSource,
+    line_mask, origin, redact, scene_bundle,
 };
 use isotrail_render::parse_count;
 use isotrail_track::Track;
@@ -23,6 +23,7 @@ use crate::output;
 use crate::report::{self, Report, ReportArgs, Written, say, shown};
 use crate::season::{self, SeasonArg};
 use crate::servers::{CacheDirArg, WeatherUrlArg, parse_template};
+use crate::usage;
 use crate::weather;
 
 const PREVIEW_SCALE: u32 = 4;
@@ -171,6 +172,20 @@ fn parse_padding(value: &str) -> Result<Padding, String> {
 }
 
 impl DataArgs {
+    /// The padding as `--padding` takes it, such as 15,500
+    fn padding_text(&self) -> String {
+        let padding = self.padding.unwrap_or(Padding {
+            fraction: PADDING_FRACTION,
+            min_m: MIN_PADDING_M,
+        });
+        let round = |value: f64| (value * 1e6).round() / 1e6;
+        format!(
+            "{},{}",
+            round(padding.fraction * 100.0),
+            round(padding.min_m)
+        )
+    }
+
     fn footprint(&self) -> FootprintOptions {
         let padding = self.padding.unwrap_or(Padding {
             fraction: PADDING_FRACTION,
@@ -324,7 +339,17 @@ fn is_offline(error: &(dyn std::error::Error + 'static)) -> bool {
 /// Fetches terrain, map data and weather around the track read from `file`
 /// and packs them into a bundle
 pub fn prepare(track: &Track, file: &Path, data: &DataArgs) -> anyhow::Result<Prepared> {
-    let footprint = Footprint::from_track_with(track, &data.footprint())?;
+    let footprint = Footprint::from_track_with(track, &data.footprint()).map_err(|error| {
+        if matches!(error, GeoError::NoGround) {
+            usage(format!(
+                "the route stays on one spot, so --padding {} leaves no ground to draw; \
+                 give it some metres, such as --padding 15,500",
+                data.padding_text()
+            ))
+        } else {
+            error.into()
+        }
+    })?;
     let detail = NonZeroU32::new(data.detail).context("--detail must be positive")?;
     let grid = Grid::new(&footprint, detail);
 
@@ -389,6 +414,15 @@ pub fn prepare(track: &Track, file: &Path, data: &DataArgs) -> anyhow::Result<Pr
     bundle.weather = weather.map(|(weather, _)| weather);
     season::estimate(&mut bundle, track, &fetcher, &server);
     season::apply(&mut bundle, data.season);
+    bundle.validate().map_err(|error| match error {
+        BundleError::Invalid(reason) => {
+            anyhow::anyhow!(
+                "the scene made from {} can't be drawn: {reason}",
+                file.display()
+            )
+        }
+        error => error.into(),
+    })?;
     Ok(Prepared {
         bundle,
         grid,

@@ -231,6 +231,45 @@ fn user_config() -> Option<UserFile> {
     }
 }
 
+fn missing_user_file(path: &Path) -> String {
+    format!(
+        "{CONFIG_ENV} names {}, which does not exist; set it to an empty value for no user config file",
+        path.display()
+    )
+}
+
+/// `cache-dir` from the [render] table of the user config file, so the
+/// cache command looks where renders do
+pub fn user_cache_dir() -> anyhow::Result<Option<PathBuf>> {
+    cache_dir_in(user_config()).map_err(|error| crate::usage(format!("{error:#}")))
+}
+
+fn cache_dir_in(user: Option<UserFile>) -> anyhow::Result<Option<PathBuf>> {
+    let Some(user) = user else {
+        return Ok(None);
+    };
+    if !user.path.is_file() {
+        if user.named {
+            bail!(missing_user_file(&user.path));
+        }
+        return Ok(None);
+    }
+    let mut tables = read_tables(&user.path, &Cli::command())?;
+    let Some(value) = tables
+        .remove(RENDER)
+        .and_then(|mut table| table.remove("cache-dir"))
+    else {
+        return Ok(None);
+    };
+    match value {
+        Value::String(dir) => Ok((!dir.is_empty()).then(|| PathBuf::from(dir))),
+        _ => bail!(
+            "cache-dir in {}: expected a folder name in quotes",
+            user.path.display()
+        ),
+    }
+}
+
 /// `args` with a flag added after the command for each setting that isn't
 /// already given on the command line or through the environment, and
 /// doesn't conflict with a flag that is
@@ -249,10 +288,7 @@ fn with_config(
         .as_ref()
         .filter(|user| user.named && !user.path.is_file())
     {
-        bail!(
-            "{CONFIG_ENV} names {}, which does not exist; set it to an empty value for no user config file",
-            user.path.display()
-        );
+        bail!(missing_user_file(&user.path));
     }
     let config = given.get_one::<PathBuf>("config");
     let files: Vec<&Path> = user
@@ -267,18 +303,33 @@ fn with_config(
     let command = cli
         .find_subcommand(name)
         .with_context(|| format!("the {name} command is missing"))?;
-    let mut settings: BTreeMap<String, (Value, &Path)> = BTreeMap::new();
-    for &path in &files {
+    let mut settings: BTreeMap<String, Found> = BTreeMap::new();
+    for (index, &path) in files.iter().enumerate() {
         let mut tables = read_tables(path, &cli)?;
         let shared = tables.remove(RENDER).unwrap_or_default();
         let own = tables.remove(name).unwrap_or_default();
+        let mut add = |key: String, value: Value, table: u8| {
+            if let Some(long) = long_name(command, &key) {
+                let rank = (index, table);
+                settings.insert(
+                    long,
+                    Found {
+                        key,
+                        value,
+                        path,
+                        rank,
+                    },
+                );
+            }
+        };
         for (key, value) in shared {
-            if name == RENDER || takes_from_render(name, command, &key, &value) {
-                settings.insert(key, (value, path));
+            let long = long_name(command, &key).unwrap_or_default();
+            if name == RENDER || takes_from_render(name, command, &long, &value) {
+                add(key, value, 0);
             }
         }
         for (key, value) in own {
-            settings.insert(key, (value, path));
+            add(key, value, 1);
         }
     }
 
@@ -288,25 +339,44 @@ fn with_config(
             Some(ValueSource::CommandLine | ValueSource::EnvVariable)
         )
     };
-    let mut flags = Vec::new();
-    for (key, (value, path)) in settings {
-        let arg = setting(command, &key).context("a checked setting went missing")?;
+    settings.retain(|long, found| {
+        let Some(arg) = setting(command, long) else {
+            return false;
+        };
         if explicit(arg) {
-            continue;
+            return false;
         }
-        if let Some(flag) = conflicting(command, arg)
+        match conflicting(command, arg)
             .into_iter()
             .find(|&other| explicit(other))
         {
-            debug!(
-                "{key} in {} left out for --{}",
-                path.display(),
-                flag.get_long().unwrap_or_default()
-            );
-            continue;
+            Some(flag) => {
+                debug!(
+                    "{} in {} left out for --{}",
+                    found.key,
+                    found.path.display(),
+                    flag.get_long().unwrap_or_default()
+                );
+                false
+            }
+            None => true,
         }
+    });
+    for long in losers(command, &settings)? {
+        settings.remove(&long);
+    }
+
+    let mut flags = Vec::new();
+    for (
+        long,
+        Found {
+            key, value, path, ..
+        },
+    ) in settings
+    {
+        let arg = setting(command, &long).context("a checked setting went missing")?;
         let in_file = || format!("{key} in {}", path.display());
-        let Some(flag) = flag(&key, &value, arg).with_context(in_file)? else {
+        let Some(flag) = flag(&long, &value, arg).with_context(in_file)? else {
             continue;
         };
         // Checked alone, so a bad value is blamed on its file
@@ -337,12 +407,73 @@ fn with_config(
     Ok(args)
 }
 
-/// The command's flag a setting stands for, if it is one
+/// A setting from a config file, under the name it was written with
+struct Found<'a> {
+    key: String,
+    value: Value,
+    path: &'a Path,
+    /// The file's place in the order of precedence, then 0 for the [render]
+    /// table and 1 for the command's own
+    rank: (usize, u8),
+}
+
+/// The command's flag a setting stands for, if it is one, by its name or
+/// an alias such as route-color
 fn setting<'a>(command: &'a Command, key: &str) -> Option<&'a Arg> {
     command
         .get_arguments()
-        .find(|arg| arg.get_long() == Some(key))
-        .filter(|_| !NOT_SETTINGS.contains(&key))
+        .find(|arg| {
+            arg.get_long() == Some(key)
+                || arg
+                    .get_all_aliases()
+                    .is_some_and(|aliases| aliases.contains(&key))
+        })
+        .filter(|arg| {
+            !arg.get_long()
+                .is_some_and(|long| NOT_SETTINGS.contains(&long))
+        })
+}
+
+/// The flag's own name for a setting written with an alias
+fn long_name(command: &Command, key: &str) -> Option<String> {
+    setting(command, key)?.get_long().map(str::to_owned)
+}
+
+/// Settings that conflict with a setting from a file or table that comes
+/// later in the order of precedence; an error when both are in one table
+fn losers(command: &Command, settings: &BTreeMap<String, Found>) -> anyhow::Result<Vec<String>> {
+    let mut losers: Vec<String> = Vec::new();
+    for (long, found) in settings {
+        let Some(arg) = setting(command, long) else {
+            continue;
+        };
+        for other in conflicting(command, arg) {
+            let Some((other_long, other_found)) = other
+                .get_long()
+                .and_then(|other_long| settings.get_key_value(other_long))
+            else {
+                continue;
+            };
+            if found.rank == other_found.rank {
+                bail!(
+                    "{} and {} can't both be set in {}, so remove one of them",
+                    found.key,
+                    other_found.key,
+                    found.path.display()
+                );
+            }
+            let loser = if found.rank < other_found.rank {
+                long
+            } else {
+                other_long
+            };
+            debug!("{loser} left out for a setting it conflicts with");
+            if !losers.contains(loser) {
+                losers.push(loser.clone());
+            }
+        }
+    }
+    Ok(losers)
 }
 
 /// Whether a command other than render takes this [render] setting
@@ -404,6 +535,16 @@ fn read_tables(path: &Path, cli: &Command) -> anyhow::Result<BTreeMap<String, Ta
                 "unknown setting {key:?} in the [{name}] table of {}",
                 path.display()
             );
+        }
+        let mut seen: BTreeMap<String, &str> = BTreeMap::new();
+        for key in table.keys() {
+            let long = long_name(command, key).unwrap_or_default();
+            if let Some(first) = seen.insert(long, key) {
+                bail!(
+                    "{first} and {key} in the [{name}] table of {} are the same setting, so keep one",
+                    path.display()
+                );
+            }
         }
         tables.insert(name, table);
     }
@@ -951,5 +1092,154 @@ aspect = [\"story\", \"wide\"]
             message.contains("expected a whole number from 1 to 16"),
             "{message}"
         );
+    }
+
+    #[test]
+    fn route_color_is_a_setting_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let user = write(
+            dir.path(),
+            "user.toml",
+            "[render]
+route-color = \"#ff0000\"
+",
+        );
+        let result = with_config(args("isotrail render hike.gpx"), found(user)).unwrap();
+        assert_eq!(
+            strings(&result),
+            ["isotrail", "render", "--route-colour=#ff0000", "hike.gpx"]
+        );
+        assert!(matches!(
+            parse_args(result).command,
+            crate::Command::Render(_)
+        ));
+        let both = write(
+            dir.path(),
+            "both.toml",
+            "[render]
+route-color = \"#ff0000\"
+route-colour = \"#00ff00\"
+",
+        );
+        let message = format!(
+            "{:#}",
+            with_config(args("isotrail render hike.gpx"), found(both)).unwrap_err()
+        );
+        assert!(message.contains("are the same setting"), "{message}");
+        assert!(message.contains("both.toml"), "{message}");
+    }
+
+    #[test]
+    fn settings_that_conflict_in_one_table_name_their_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let user = write(
+            dir.path(),
+            "hike.toml",
+            "[render]
+size = \"800x800\"
+aspect = \"story\"
+",
+        );
+        let message = format!(
+            "{:#}",
+            with_config(args("isotrail render hike.gpx"), found(user)).unwrap_err()
+        );
+        assert!(message.contains("can't both be set in"), "{message}");
+        assert!(message.contains("hike.toml"), "{message}");
+        assert!(
+            message.contains("aspect") && message.contains("size"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn of_two_conflicting_settings_the_later_one_wins() {
+        let dir = tempfile::tempdir().unwrap();
+        let user = write(
+            dir.path(),
+            "user.toml",
+            "[render]
+aspect = \"story\"
+",
+        );
+        let hike = write(
+            dir.path(),
+            "hike.toml",
+            "[render]
+size = \"800x800\"
+",
+        );
+        let line = format!("isotrail render hike.gpx --config {}", hike.display());
+        let result = strings(&with_config(args(&line), found(user)).unwrap());
+        assert!(result.contains(&"--size=800x800".to_owned()), "{result:?}");
+        assert!(
+            !result.iter().any(|arg| arg.starts_with("--aspect")),
+            "{result:?}"
+        );
+
+        // A command's own table beats [render] in the same file
+        let both = write(
+            dir.path(),
+            "both.toml",
+            "[render]
+aspect = \"story\"
+
+[embed]
+size = \"800x800\"
+",
+        );
+        let result =
+            strings(&with_config(args("isotrail embed hike.gpx -o site"), found(both)).unwrap());
+        assert!(result.contains(&"--size=800x800".to_owned()), "{result:?}");
+        assert!(
+            !result.iter().any(|arg| arg.starts_with("--aspect")),
+            "{result:?}"
+        );
+        let cli = parse_args(with_config(args(&line), None).unwrap());
+        assert!(matches!(cli.command, crate::Command::Render(_)));
+    }
+
+    #[test]
+    fn the_cache_folder_comes_from_the_user_files_render_table() {
+        let dir = tempfile::tempdir().unwrap();
+        let user = write(
+            dir.path(),
+            "user.toml",
+            "[render]
+cache-dir = \"cfgcache\"
+",
+        );
+        assert_eq!(
+            cache_dir_in(found(user)).unwrap(),
+            Some(PathBuf::from("cfgcache"))
+        );
+        let other = write(
+            dir.path(),
+            "other.toml",
+            "[render]
+scale = 5
+",
+        );
+        assert_eq!(cache_dir_in(found(other)).unwrap(), None);
+        assert_eq!(
+            cache_dir_in(found(dir.path().join("none.toml"))).unwrap(),
+            None
+        );
+        assert_eq!(cache_dir_in(None).unwrap(), None);
+        let bad = write(
+            dir.path(),
+            "bad.toml",
+            "[render]
+cache-dir = 3
+",
+        );
+        let message = cache_dir_in(found(bad)).unwrap_err().to_string();
+        assert!(message.contains("bad.toml"), "{message}");
+        let named = Some(UserFile {
+            path: dir.path().join("missing.toml"),
+            named: true,
+        });
+        let message = cache_dir_in(named).unwrap_err().to_string();
+        assert!(message.contains("ISOTRAIL_CONFIG names"), "{message}");
     }
 }

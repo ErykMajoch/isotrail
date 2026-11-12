@@ -3,6 +3,8 @@ use crate::{Track, TrackPoint, haversine_m};
 /// 1990-01-01: earlier times come from a device clock that was never set
 const EARLIEST_S: i64 = 631_152_000;
 const GLITCH_GAP_S: i64 = 30 * 86_400;
+/// Times further apart than this can't belong to one hike
+const CLOCK_BREAK_S: i64 = 31 * 86_400;
 const STRAY_SPEED_M_S: f64 = 100.0;
 /// Untimed legs longer than this many median steps are suspect
 const STRAY_STEP_FACTOR: f64 = 50.0;
@@ -29,6 +31,7 @@ pub fn clear_glitched_times(track: &mut Track) -> usize {
             }
         }
     }
+    keep_one_clock(&mut times);
     let mut cleared = 0;
     for (point, time) in points_mut(track).zip(&times) {
         if point.time.is_some() && time.is_none() {
@@ -37,6 +40,29 @@ pub fn clear_glitched_times(track: &mut Track) -> usize {
         }
     }
     cleared
+}
+
+/// Splits the times, in order, wherever two are more than 31 days apart, and
+/// keeps only the group with the most of them (the earliest on a tie): a
+/// pair of glitched times close to each other still lies weeks away from the
+/// rest
+fn keep_one_clock(times: &mut [Option<i64>]) {
+    let mut sorted: Vec<i64> = times.iter().flatten().copied().collect();
+    sorted.sort_unstable();
+    let mut groups: Vec<&[i64]> = sorted
+        .chunk_by(|a, b| b.saturating_sub(*a) <= CLOCK_BREAK_S)
+        .collect();
+    if groups.len() < 2 {
+        return;
+    }
+    groups.sort_by_key(|group| std::cmp::Reverse(group.len()));
+    let kept = groups[0];
+    let (first, last) = (kept[0], kept[kept.len() - 1]);
+    for time in times.iter_mut() {
+        if time.is_some_and(|t| t < first || t > last) {
+            *time = None;
+        }
+    }
 }
 
 /// Drops points far from both neighbours while those neighbours lie close
@@ -176,6 +202,26 @@ mod tests {
         assert_eq!(clear_glitched_times(&mut t), 2);
         let cleared: Vec<bool> = t.points().map(|p| p.time.is_none()).collect();
         assert_eq!(cleared, [true, false, false, true, false, false]);
+    }
+
+    #[test]
+    fn a_pair_of_times_far_in_the_future_is_cleared() {
+        let mut points = walk(4, Some(1));
+        let far = Utc.with_ymd_and_hms(9999, 1, 1, 0, 0, 0).single().unwrap();
+        points[2].time = Some(far);
+        points[3].time = Some(far + chrono::TimeDelta::seconds(1));
+        let mut t = track(vec![points]);
+        assert_eq!(clear_glitched_times(&mut t), 2);
+        let cleared: Vec<bool> = t.points().map(|p| p.time.is_none()).collect();
+        assert_eq!(cleared, [false, false, true, true]);
+
+        // The larger group is kept, wherever it lies
+        let mut points = walk(5, Some(1));
+        points[0].time = at(START_S - 400 * 86_400);
+        points[1].time = at(START_S - 400 * 86_400 + 1);
+        let mut t = track(vec![points]);
+        assert_eq!(clear_glitched_times(&mut t), 2);
+        assert!(t.points().skip(2).all(|p| p.time.is_some()));
     }
 
     #[test]

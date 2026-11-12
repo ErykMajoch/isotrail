@@ -10,7 +10,9 @@ pub use open_meteo::{
     OPEN_METEO_ARCHIVE_URL, OPEN_METEO_CUSTOMER_ARCHIVE_URL, OPEN_METEO_CUSTOMER_FORECAST_URL,
     OPEN_METEO_FORECAST_URL, OpenMeteoSource, WeatherServer,
 };
-pub use request::{LOCATION_SPACING_M, MAX_LOCATIONS, WeatherLocation, WeatherRequest};
+pub use request::{
+    LOCATION_SPACING_M, MAX_LOCATIONS, RequestError, WeatherLocation, WeatherRequest,
+};
 
 /// Weather for the hours of a hike and the days before it
 pub trait WeatherSource {

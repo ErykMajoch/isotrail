@@ -6,8 +6,8 @@ use isotrail_bundle::{
     Units, WEATHER_ATTRIBUTION, Weather, WeatherDataset, WeatherSample, weather_condition,
 };
 use isotrail_geo::{
-    Fetcher, MAX_TIMED_SPAN_DAYS, OpenMeteoSource, WeatherError, WeatherRequest, WeatherServer,
-    WeatherSource,
+    Fetcher, MAX_TIMED_SPAN_DAYS, OpenMeteoSource, RequestError, WeatherError, WeatherRequest,
+    WeatherServer, WeatherSource,
 };
 use isotrail_track::{Track, Tz};
 use serde::Serialize;
@@ -23,17 +23,19 @@ pub fn look_up(
     fetcher: impl Fetcher,
     server: &WeatherServer,
 ) -> Option<(Weather, String)> {
-    let Some(request) = WeatherRequest::from_track(track, now()) else {
-        warn!("the track has no times, so the weather is left out");
-        return None;
+    let request = match WeatherRequest::from_track(track, now()) {
+        Ok(request) => request,
+        Err(RequestError::Untimed) => {
+            warn!("the track has no times, so the weather is left out");
+            return None;
+        }
+        Err(RequestError::TooLong { days }) => {
+            warn!(
+                "the hike spans {days} days, more than {MAX_TIMED_SPAN_DAYS}, so the weather is left out"
+            );
+            return None;
+        }
     };
-    let days = (request.last_hour() - request.hours[0]) / (24 * HOUR_S);
-    if days > MAX_TIMED_SPAN_DAYS {
-        warn!(
-            "the hike spans {days} days, more than {MAX_TIMED_SPAN_DAYS}, so the weather is left out"
-        );
-        return None;
-    }
     match OpenMeteoSource::new(fetcher)
         .server(server)
         .weather(&request)

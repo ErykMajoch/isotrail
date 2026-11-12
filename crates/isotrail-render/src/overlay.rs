@@ -499,7 +499,9 @@ impl Overlays {
         let (mut text, mut style, mut gap) = (text.clone(), style.clone(), STAT_GAP);
         let mut overlays = Overlays::arrange(&text, &style, framing, gap);
         let mut steps = Vec::new();
+        // A date left empty by a theme has nothing to shorten
         if let (Some(date), Some(short)) = (&text.date, &text.short_date)
+            && !date.trim().is_empty()
             && !overlays.shows_whole(date)
         {
             text.date = Some(short.clone());
@@ -1963,6 +1965,33 @@ mod tests {
 
     fn overlapping(a: Rect, b: Rect) -> bool {
         a.min.x < b.max.x && b.min.x < a.max.x && a.min.y < b.max.y && b.min.y < a.max.y
+    }
+
+    #[test]
+    fn an_empty_date_is_not_shortened() {
+        let framing = Aspect::Wide.framing(3).unwrap();
+        let style = OverlayStyle::default();
+        let long = OverlayText {
+            date: Some("Wednesday 29 September 2026, a long day on the hills".into()),
+            short_date: Some("29 Sep 2026".into()),
+            ..full_text()
+        };
+        let fitted = Overlays::fit(&long, &style, &framing).unwrap();
+        assert!(
+            fitted.steps.contains(&FitStep::ShortDate),
+            "{:?}",
+            fitted.steps
+        );
+        let empty = OverlayText {
+            date: Some(String::new()),
+            ..long
+        };
+        let fitted = Overlays::fit(&empty, &style, &framing).unwrap();
+        assert!(
+            !fitted.steps.contains(&FitStep::ShortDate),
+            "{:?}",
+            fitted.steps
+        );
     }
 
     #[test]

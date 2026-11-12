@@ -180,13 +180,15 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
         motion.pacing = theme.pacing;
     }
     let text = args.overlay.text(&bundle, &theme.labels)?;
+    let built_in = args.overlay.built_in_text(&bundle, &theme.labels);
+    let themed = built_in.as_ref().zip(args.theme.path());
     let style = args.overlay.style(&theme, look.route.colour);
     let fitted = shapes
         .iter()
         .zip(&framings)
         .map(|(shape, framing)| {
             args.overlay
-                .fit(&text, &shape.label(), framing, args.scale, &style)
+                .fit(&text, themed, &shape.label(), framing, args.scale, &style)
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
     if motion.is_some_and(|motion| motion.pace == Pace::Time)

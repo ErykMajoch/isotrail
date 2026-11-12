@@ -11,6 +11,11 @@ All notable changes to `isotrail` are documented here.
 - On Windows, a folder typed with forward slashes, as in `-o site/hikes`, keeps them in the paths isotrail prints, the JSON included, instead of mixing in backslashes.
 - A clip of one frame says `Rendered 1 frame`. A render at `--scale 1`, or a GIF at `--gif-scale 1`, no longer says it was enlarged from the same size.
 - The usage line under a mistake no longer lists options set through environment variables, such as `ISOTRAIL_CACHE_DIR`.
+- `route-color` works in config files, as it does on the command line.
+- `size` and `aspect` in the same config file get a message that names the file. In two different files, the one that takes precedence wins.
+- `isotrail cache path` and `cache clear` follow `cache-dir` from your user config file, so `cache clear` empties the folder your renders use.
+- A route that stays on one spot with `--padding 0,0` is refused before any download, instead of making a picture with no diorama.
+- A pair of timestamps far from the rest of the hike, such as two points stamped in the year 9999, is ignored like a single stray one.
 
 ### Changed
 

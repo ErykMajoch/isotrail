@@ -318,12 +318,32 @@ fn read_named(path: &Path, what: &str) -> anyhow::Result<Vec<u8>> {
 fn read_text(path: &Path, what: &str) -> Result<String, String> {
     let bytes = read_named(path, what).map_err(|error| error.to_string())?;
     let shown = path.display();
-    if bytes.starts_with(&[0xff, 0xfe]) || bytes.starts_with(&[0xfe, 0xff]) {
+    if bytes.starts_with(&[0xff, 0xfe])
+        || bytes.starts_with(&[0xfe, 0xff])
+        || utf16_unmarked(&bytes)
+    {
         return Err(format!(
             "{what}{shown} is saved as UTF-16 (as PowerShell's > writes it); save it as UTF-8"
         ));
     }
     String::from_utf8(bytes).map_err(|_| format!("{what}{shown} isn't UTF-8 text"))
+}
+
+/// UTF-16 without a byte-order mark: mostly English text puts a zero in
+/// every other byte, and UTF-8 text has none
+fn utf16_unmarked(bytes: &[u8]) -> bool {
+    let start = &bytes[..bytes.len().min(256) & !1];
+    let zeros = |parity: usize| {
+        start
+            .iter()
+            .skip(parity)
+            .step_by(2)
+            .filter(|&&b| b == 0)
+            .count()
+    };
+    let pairs = start.len() / 2;
+    let (even, odd) = (zeros(0), zeros(1));
+    pairs > 0 && (even.min(odd) == 0) && even.max(odd) * 2 > pairs
 }
 
 /// A scene bundle by its extension or its first bytes, otherwise GPX

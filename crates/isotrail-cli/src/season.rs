@@ -30,7 +30,7 @@ pub fn estimate(
     let Some(weather) = &bundle.weather else {
         return;
     };
-    let Some(request) = WeatherRequest::from_track(track, crate::weather::now()) else {
+    let Ok(request) = WeatherRequest::from_track(track, crate::weather::now()) else {
         return;
     };
     let before = OpenMeteoSource::new(fetcher)

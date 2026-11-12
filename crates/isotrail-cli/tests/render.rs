@@ -139,6 +139,55 @@ fn renders_a_gpx_file_from_cached_data_as_a_story_png() {
 }
 
 #[test]
+fn a_route_on_one_spot_needs_some_padding() {
+    let temp = tempfile::tempdir().unwrap();
+    let cache_dir = temp.path().join("cache");
+    let point = |minute: u32| {
+        format!(
+            "<trkpt lat=\"53.06850\" lon=\"-4.07630\"><ele>1080</ele>\
+             <time>2025-06-14T09:{minute:02}:00Z</time></trkpt>"
+        )
+    };
+    let points: String = (0..3).map(point).collect();
+    fs::write(
+        temp.path().join("spot.gpx"),
+        format!(
+            "<?xml version=\"1.0\"?><gpx version=\"1.1\" creator=\"test\" \
+             xmlns=\"http://www.topografix.com/GPX/1/1\"><trk><trkseg>{points}</trkseg></trk></gpx>"
+        ),
+    )
+    .unwrap();
+    let data = [
+        "--detail",
+        "8",
+        "--no-map-data",
+        "--no-weather",
+        "--offline",
+    ];
+    let refused = isotrail(
+        &cache_dir,
+        temp.path(),
+        &[&["render", "spot.gpx", "--padding", "0,0"][..], &data].concat(),
+    );
+    let stderr = text(&refused.stderr);
+    assert_eq!(refused.status.code(), Some(2), "{stderr}");
+    assert!(stderr.contains("stays on one spot"), "{stderr}");
+    assert!(stderr.contains("--padding 0,0"), "{stderr}");
+    assert!(!stderr.contains("Downloading"), "{stderr}");
+    assert!(!stderr.contains("cache"), "{stderr}");
+    assert!(!temp.path().join("spot.png").exists());
+
+    warm(&cache_dir);
+    let output = isotrail(
+        &cache_dir,
+        temp.path(),
+        &[&["render", "spot.gpx"][..], &data].concat(),
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert_eq!(png_size(&temp.path().join("spot.png")), (1080, 1920));
+}
+
+#[test]
 fn renders_a_gif_of_a_track_whose_times_run_backwards() {
     let temp = tempfile::tempdir().unwrap();
     let cache_dir = temp.path().join("cache");

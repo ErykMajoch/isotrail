@@ -1,5 +1,7 @@
 use isotrail_track::{Track, TrackPoint, haversine_m};
 
+use crate::MAX_TIMED_SPAN_DAYS;
+
 /// One weather location per this much of the route's extent
 pub const LOCATION_SPACING_M: f64 = 20_000.0;
 pub const MAX_LOCATIONS: usize = 8;
@@ -19,6 +21,15 @@ pub struct WeatherRequest {
     pub now: i64,
 }
 
+/// Why there is no weather to ask for
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum RequestError {
+    #[error("the track has no times")]
+    Untimed,
+    #[error("the hike spans {days} days, more than {MAX_TIMED_SPAN_DAYS}")]
+    TooLong { days: i64 },
+}
+
 /// The middle of a stretch of the route, rounded to 0.01°
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WeatherLocation {
@@ -31,9 +42,9 @@ pub struct WeatherLocation {
 
 impl WeatherRequest {
     /// The route is split into equal stretches, one per location, and each
-    /// hour reads the weather in the middle of the stretch the hiker was on;
-    /// none when the track has no times
-    pub fn from_track(track: &Track, now: i64) -> Option<WeatherRequest> {
+    /// hour reads the weather in the middle of the stretch the hiker was on.
+    /// The span is checked before the hours are listed
+    pub fn from_track(track: &Track, now: i64) -> Result<WeatherRequest, RequestError> {
         let points: Vec<&TrackPoint> = track.points().collect();
         let along: Vec<f64> = points
             .iter()
@@ -49,10 +60,17 @@ impl WeatherRequest {
             .zip(&along)
             .filter_map(|(p, &d)| Some((p.time?.timestamp(), d)))
             .collect();
-        let start = timed.iter().map(|&(t, _)| t).min()?;
-        let end = timed.iter().map(|&(t, _)| t).max()?;
+        let start = timed.iter().map(|&(t, _)| t).min();
+        let end = timed.iter().map(|&(t, _)| t).max();
+        let (Some(start), Some(end)) = (start, end) else {
+            return Err(RequestError::Untimed);
+        };
         let first = start.div_euclid(HOUR_S) * HOUR_S - HOUR_S;
         let last = (end + HOUR_S - 1).div_euclid(HOUR_S) * HOUR_S + HOUR_S;
+        let days = (last - first) / (24 * HOUR_S);
+        if days > MAX_TIMED_SPAN_DAYS {
+            return Err(RequestError::TooLong { days });
+        }
         let hours: Vec<i64> = (first..=last).step_by(HOUR_S as usize).collect();
 
         let total = along.last().copied().unwrap_or_default();
@@ -88,7 +106,7 @@ impl WeatherRequest {
             .iter()
             .map(|&hour| stretch(distance_at(&timed, hour)))
             .collect();
-        Some(WeatherRequest {
+        Ok(WeatherRequest {
             locations,
             hours,
             hour_locations,
@@ -230,7 +248,25 @@ mod tests {
             p.time = None;
             p.ele = None;
         }
-        assert_eq!(WeatherRequest::from_track(&track, 0), None);
+        assert_eq!(
+            WeatherRequest::from_track(&track, 0),
+            Err(RequestError::Untimed)
+        );
+    }
+
+    #[test]
+    fn a_hundred_years_is_refused_before_the_hours_are_listed() {
+        let mut track = walk(5.0, 2, 60);
+        let last = &mut track.segments[0].points[1];
+        last.time = DateTime::from_timestamp(NOON + 100 * 365 * 86_400, 0);
+        assert!(matches!(
+            WeatherRequest::from_track(&track, 0),
+            Err(RequestError::TooLong { days }) if days > 36_000
+        ));
+        let mut month = walk(5.0, 2, 30 * 86_400);
+        assert!(WeatherRequest::from_track(&month, 0).is_ok());
+        month.segments[0].points[1].time = DateTime::from_timestamp(NOON + 40 * 86_400, 0);
+        assert!(WeatherRequest::from_track(&month, 0).is_err());
     }
 
     #[test]

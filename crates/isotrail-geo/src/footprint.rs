@@ -7,6 +7,8 @@ use crate::{GeoError, LocalProjection};
 pub const PADDING_FRACTION: f64 = 0.15;
 pub const MIN_PADDING_M: f64 = 500.0;
 pub const MAX_ASPECT: f64 = 2.0;
+/// A slab shorter than this has no ground to draw
+const MIN_LENGTH_M: f64 = 1.0;
 
 /// The slab of terrain cut out around a route: a rectangle in local metres,
 /// turned so its long side follows the route
@@ -97,6 +99,9 @@ impl Footprint {
         if width_m > length_m {
             (length_m, width_m) = (width_m, length_m);
             rotation_rad += FRAC_PI_2;
+        }
+        if length_m.is_nan() || length_m < MIN_LENGTH_M {
+            return Err(GeoError::NoGround);
         }
         width_m = width_m.max(length_m / MAX_ASPECT);
         while rotation_rad > FRAC_PI_2 {
@@ -419,6 +424,33 @@ mod tests {
         assert_eq!((footprint.length_m, footprint.width_m), (1_000.0, 1_000.0));
         assert_eq!(footprint.rotation_rad, 0.0);
         assert_contains(&track, &footprint);
+    }
+
+    #[test]
+    fn a_single_spot_without_padding_has_no_ground() {
+        let track = track(&[vec![(0.0, 0.0); 3]]);
+        let bare = FootprintOptions {
+            padding_fraction: 0.15,
+            min_padding_m: 0.0,
+            orientation: Orientation::Route,
+        };
+        assert!(matches!(
+            Footprint::from_track_with(&track, &bare),
+            Err(GeoError::NoGround)
+        ));
+        let north = FootprintOptions {
+            orientation: Orientation::North,
+            ..bare
+        };
+        assert!(matches!(
+            Footprint::from_track_with(&track, &north),
+            Err(GeoError::NoGround)
+        ));
+        let some = FootprintOptions {
+            min_padding_m: 1.0,
+            ..bare
+        };
+        assert!(Footprint::from_track_with(&track, &some).is_ok());
     }
 
     #[test]

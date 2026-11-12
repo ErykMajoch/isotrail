@@ -18,6 +18,10 @@ const EXAGGERATION: RangeInclusive<f64> = 0.1..=100.0;
 /// More than the drop from the highest peak to the deepest trench
 const MAX_RELIEF_M: f32 = 20_000.0;
 const DAMAGED: &str = "its data is cut short or garbled";
+/// 200 years, the longest a hike's times may span
+const MAX_SPAN_S: i64 = 6_311_520_000;
+/// Unix seconds from the year 0 to the end of 9999, the years a GPX time can hold
+const INSTANTS: RangeInclusive<i64> = -62_167_219_200..=253_402_300_799;
 
 pub fn is_bundle(bytes: &[u8]) -> bool {
     bytes.starts_with(&MAGIC)
@@ -27,7 +31,7 @@ impl SceneBundle {
     /// Magic, little-endian format version, then the deflated postcard
     /// payload. Refuses a scene that [`SceneBundle::from_bytes`] would refuse
     pub fn to_bytes(&self) -> Result<Vec<u8>, BundleError> {
-        self.validate().map_err(BundleError::Invalid)?;
+        self.validate()?;
         let payload = postcard::to_allocvec(self).expect("bundles always serialise");
         let mut bytes = Vec::with_capacity(HEADER_LEN + payload.len() / 2);
         bytes.extend_from_slice(&MAGIC);
@@ -56,7 +60,7 @@ impl SceneBundle {
         if !rest.is_empty() {
             return Err(damaged());
         }
-        bundle.validate().map_err(BundleError::Corrupt)?;
+        bundle.check().map_err(BundleError::Corrupt)?;
         Ok(bundle)
     }
 
@@ -73,7 +77,12 @@ impl SceneBundle {
         fnv1a(&postcard::to_allocvec(&content).expect("bundles always serialise"))
     }
 
-    fn validate(&self) -> Result<(), String> {
+    /// Refuses a scene that [`SceneBundle::from_bytes`] would refuse
+    pub fn validate(&self) -> Result<(), BundleError> {
+        self.check().map_err(BundleError::Invalid)
+    }
+
+    fn check(&self) -> Result<(), String> {
         self.validate_grid()?;
         self.validate_route()?;
         self.validate_sky_and_weather()?;
@@ -200,6 +209,25 @@ impl SceneBundle {
             .all(|v| v.is_finite())
         {
             return Err("statistics that aren't numbers".into());
+        }
+        for (what, seconds) in [("elapsed", stats.elapsed_s), ("moving", stats.moving_s)] {
+            if let Some(seconds) = seconds.filter(|s| !(0..=MAX_SPAN_S).contains(s)) {
+                return Err(format!("{what} time of {seconds} s"));
+            }
+        }
+        for (what, time) in [("start", stats.start), ("end", stats.end)] {
+            if let Some(time) = time.filter(|t| !INSTANTS.contains(t)) {
+                return Err(format!("{what} time {time}"));
+            }
+        }
+        let times: Vec<i64> = points.iter().filter_map(|p| p.time).collect();
+        if let Some(time) = times.iter().find(|t| !INSTANTS.contains(t)) {
+            return Err(format!("route time {time}"));
+        }
+        if let (Some(first), Some(last)) = (times.iter().min(), times.iter().max())
+            && last - first > MAX_SPAN_S
+        {
+            return Err(format!("route times {} s apart", last - first));
         }
         Ok(())
     }
@@ -560,6 +588,17 @@ mod tests {
             ("statistics", |b| b.meta.stats.distance_m = f64::INFINITY),
             ("statistics", |b| b.meta.stats.gain_m = Some(f64::NAN)),
             ("statistics", |b| b.meta.stats.bounds.max_lon = f64::NAN),
+            ("elapsed time", |b| b.meta.stats.elapsed_s = Some(i64::MAX)),
+            ("elapsed time", |b| b.meta.stats.elapsed_s = Some(-1)),
+            ("moving time", |b| {
+                b.meta.stats.moving_s = Some(10_000_000_000)
+            }),
+            ("start time", |b| b.meta.stats.start = Some(i64::MIN)),
+            ("end time", |b| b.meta.stats.end = Some(300_000_000_000)),
+            ("route time", |b| b.route.points[2].time = Some(i64::MAX)),
+            ("route times", |b| {
+                b.route.points[4].time = Some(1_750_000_000 + 7_000_000_000)
+            }),
             ("sun samples out of order", |b| {
                 b.sun[2].time = b.sun[1].time
             }),
