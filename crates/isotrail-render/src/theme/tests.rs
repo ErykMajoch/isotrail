@@ -26,8 +26,11 @@ fn the_printed_built_in_theme_reads_back_as_it_is() {
         printed.contains("\ncolour = [1.0, 0.96, 0.88]\n"),
         "{printed}"
     );
+    assert!(printed.contains("seconds\npause-cut = 60.0\n"), "{printed}");
     for line in printed.lines().filter(|line| line.starts_with('#')) {
         assert!(!line.ends_with('.'), "{line}");
+        assert!(!line.contains(';'), "{line}");
+        assert!(line.chars().count() <= 80, "{line}");
     }
 }
 

@@ -551,7 +551,7 @@ Pass `--cache-dir DIR` to any command that downloads, or set `ISOTRAIL_CACHE_DIR
 isotrail theme print [-o FILE]
 ```
 
-`theme print` prints the built-in theme: every table and key of a [theme file](configuration.md#theme-files) at its built-in value, with a comment on each table. Save it, change what you like and delete the rest. Then pass it to `render`, `embed` or `style-lab` with `--theme`. Reading the printed file back changes nothing.
+`theme print` prints the built-in theme: every table and key of a [theme file](configuration.md#theme-files) at its built-in value, with comments on the tables and on the keys that need one. Save it, change what you like and delete the rest. Then pass it to `render`, `embed` or `style-lab` with `--theme`. Reading the printed file back changes nothing.
 
 `-o FILE` writes it to a file instead. Use it in Windows PowerShell 5.1, whose `>` saves text as UTF-16. isotrail doesn't read UTF-16 as a theme.
 

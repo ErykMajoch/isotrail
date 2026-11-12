@@ -20,6 +20,7 @@ All notable changes to `isotrail` are documented here.
 - A web embed too tall or too wide for the graphics card, such as `aspect="1:1000000"`, no longer fails on WebGL2. The diorama is drawn at the largest size the card allows and stretched to fit.
 - `route-color` works as an attribute of the web embed, and `routeColor` in the `Viewer` script API, next to `route-colour` and `routeColour`.
 - The web embed's console warnings name the attribute as you wrote it, such as `max-zoom`. An `aspect`, `credit` or `backend` value it can't read now gets a warning too.
+- The Hugo and Astro examples for the web embed load the current runtime and show the poster while it loads. The link to wasm-pack works again.
 
 ### Changed
 

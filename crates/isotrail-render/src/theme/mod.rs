@@ -128,6 +128,9 @@ pub(crate) enum Field<'a> {
 pub(crate) trait Visitor {
     fn field(&mut self, key: &'static str, field: Field);
 
+    /// A comment line above the next key
+    fn note(&mut self, _line: &'static str) {}
+
     fn table(
         &mut self,
         name: &'static str,
