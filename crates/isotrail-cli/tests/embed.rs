@@ -252,6 +252,55 @@ fn the_poster_and_snippet_carry_the_look() {
 }
 
 #[test]
+fn the_starting_view_and_size_reach_the_snippet() {
+    let temp = with_hike("ridge.itb");
+    let output = isotrail(
+        temp.path(),
+        &[
+            "embed",
+            "ridge.itb",
+            "-o",
+            "view",
+            "--turn=-30",
+            "--pitch",
+            "45",
+            "--zoom",
+            "1.5",
+            "--aspect",
+            "portrait",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let view = temp.path().join("view");
+    assert_eq!(png_size(&view.join("ridge.png")), (1080, 1440));
+    let html = fs::read_to_string(view.join("snippet.html")).unwrap();
+    assert!(
+        html.contains(r#"aspect="portrait" turn="-30" pitch="45" zoom="1.5" style="display:block;aspect-ratio:3/4""#),
+        "{html}"
+    );
+
+    let output = isotrail(
+        temp.path(),
+        &[
+            "embed",
+            "ridge.itb",
+            "-o",
+            "sized",
+            "--size",
+            "1200x900",
+            "--heading",
+            "90",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let sized = temp.path().join("sized");
+    assert_eq!(png_size(&sized.join("ridge.png")), (1200, 900));
+    let html = fs::read_to_string(sized.join("snippet.html")).unwrap();
+    assert!(html.contains(r#"aspect="4:3" turn=""#), "{html}");
+    assert!(html.contains("aspect-ratio:4/3"), "{html}");
+}
+
+#[test]
 fn a_palette_file_is_copied_beside_the_bundle() {
     let temp = with_hike("ridge.itb");
     fs::create_dir(temp.path().join("colours")).unwrap();

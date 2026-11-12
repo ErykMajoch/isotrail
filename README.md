@@ -36,7 +36,7 @@
 - **Animated**: looping GIFs and MP4 videos where the route draws itself, the camera turns and the stats count up
 - **Light, weather and seasons**: lit by the sun or moon as they stood during the hike, under its real weather (clouds, rain, snow, fog and sunbeams breaking through), in its season (blossom, autumn colours, snow and frozen lakes)
 - **On your website**: an interactive `<isotrail-hike>` element that visitors can turn, zoom and play, on any static site
-- **Ready to share**: story, feed, square and wide presets, with the title, date, stats and elevation profile laid out around Instagram's interface
+- **Ready to share**: story, video, portrait, feed, square and wide presets or any size, with the title, date, stats and elevation profile laid out clear of social apps' buttons and captions, and a camera you can turn and tilt
 - **Your style**: choose the stats, units, date format and panels, or use a transparent background to place the diorama over a photo
 - **Offline and repeatable**: map data is cached, and a scene bundle (`.itb`) re-renders a hike without the network
 <!-- 
@@ -125,8 +125,9 @@ isotrail render hike.gpx --no-map-data
 
 | Where | Output | Why |
 | --- | --- | --- |
-| Instagram story | `--aspect story -o hike.mp4`, or a PNG | Instagram animates videos, not GIF files |
-| Instagram post | `--aspect feed`, as a PNG or `.mp4` | 4:5 takes up the most room in the feed |
+| A story | `--aspect story -o hike.mp4`, or a PNG | Social apps animate videos, not GIF files |
+| A short video | `--aspect video -o hike.mp4` | Keeps the diorama and text clear of the caption and buttons laid over short videos |
+| A post | `--aspect feed` or `--aspect portrait`, as a PNG or `.mp4` | Tall 4:5 and 3:4 posts take up the most room in a feed |
 | Your website | [`isotrail embed`](docs/usage.md#embed), or `--aspect wide` as a PNG | The bundle is about 100 KB and the runtime (about 1.2 MB gzipped) is shared by every hike; a PNG is a few dozen KB |
 | Chats, forums, READMEs | `.gif` | Plays anywhere, but a 10-second story is several MB, often over 10 MB. A shorter `--duration` or a lower `--fps` makes it smaller |
 

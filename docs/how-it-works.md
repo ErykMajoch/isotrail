@@ -45,7 +45,7 @@ The sky behind the diorama is a band of the real sky, half a turn either side of
 4. **Outlines.** Dark lines mark the slab's silhouette and the places where one surface passes in front of another. Sharp outward folds, such as ridges and the rim of the slab, are picked out in a lighter shade.
 5. **Route.** The route is a bold line with a dark border that climbs every block step it crosses. Where a ridge hides it, it shows through as a faint dashed line. Flags mark the start and finish.
 6. **Palette.** Every pixel is snapped to the nearest colour of the palette, compared in [OKLab](https://bottosson.github.io/posts/oklab/), a colour space that matches how alike colours look to the eye. The sky gradient is dithered with a fine checker pattern.
-7. **Text.** The title, date, stats and elevation profile are drawn in the [monogram](https://datagoblin.itch.io/monogram) pixel font, on frosted panels that blur and tint the scene behind them. The panels are laid out around Instagram's interface.
+7. **Text.** The title, date, stats and elevation profile are drawn in the [monogram](https://datagoblin.itch.io/monogram) pixel font, on frosted panels that blur and tint the scene behind them. The panels are laid out clear of the parts that social apps cover with their own buttons and captions.
 8. **Enlarge.** The frame is scaled up by a whole number without smoothing, so every drawn pixel becomes a crisp square.
 
 ## Animation

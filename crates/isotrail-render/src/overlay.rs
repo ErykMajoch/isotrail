@@ -535,8 +535,9 @@ impl Overlays {
             pad: IVec2::new(3 * large as i32, 2 * large as i32),
             stat_gap: (gap * large) as i32,
         };
-        // Half the diorama's side margin: the sides of a story stay uncovered
-        let margin = ((width as f32 * framing.safe.left / 2.0).round() as i32).max(2);
+        // Half the diorama's side margins: the sides of a story stay uncovered
+        let side = |share: f32| ((width as f32 * share / 2.0).round() as i32).max(2);
+        let (margin, right_margin) = (side(framing.safe.left), side(framing.safe.right));
         let mut layout = Overlays {
             framing: *framing,
             style: *style,
@@ -558,8 +559,9 @@ impl Overlays {
             let inner = (width as f32 * COLUMN_SHARE).round() as i32 - 2 * metrics.pad.x;
             layout.place_column(text, &metrics, margin, inner.max(1));
         } else {
-            let max_width = width as i32 - 2 * margin - 2 * metrics.pad.x;
-            layout.place_stacked(text, &metrics, max_width.max(1));
+            let max_width = width as i32 - margin - right_margin - 2 * metrics.pad.x;
+            let centre = (margin + width as i32 - right_margin) / 2;
+            layout.place_stacked(text, &metrics, centre, max_width.max(1));
         }
         layout.overflow = layout.overflow.max(layout.outside_frame());
         layout
@@ -679,11 +681,16 @@ impl Overlays {
         }
     }
 
-    fn place_stacked(&mut self, text: &OverlayText, metrics: &Metrics, max_width: i32) {
-        let (width, height) = (self.framing.width as i32, self.framing.height as i32);
+    fn place_stacked(
+        &mut self,
+        text: &OverlayText,
+        metrics: &Metrics,
+        centre: i32,
+        max_width: i32,
+    ) {
+        let height = self.framing.height as i32;
         let safe = self.framing.safe;
         let pad = metrics.pad;
-        let centre = width / 2;
 
         let safe_top = (height as f32 * safe.top).round() as i32;
         let safe_bottom = (height as f32 * (1.0 - safe.bottom)).round() as i32;
@@ -1190,7 +1197,7 @@ mod tests {
     use isotrail_bundle::Bounds;
 
     use super::*;
-    use crate::Aspect;
+    use crate::{Aspect, Canvas};
 
     fn story() -> Framing {
         Aspect::Story.framing(3).unwrap()
@@ -1799,12 +1806,42 @@ mod tests {
     fn every_scale_fits_its_frame_or_says_it_cant() {
         let font = PixelFont::monogram();
         let text = six_stats();
+        let mut cases: Vec<(String, Framing, bool)> = Vec::new();
         for aspect in Aspect::ALL {
             for scale in [2, 3, 5, 6, 10] {
                 let framing = aspect.framing(scale).unwrap();
-                let case = format!("{} at scale {scale}", aspect.name());
+                cases.push((
+                    format!("{} at scale {scale}", aspect.name()),
+                    framing,
+                    scale <= 3,
+                ));
+            }
+        }
+        let lopsided = Canvas {
+            safe: Insets {
+                top: 0.1,
+                bottom: 0.08,
+                left: 0.04,
+                right: 0.3,
+            },
+            ..Canvas::new(1080, 1350)
+        };
+        for (canvas, scale, must_fit) in [
+            (Canvas::new(1000, 700), 1, true),
+            (Canvas::new(999, 1332), 3, true),
+            (Canvas::new(1080, 1440), 4, false),
+            (Canvas::new(1210, 770), 11, false),
+            (Canvas::new(640, 2000), 2, true),
+            (lopsided, 3, true),
+        ] {
+            let framing = canvas.framing(scale).unwrap();
+            let case = format!("{} × {} at scale {scale}", canvas.width, canvas.height);
+            cases.push((case, framing, must_fit));
+        }
+        for (case, framing, must_fit) in cases {
+            {
                 let Ok(fitted) = Overlays::fit(&text, &OverlayStyle::default(), &framing) else {
-                    assert!(scale >= 5, "{case} doesn't fit");
+                    assert!(!must_fit, "{case} doesn't fit");
                     continue;
                 };
                 let overlays = &fitted.overlays;
@@ -1846,8 +1883,12 @@ mod tests {
                 } else {
                     assert_eq!(Some(drawn.join(" ")), text.attribution, "{case}");
                 }
-                if scale <= 3 {
+                if must_fit {
                     assert_eq!(fitted.steps, [], "{case}");
+                }
+                let right = framing.width as f32 * (1.0 - framing.safe.right / 2.0);
+                for panel in &overlays.panels {
+                    assert!(panel.max.x as f32 <= right + 1.0, "{case}: {panel:?}");
                 }
                 eprintln!("{case}: {:?}", fitted.steps);
             }

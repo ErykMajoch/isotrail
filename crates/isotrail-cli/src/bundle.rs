@@ -4,13 +4,13 @@ use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
-use clap::Args;
+use clap::{Args, ValueEnum};
 use isotrail_bundle::Route;
 use isotrail_geo::{
-    Cache, CachedFetcher, DEFAULT_DETAIL, DemSource, FeatureSource, Footprint, Grid, Heightmap,
-    HttpFetcher, Landcover, LandcoverMap, OSM_ATTRIBUTION, OVERPASS_URL, OsmFeatures,
-    OverpassSource, Provenance, RetryPolicy, SceneBundle, TERRARIUM_URL, TerrariumSource,
-    line_mask, origin, scene_bundle,
+    Cache, CachedFetcher, DEFAULT_DETAIL, DemSource, FeatureSource, Footprint, FootprintOptions,
+    Grid, Heightmap, HttpFetcher, Landcover, LandcoverMap, MIN_PADDING_M, OSM_ATTRIBUTION,
+    OVERPASS_URL, Orientation, OsmFeatures, OverpassSource, PADDING_FRACTION, Provenance,
+    RetryPolicy, SceneBundle, TERRARIUM_URL, TerrariumSource, line_mask, origin, scene_bundle,
 };
 use isotrail_track::Track;
 use png::ColorType;
@@ -100,6 +100,16 @@ pub struct DataArgs {
     #[arg(long)]
     no_map_data: bool,
 
+    /// Ground added round the route on each side: a percentage of its
+    /// length and width, and at least this many metres; 15,500 by default
+    #[arg(long, value_name = "PERCENT[,METRES]", value_parser = parse_padding)]
+    padding: Option<Padding>,
+
+    /// Which way the slab's sides run: along the route, or north-south and
+    /// east-west
+    #[arg(long, value_enum, value_name = "ALONG", default_value_t = FootprintArg::Route)]
+    footprint: FootprintArg,
+
     /// Leave the weather out: don't look it up, or draw what a bundle holds,
     /// along with the snow and ice it brings
     #[arg(long)]
@@ -111,7 +121,59 @@ pub struct DataArgs {
     pub season: SeasonArg,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Padding {
+    fraction: f64,
+    min_m: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum FootprintArg {
+    Route,
+    North,
+}
+
+fn parse_padding(value: &str) -> Result<Padding, String> {
+    let (percent, metres) = match value.split_once(',') {
+        Some((percent, metres)) => (percent, Some(metres)),
+        None => (value, None),
+    };
+    let number = |text: &str, max: f64, what: &str| -> Result<f64, String> {
+        let number: f64 = text
+            .trim()
+            .parse()
+            .map_err(|_| format!("{:?} is not a number", text.trim()))?;
+        if (0.0..=max).contains(&number) {
+            Ok(number)
+        } else {
+            Err(format!("the {what} must be from 0 to {max}"))
+        }
+    };
+    Ok(Padding {
+        fraction: number(percent, 100.0, "percentage")? / 100.0,
+        min_m: match metres {
+            Some(metres) => number(metres, 10_000.0, "metres")?,
+            None => MIN_PADDING_M,
+        },
+    })
+}
+
 impl DataArgs {
+    fn footprint(&self) -> FootprintOptions {
+        let padding = self.padding.unwrap_or(Padding {
+            fraction: PADDING_FRACTION,
+            min_m: MIN_PADDING_M,
+        });
+        FootprintOptions {
+            padding_fraction: padding.fraction,
+            min_padding_m: padding.min_m,
+            orientation: match self.footprint {
+                FootprintArg::Route => Orientation::Route,
+                FootprintArg::North => Orientation::North,
+            },
+        }
+    }
+
     /// Warns about flags typed for fetching data, which a bundle doesn't need
     pub fn warn_unused_with_bundle(&self, typed: &Typed) {
         for (id, flag) in [
@@ -119,6 +181,8 @@ impl DataArgs {
             ("offline", "--offline"),
             ("overpass_url", "--overpass-url"),
             ("no_map_data", "--no-map-data"),
+            ("padding", "--padding"),
+            ("footprint", "--footprint"),
         ] {
             if typed.has(id) {
                 warn!(
@@ -176,7 +240,7 @@ fn map_data(grid: &Grid, data: &DataArgs) -> anyhow::Result<Option<OsmFeatures>>
 /// Fetches terrain, map data and weather around the track read from `file`
 /// and packs them into a bundle
 pub fn prepare(track: &Track, file: &Path, data: &DataArgs) -> anyhow::Result<Prepared> {
-    let footprint = Footprint::from_track(track)?;
+    let footprint = Footprint::from_track_with(track, &data.footprint())?;
     let detail = NonZeroU32::new(data.detail).context("--detail must be positive")?;
     let grid = Grid::new(&footprint, detail);
 
@@ -510,5 +574,26 @@ mod tests {
         assert_eq!(big[4 * 12], 4);
         assert_eq!(big[big.len() - 1], 6);
         assert_eq!(enlarge(&[9, 8, 7], 1, 3), [9, 8, 7].repeat(16));
+    }
+
+    #[test]
+    fn padding_is_a_percentage_and_maybe_metres() {
+        assert_eq!(
+            parse_padding("10"),
+            Ok(Padding {
+                fraction: 0.1,
+                min_m: MIN_PADDING_M
+            })
+        );
+        assert_eq!(
+            parse_padding("0, 250"),
+            Ok(Padding {
+                fraction: 0.0,
+                min_m: 250.0
+            })
+        );
+        for bad in ["", "x", "101", "-1", "10,", "10,20000", "10,5,5"] {
+            assert!(parse_padding(bad).is_err(), "{bad}");
+        }
     }
 }

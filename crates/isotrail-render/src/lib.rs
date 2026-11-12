@@ -26,8 +26,8 @@ mod timeline;
 mod weather;
 
 pub use camera::{
-    Aspect, Camera, DEFAULT_YAW_OFFSET_DEG, Framing, Insets, MAX_ZOOM, PITCH_DEG, Turntable, View,
-    route_heading, view_heading,
+    Aim, Aspect, Camera, Canvas, DEFAULT_YAW_OFFSET_DEG, Framing, Insets, MAX_ZOOM, PITCH_DEG,
+    Turntable, View, Viewpoints, route_heading, view_heading,
 };
 pub use diorama::Diorama;
 pub use error::RenderError;
@@ -41,7 +41,8 @@ pub use mesh::{
     Mesher, SmoothMesher, Surface, TerrainMesh, Vertex, VoxelMesher, foliage, mesh_within,
 };
 pub use options::{
-    BLOCK_HEIGHT_RANGE, MesherKind, OCCLUSION_RANGE, SOFT_SHADOWS_RANGE, parse_within,
+    BLOCK_HEIGHT_RANGE, HEADING_RANGE, MesherKind, OCCLUSION_RANGE, PITCH_RANGE,
+    SOFT_SHADOWS_RANGE, TURN_RANGE, ZOOM_RANGE, parse_within,
 };
 pub use overlay::{
     DEFAULT_STATS, DateFormat, FitStep, Fitted, OverlayStyle, OverlayText, Overlays,

@@ -3,15 +3,15 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
-use clap::{Args, ValueEnum};
+use clap::Args;
 use isotrail_bundle::SceneBundle;
 use isotrail_export::{
     DEFAULT_SCALE, ExportError, Ffmpeg, GifWriter, Mp4Writer, check_gif_look, encode_png,
     render_clip, render_still, upscale,
 };
 use isotrail_render::{
-    Aspect, Background, DEFAULT_YAW_OFFSET_DEG, Fitted, Frame, Gpu, Look, Mesher, Motion, Overlays,
-    Pace, SunState, Walk,
+    Aim, Aspect, Background, Fitted, Frame, Gpu, Look, Mesher, Motion, Overlays, Pace, SunState,
+    Walk,
 };
 use isotrail_track::Track;
 use tracing::{info, warn};
@@ -19,6 +19,7 @@ use tracing::{info, warn};
 use crate::animation::AnimationArgs;
 use crate::bundle::DataArgs;
 use crate::config::Typed;
+use crate::frame::{AspectArg, FrameArgs, Shape, parse_scale};
 use crate::look::LookArgs;
 use crate::output::{self, Pending};
 use crate::overlay::OverlayArgs;
@@ -35,8 +36,9 @@ pub struct RenderArgs {
     #[arg(short, long, value_name = "FILE")]
     output: Option<PathBuf>,
 
-    /// Image shapes to render: story (1080 × 1920), feed (1080 × 1350),
-    /// square (1080 × 1080) or wide (1920 × 1080)
+    /// Image shapes to render: story or video (1080 × 1920), portrait
+    /// (1080 × 1440), feed (1080 × 1350), square (1080 × 1080) or wide
+    /// (1920 × 1080)
     #[arg(
         long,
         value_enum,
@@ -46,7 +48,8 @@ pub struct RenderArgs {
     )]
     aspect: Vec<AspectArg>,
 
-    /// Output pixels per drawn pixel: 2, 3, 5, 6 or 10
+    /// Output pixels per drawn pixel, from 1 to 16; it must divide both
+    /// sides of the image
     #[arg(long, value_name = "N", default_value_t = DEFAULT_SCALE, value_parser = parse_scale)]
     scale: u32,
 
@@ -59,6 +62,9 @@ pub struct RenderArgs {
     /// slab's size and relief by default
     #[arg(long, value_name = "X", value_parser = crate::bundle::parse_exaggeration)]
     exaggeration: Option<f64>,
+
+    #[command(flatten)]
+    frame: FrameArgs,
 
     #[command(flatten)]
     look: LookArgs,
@@ -80,51 +86,22 @@ enum Format {
     Mp4,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub(crate) enum AspectArg {
-    Story,
-    Feed,
-    Square,
-    Wide,
-}
-
-impl From<AspectArg> for Aspect {
-    fn from(aspect: AspectArg) -> Self {
-        match aspect {
-            AspectArg::Story => Aspect::Story,
-            AspectArg::Feed => Aspect::Feed,
-            AspectArg::Square => Aspect::Square,
-            AspectArg::Wide => Aspect::Wide,
-        }
-    }
-}
-
-pub(crate) const SCALES: [u32; 5] = [2, 3, 5, 6, 10];
-
 impl RenderArgs {
-    fn aspects(&self) -> anyhow::Result<Vec<Aspect>> {
+    fn shapes(&self) -> anyhow::Result<Vec<Shape>> {
         let aspects: Vec<Aspect> = self.aspect.iter().map(|&a| a.into()).collect();
         for (i, aspect) in aspects.iter().enumerate() {
             if aspects[..i].contains(aspect) {
                 return Err(usage(format!("--aspect lists {} twice", aspect.name())));
             }
         }
-        Ok(aspects)
-    }
-}
-
-pub(crate) fn parse_scale(value: &str) -> Result<u32, String> {
-    let scale: u32 = value.parse().map_err(|e| format!("{e}"))?;
-    if SCALES.contains(&scale) {
-        Ok(scale)
-    } else {
-        Err("must be 2, 3, 5, 6 or 10, so that it divides every image size".into())
+        Ok(self.frame.shapes(&aspects))
     }
 }
 
 pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
-    let aspects = args.aspects()?;
-    let (outputs, format) = output_paths(&args.file, args.output.as_deref(), &aspects)?;
+    let shapes = args.shapes()?;
+    let framings = args.frame.framings(&shapes, args.scale)?;
+    let (outputs, format) = output_paths(&args.file, args.output.as_deref(), &shapes)?;
     let inputs: Vec<&Path> = [Some(args.file.as_path()), args.config.as_deref()]
         .into_iter()
         .flatten()
@@ -145,6 +122,12 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
         if look.background == Background::Transparent {
             return Err(usage(ExportError::Mp4Transparent.to_string()));
         }
+        for framing in &framings {
+            let (width, height) = (framing.width * args.scale, framing.height * args.scale);
+            if width % 2 != 0 || height % 2 != 0 {
+                return Err(usage(ExportError::Mp4Size { width, height }.to_string()));
+            }
+        }
         Some(Ffmpeg::find()?)
     } else {
         None
@@ -164,29 +147,23 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
     }
     info!(exaggeration = bundle.grid.exaggeration, "terrain");
     let sun = crate::sun::hike_sun(&bundle, args.look.time)?;
+    let aim = args.frame.aim();
     if let Some(motion) = &mut motion {
         motion.sun = args.look.time.is_some().then_some(sun);
+        motion.aim = aim;
     }
     let text = args.overlay.text(&bundle)?;
-    let frames = aspects
+    let fitted = shapes
         .iter()
-        .map(|&aspect| {
-            let framing = aspect
-                .framing(args.scale)
-                .context("the pixel scale doesn't divide the image size")?;
-            Ok((aspect, framing))
-        })
-        .collect::<anyhow::Result<Vec<_>>>()?;
-    let fitted = frames
-        .iter()
-        .map(|(aspect, framing)| args.overlay.fit(&text, *aspect, framing, args.scale))
+        .zip(&framings)
+        .map(|(shape, framing)| args.overlay.fit(&text, &shape.label(), framing, args.scale))
         .collect::<anyhow::Result<Vec<_>>>()?;
     if motion.is_some_and(|motion| motion.pace == Pace::Time) && !Walk::new(&bundle).is_timed() {
         warn!("the track has no times to pace the route by, so it draws at an even speed");
     }
 
     let gpu = Gpu::headless()?;
-    for (((_, framing), fit), output) in frames.iter().zip(&fitted).zip(&outputs) {
+    for ((framing, fit), output) in framings.iter().zip(&fitted).zip(&outputs) {
         let overlays = &fit.overlays;
         let (width, height) = (framing.width * args.scale, framing.height * args.scale);
         let size = format!(
@@ -205,7 +182,7 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
             let frames = write_clip(args, &clip, output, ffmpeg.as_ref())?;
             println!("Rendered {frames} frames of {size}");
         } else {
-            let frame = still(&gpu, &bundle, mesher.as_ref(), overlays, &sun, &look)?;
+            let frame = still(&gpu, &bundle, mesher.as_ref(), overlays, &aim, &sun, &look)?;
             let image = upscale(&frame, args.scale)?;
             output::write(output, |file| Ok(encode_png(&image, file)?))?;
             println!("Rendered {size}");
@@ -225,6 +202,7 @@ pub(crate) fn still(
     bundle: &SceneBundle,
     mesher: &dyn Mesher,
     overlays: &Overlays,
+    aim: &Aim,
     sun: &SunState,
     look: &Look,
 ) -> anyhow::Result<Frame> {
@@ -233,7 +211,7 @@ pub(crate) fn still(
         bundle,
         mesher,
         &overlays.diorama_framing(),
-        DEFAULT_YAW_OFFSET_DEG,
+        aim,
         sun,
         look,
     )?;
@@ -404,12 +382,12 @@ impl Source {
     }
 }
 
-/// One file per aspect, named after the aspect when there are several, and
+/// One file per shape, named after its aspect when there are several, and
 /// the format their extension asks for
 fn output_paths(
     input: &Path,
     output: Option<&Path>,
-    aspects: &[Aspect],
+    shapes: &[Shape],
 ) -> anyhow::Result<(Vec<PathBuf>, Format)> {
     let output = match output {
         Some(path) => path.to_owned(),
@@ -435,17 +413,17 @@ fn output_paths(
             output.display()
         )));
     };
-    if aspects.len() == 1 {
+    if shapes.len() == 1 {
         return Ok((vec![output], format));
     }
     let stem = output
         .file_stem()
         .with_context(|| format!("{} has no file name", output.display()))?;
-    let paths = aspects
+    let paths = shapes
         .iter()
-        .map(|aspect| {
+        .map(|shape| {
             let mut name = stem.to_owned();
-            name.push(format!("-{}.", aspect.name()));
+            name.push(format!("-{}.", shape.label()));
             name.push(&extension);
             output.with_file_name(name)
         })
@@ -511,7 +489,11 @@ mod tests {
     }
 
     fn output_path(input: &Path, output: Option<&Path>) -> anyhow::Result<PathBuf> {
-        Ok(output_paths(input, output, &[Aspect::Story])?.0.remove(0))
+        Ok(
+            output_paths(input, output, &[Shape::Aspect(Aspect::Story)])?
+                .0
+                .remove(0),
+        )
     }
 
     #[test]
@@ -524,7 +506,7 @@ mod tests {
 
     #[test]
     fn several_aspects_name_their_images() {
-        let aspects = [Aspect::Story, Aspect::Wide];
+        let aspects = [Shape::Aspect(Aspect::Story), Shape::Aspect(Aspect::Wide)];
         let output = Some(Path::new("out/a.v2.PNG"));
         let (paths, format) = output_paths(Path::new("hike.gpx"), output, &aspects).unwrap();
         assert_eq!(format, Format::Png);
@@ -543,23 +525,14 @@ mod tests {
     }
 
     #[test]
-    fn scales_are_checked() {
-        for scale in SCALES {
-            assert_eq!(parse_scale(&scale.to_string()), Ok(scale));
-        }
-        for bad in ["4", "0", "x"] {
-            assert!(parse_scale(bad).is_err(), "{bad}");
-        }
-    }
-
-    #[test]
     fn png_gif_and_mp4_output_are_accepted() {
         let input = Path::new("hike.gpx");
-        let format = |output: &str| output_paths(input, Some(Path::new(output)), &[Aspect::Feed]);
+        let feed = [Shape::Aspect(Aspect::Feed)];
+        let format = |output: &str| output_paths(input, Some(Path::new(output)), &feed);
         assert_eq!(format("out/a.PNG").unwrap().1, Format::Png);
         assert_eq!(format("a.gif").unwrap().1, Format::Gif);
         assert_eq!(format("a.MP4").unwrap().1, Format::Mp4);
-        let aspects = [Aspect::Story, Aspect::Wide];
+        let aspects = [Shape::Aspect(Aspect::Story), Shape::Aspect(Aspect::Wide)];
         let (paths, _) = output_paths(input, Some(Path::new("a.Gif")), &aspects).unwrap();
         assert_eq!(paths, [Path::new("a-story.Gif"), Path::new("a-wide.Gif")]);
         for bad in ["a.webm", "a"] {

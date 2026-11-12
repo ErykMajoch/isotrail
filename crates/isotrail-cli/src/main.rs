@@ -6,6 +6,7 @@ mod bundle;
 mod cache;
 mod config;
 mod embed;
+mod frame;
 mod look;
 mod output;
 mod overlay;

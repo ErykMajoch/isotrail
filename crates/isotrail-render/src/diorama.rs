@@ -4,8 +4,8 @@ use glam::Vec3;
 use isotrail_bundle::SceneBundle;
 
 use crate::{
-    DEFAULT_YAW_OFFSET_DEG, Framing, Gpu, GpuMesh, Look, OffscreenTarget, RenderError, RouteLine,
-    Scene, SunState, TerrainMesh, TerrainRenderer, Turntable, View, view_heading,
+    Framing, Gpu, GpuMesh, Look, OffscreenTarget, RenderError, RouteLine, Scene, SunState,
+    TerrainMesh, TerrainRenderer, Turntable, View, Viewpoints,
 };
 
 /// A bundle's terrain and route on the GPU, at one scale that fits the slab
@@ -21,20 +21,26 @@ pub struct Diorama {
 }
 
 impl Diorama {
-    /// `mesh` comes from the bundle's mesher without props, and
-    /// `yaw_offsets_deg` are the turns from the still's view it will be drawn at
+    /// `mesh` comes from the bundle's mesher without props
     pub fn new(
         gpu: &Gpu,
         renderer: &TerrainRenderer,
         bundle: &SceneBundle,
         mut mesh: TerrainMesh,
         framing: &Framing,
-        yaw_offsets_deg: &[f32],
+        viewpoints: &Viewpoints,
         sun: SunState,
     ) -> Result<Diorama, RenderError> {
         let outline = outline(&mesh, bundle.grid.cell_size_m as f32);
-        let heading = view_heading(bundle, DEFAULT_YAW_OFFSET_DEG);
-        let turntable = Turntable::new(heading, outline, framing, yaw_offsets_deg);
+        let aim = &viewpoints.aim;
+        let turntable = Turntable::new(
+            aim.heading(bundle),
+            aim.pitch_deg,
+            aim.zoom,
+            outline,
+            framing,
+            viewpoints.yaw_offsets_deg,
+        );
         let metres_per_px = turntable.metres_per_px();
         mesh.add_props(bundle, metres_per_px);
         // About one point per internal pixel

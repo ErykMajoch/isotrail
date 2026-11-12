@@ -41,7 +41,9 @@ pub use fetch::{
     Cache, CacheStats, CachedFetcher, FetchError, Fetcher, HttpFetcher, MAX_RESPONSE_BYTES,
     RecordedFetcher, RetryPolicy, USER_AGENT, origin,
 };
-pub use footprint::{Footprint, MAX_ASPECT, MIN_PADDING_M, PADDING_FRACTION};
+pub use footprint::{
+    Footprint, FootprintOptions, MAX_ASPECT, MIN_PADDING_M, Orientation, PADDING_FRACTION,
+};
 pub use grid::{DEFAULT_DETAIL, Grid, MAX_DEM_ZOOM, dem_zoom, ground_resolution_m};
 pub use isotrail_bundle::{Landcover, Provenance, SceneBundle, line_mask};
 pub use landcover::{

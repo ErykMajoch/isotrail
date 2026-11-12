@@ -16,8 +16,12 @@ no-attribution = true          # switches are true or false
 background = "#1e2a33"
 season = "autumn"
 god-rays = "on"
+pitch = 40
+safe-area = [14, 6, 35, 6]     # top, right, bottom, left
 orbit = 0                      # animation settings only apply to .gif and .mp4 output
 ```
+
+A `size` typed on the command line replaces the `aspect` from a file, as the two can't be combined.
 
 ### The other commands
 
@@ -25,9 +29,9 @@ orbit = 0                      # animation settings only apply to .gif and .mp4 
 
 | Command | Takes from `[render]` |
 | --- | --- |
-| `embed` | Everything that is also an `embed` option: the look, text and overlays, data, `scale` (for the poster) and `aspect` when it names one shape |
+| `embed` | Everything that is also an `embed` option: the look, camera, text and overlays, data, `scale`, `size` and `safe-area` (for the poster) and `aspect` when it names one shape |
 | `bundle` | `title`, `exaggeration` and the data settings |
-| `style-lab` | `exaggeration` and the data settings only, so the palette and scale you render with don't narrow its comparison |
+| `style-lab` | `exaggeration` and the data settings (including `padding` and `footprint`) only, so the palette and scale you render with don't narrow its comparison |
 
 A command's own table, `[embed]`, `[bundle]` or `[style-lab]`, holds its own options and wins over `[render]` for that command:
 
@@ -77,7 +81,7 @@ An option you type also wins over settings it can't be combined with: with `date
 
 - Only the `[render]`, `[embed]`, `[bundle]` and `[style-lab]` tables are allowed, so typos don't go unnoticed.
 - Each table only takes its command's options: an unknown key is an error, and so are `output`, `config`, `debug-dir`, `verbose`, `help` and `version`, which only make sense for one run.
-- A bad value is reported with the name of the file it came from, for example `scale in hike.toml: must be 2, 3, 5, 6 or 10`.
+- A bad value is reported with the name of the file it came from, for example `scale in hike.toml: must be a whole number from 1 to 16`.
 - `--background` in a config file keeps its exact colour, just as it does on the command line.
 - `time` can be a string (`"07:30"`) or a TOML time (`07:30:00`).
 - Mistakes in a config file stop the command with exit code 2, like mistakes on the command line.

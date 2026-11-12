@@ -1,7 +1,7 @@
 use isotrail_bundle::SceneBundle;
 use isotrail_render::{
     Diorama, Frame, Framing, Gpu, Look, Mesher, Moment, Motion, OffscreenTarget, SunState,
-    TerrainRenderer, View, Walk, mesh_within,
+    TerrainRenderer, View, Viewpoints, Walk, mesh_within,
 };
 
 use crate::ExportError;
@@ -33,7 +33,10 @@ pub fn render_clip<E: From<ExportError>>(
         bundle,
         mesh_within(mesher, bundle, gpu.max_buffer_size()).map_err(ExportError::from)?,
         framing,
-        &offsets,
+        &Viewpoints {
+            aim: motion.aim,
+            yaw_offsets_deg: &offsets,
+        },
         motion.sun.unwrap_or(start),
     )
     .map_err(ExportError::from)?;

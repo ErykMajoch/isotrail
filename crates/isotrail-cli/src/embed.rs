@@ -5,16 +5,18 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
 use clap::Args;
+use isotrail_bundle::SceneBundle;
 use isotrail_export::{DEFAULT_SCALE, encode_png, upscale};
-use isotrail_render::{Aspect, Gpu};
+use isotrail_render::{Aim, Aspect, Gpu, PITCH_DEG};
 use tracing::warn;
 
 use crate::bundle::DataArgs;
 use crate::config::Typed;
+use crate::frame::{AspectArg, FrameArgs, Shape, parse_scale};
 use crate::look::LookArgs;
 use crate::output;
 use crate::overlay::OverlayArgs;
-use crate::render::{AspectArg, Source};
+use crate::render::Source;
 use crate::usage;
 
 /// The element's script and the WebAssembly renderer it loads, at the paths
@@ -34,15 +36,14 @@ pub struct EmbedArgs {
     #[arg(short, long, value_name = "DIR")]
     output: PathBuf,
 
-    /// Shape of the embed and its poster: story (9:16), feed (4:5), square or
-    /// wide (16:9)
+    /// Shape of the embed and its poster: story or video (9:16), portrait
+    /// (3:4), feed (4:5), square or wide (16:9)
     #[arg(long, value_enum, default_value_t = AspectArg::Wide)]
     aspect: AspectArg,
 
-    /// Poster pixels per drawn pixel: 2, 3, 5, 6 or 10; the live embed
-    /// picks its own to suit the page
-    #[arg(long, value_name = "N", default_value_t = DEFAULT_SCALE,
-          value_parser = crate::render::parse_scale)]
+    /// Poster pixels per drawn pixel, from 1 to 16, dividing both sides of
+    /// the poster; the live embed picks its own to suit the page
+    #[arg(long, value_name = "N", default_value_t = DEFAULT_SCALE, value_parser = parse_scale)]
     scale: u32,
 
     /// How many times taller than life to draw the terrain; chosen from the
@@ -77,6 +78,9 @@ pub struct EmbedArgs {
     config: Option<PathBuf>,
 
     #[command(flatten)]
+    frame: FrameArgs,
+
+    #[command(flatten)]
     look: LookArgs,
 
     #[command(flatten)]
@@ -87,6 +91,8 @@ pub struct EmbedArgs {
 }
 
 pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
+    let shape = args.frame.shapes(&[Aspect::from(args.aspect)])[0];
+    let framing = args.frame.framings(&[shape], args.scale)?[0];
     let dir = &args.output;
     let runtime = if args.with_runtime {
         let runtime = runtime_dir(args.runtime_dir.as_deref())?;
@@ -192,11 +198,10 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
         )));
     }
     let text = args.overlay.text(&bundle)?;
-    let aspect = Aspect::from(args.aspect);
-    let framing = aspect
-        .framing(args.scale)
-        .context("the pixel scale doesn't divide the image size")?;
-    let fitted = args.overlay.fit(&text, aspect, &framing, args.scale)?;
+    let fitted = args
+        .overlay
+        .fit(&text, &shape.label(), &framing, args.scale)?;
+    let aim = args.frame.aim();
     let sun = crate::sun::hike_sun(&bundle, args.look.time)?;
 
     if in_place {
@@ -216,6 +221,7 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
         &bundle,
         mesher.as_ref(),
         &fitted.overlays,
+        &aim,
         &sun,
         &look,
     )?;
@@ -233,13 +239,15 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
         println!("Wrote {}", to.display());
     }
 
+    let mut attributes = args.look.attributes(palette_url.as_deref());
+    attributes.extend(view_attributes(&aim, &bundle));
     let html = snippet(&Snippet {
         name: &name,
         title: args.overlay.title(&bundle),
-        aspect,
+        shape,
         base_url: args.base_url.as_deref(),
         runtime_url: args.runtime_url.as_deref(),
-        attributes: &args.look.attributes(palette_url.as_deref()),
+        attributes: &attributes,
     });
     output::write(&snippet_path, |file| Ok(file.write_all(html.as_bytes())?))?;
     println!("Wrote {}\n\n{html}", snippet_path.display());
@@ -250,6 +258,23 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
         println!("Credit for the caption: {credit}");
     }
     Ok(())
+}
+
+/// The element's starting view, for each part that isn't the default; a
+/// compass heading becomes the turn from the default view that matches it
+fn view_attributes(aim: &Aim, bundle: &SceneBundle) -> Vec<(&'static str, String)> {
+    let mut attributes = Vec::new();
+    let turn = aim.as_turn(bundle);
+    if turn != 0.0 {
+        attributes.push(("turn", turn.to_string()));
+    }
+    if aim.pitch_deg != PITCH_DEG {
+        attributes.push(("pitch", aim.pitch_deg.to_string()));
+    }
+    if aim.zoom != 1.0 {
+        attributes.push(("zoom", aim.zoom.to_string()));
+    }
+    attributes
 }
 
 /// The runtime folder, checked for every file before any work starts
@@ -295,7 +320,7 @@ fn runtime_file(dir: &Path, file: &str) -> PathBuf {
 struct Snippet<'a> {
     name: &'a str,
     title: &'a str,
-    aspect: Aspect,
+    shape: Shape,
     base_url: Option<&'a str>,
     runtime_url: Option<&'a str>,
     /// The look options that aren't the default
@@ -324,8 +349,12 @@ fn snippet(snippet: &Snippet) -> String {
         Some(url) => format!("{url}?{version}"),
         None => format!("{base}{}?{version}", RUNTIME_FILES[0]),
     };
-    let (width, height) = snippet.aspect.output_size();
+    let (width, height) = snippet.shape.size();
     let common = gcd(width, height);
+    let aspect = match snippet.shape {
+        Shape::Aspect(aspect) => aspect.name().to_owned(),
+        Shape::Size(..) => format!("{}:{}", width / common, height / common),
+    };
     let alt = match snippet.title.trim() {
         "" => "Diorama of a hike".to_owned(),
         title => format!("Diorama of {title}"),
@@ -346,7 +375,7 @@ fn snippet(snippet: &Snippet) -> String {
         html,
         r#"<isotrail-hike src="{}" poster="{poster}" aspect="{}"{look} style="display:block;aspect-ratio:{}/{}"><img src="{poster}" alt="{}" style="display:block;width:100%"></isotrail-hike>"#,
         html_attr(&file("itb")),
-        snippet.aspect.name(),
+        aspect,
         width / common,
         height / common,
         html_attr(&alt),
@@ -414,7 +443,7 @@ mod tests {
         snippet(&Snippet {
             name,
             title,
-            aspect,
+            shape: Shape::Aspect(aspect),
             base_url,
             runtime_url,
             attributes: &[],
@@ -470,6 +499,62 @@ mod tests {
         let html = plain("r", "R", Aspect::Feed, None, Some("/e.js?v=2"));
         assert!(html.contains(r#"src="/e.js?v=2""#), "{html}");
         assert!(html.contains("aspect-ratio:4/5"), "{html}");
+        let html = plain("r", "R", Aspect::Portrait, None, None);
+        assert!(html.contains(r#"aspect="portrait""#), "{html}");
+        assert!(html.contains("aspect-ratio:3/4"), "{html}");
+        let html = plain("r", "R", Aspect::Video, None, None);
+        assert!(html.contains(r#"aspect="video""#), "{html}");
+        assert!(html.contains("aspect-ratio:9/16"), "{html}");
+    }
+
+    #[test]
+    fn a_given_size_becomes_its_ratio() {
+        let html = snippet(&Snippet {
+            name: "ridge",
+            title: "Ridge",
+            shape: Shape::Size(1200, 800),
+            base_url: None,
+            runtime_url: None,
+            attributes: &[],
+        });
+        assert!(
+            html.contains(r#"aspect="3:2" style="display:block;aspect-ratio:3/2""#),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn the_starting_view_is_written_when_it_isnt_the_default() {
+        let bundle = isotrail_testkit::hike_bundle();
+        assert_eq!(view_attributes(&Aim::default(), &bundle), []);
+        let aim = Aim {
+            turn_deg: -30.0,
+            pitch_deg: 45.0,
+            zoom: 1.5,
+            ..Aim::default()
+        };
+        assert_eq!(
+            view_attributes(&aim, &bundle),
+            [
+                ("turn", "-30".to_owned()),
+                ("pitch", "45".to_owned()),
+                ("zoom", "1.5".to_owned())
+            ]
+        );
+        let heading = Aim {
+            heading_deg: Some(90.0),
+            ..Aim::default()
+        };
+        let [("turn", turn)] = &view_attributes(&heading, &bundle)[..] else {
+            panic!("a turn");
+        };
+        let turn: f32 = turn.parse().unwrap();
+        let back = Aim {
+            turn_deg: turn,
+            ..Aim::default()
+        };
+        let diff = (back.heading(&bundle) - heading.heading(&bundle)).to_degrees();
+        assert!((diff + 180.0).rem_euclid(360.0) - 180.0 < 0.01, "{diff}");
     }
 
     #[test]
@@ -477,7 +562,7 @@ mod tests {
         let html = snippet(&Snippet {
             name: "ridge",
             title: "Ridge",
-            aspect: Aspect::Wide,
+            shape: Shape::Aspect(Aspect::Wide),
             base_url: None,
             runtime_url: None,
             attributes: &[

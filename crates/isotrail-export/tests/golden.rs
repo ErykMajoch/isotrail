@@ -3,10 +3,10 @@ use isotrail_bundle::{
 };
 use isotrail_export::{ExportError, GifWriter, render_clip, render_still, upscale};
 use isotrail_render::{
-    Aspect, Background, DEFAULT_PALETTE, DEFAULT_STATS, DEFAULT_YAW_OFFSET_DEG, DateFormat,
-    Diorama, Frame, GodRays, Gpu, Look, Mesher, Motion, OffscreenTarget, Orbit, OverlayStyle,
-    OverlayText, Overlays, Pace, Palette, SmoothMesher, SunState, TerrainRenderer, Timeline, View,
-    VoxelMesher, Walk, draw_test_scene,
+    Aim, Aspect, Background, DEFAULT_PALETTE, DEFAULT_STATS, DateFormat, Diorama, Frame, GodRays,
+    Gpu, Look, Mesher, Motion, OffscreenTarget, Orbit, OverlayStyle, OverlayText, Overlays, Pace,
+    Palette, SmoothMesher, SunState, TerrainRenderer, Timeline, View, Viewpoints, VoxelMesher,
+    Walk, draw_test_scene,
 };
 use isotrail_testkit::{
     Tolerance, assert_golden, decode_gif, differing_share, diorama_bundle, hike_bundle,
@@ -30,7 +30,7 @@ fn assert_terrain_golden(name: &str, mesher: &dyn Mesher, look: &Look) {
         &bundle,
         mesher,
         &framing,
-        DEFAULT_YAW_OFFSET_DEG,
+        &Aim::default(),
         &SunState::for_hike(&bundle),
         look,
     )
@@ -94,7 +94,7 @@ fn low_suns_and_night_match_goldens() {
             &bundle,
             &VoxelMesher::default(),
             &framing,
-            DEFAULT_YAW_OFFSET_DEG,
+            &Aim::default(),
             &SunState::for_hike(&bundle),
             &Look::default(),
         )
@@ -176,7 +176,7 @@ fn weather_matches_goldens() {
             &bundle,
             &VoxelMesher::default(),
             &framing,
-            DEFAULT_YAW_OFFSET_DEG,
+            &Aim::default(),
             &SunState::for_hike(&bundle),
             &Look::default(),
         )
@@ -229,7 +229,7 @@ fn seasons_match_goldens() {
             &bundle,
             &VoxelMesher::default(),
             &framing,
-            DEFAULT_YAW_OFFSET_DEG,
+            &Aim::default(),
             &SunState::for_hike(&bundle),
             &Look::default(),
         )
@@ -266,7 +266,7 @@ fn the_sea_stays_open_and_dark_in_winter() {
             bundle,
             &VoxelMesher::default(),
             &framing,
-            DEFAULT_YAW_OFFSET_DEG,
+            &Aim::default(),
             &SunState::for_hike(bundle),
             &Look::default(),
         )
@@ -297,7 +297,7 @@ fn god_rays_light_the_ground_through_gaps_in_the_cloud() {
             &bundle,
             &VoxelMesher::default(),
             &framing,
-            DEFAULT_YAW_OFFSET_DEG,
+            &Aim::default(),
             &SunState::for_hike(&bundle),
             &look,
         )
@@ -335,7 +335,7 @@ fn occlusion_darkens_hollows() {
             &bundle,
             &VoxelMesher::default(),
             &framing,
-            DEFAULT_YAW_OFFSET_DEG,
+            &Aim::default(),
             &SunState::for_hike(&bundle),
             &look,
         )
@@ -365,7 +365,10 @@ fn rain_moves_with_the_clock_and_repeats() {
         &bundle,
         VoxelMesher::default().mesh(&bundle),
         &framing,
-        &[0.0],
+        &Viewpoints {
+            aim: Aim::default(),
+            yaw_offsets_deg: &[0.0],
+        },
         sun,
     )
     .unwrap();
@@ -482,7 +485,7 @@ fn overlays_on_the_diorama_match_golden() {
         &bundle,
         &VoxelMesher::default(),
         &overlays.diorama_framing(),
-        DEFAULT_YAW_OFFSET_DEG,
+        &Aim::default(),
         &SunState::for_hike(&bundle),
         &look,
     )
@@ -512,7 +515,7 @@ fn render_hike_at(gpu: &Gpu, aspect: Aspect, scale: u32, look: &Look) -> Frame {
         &bundle,
         &VoxelMesher::default(),
         &overlays.diorama_framing(),
-        DEFAULT_YAW_OFFSET_DEG,
+        &Aim::default(),
         &SunState::for_hike(&bundle),
         look,
     )
@@ -667,7 +670,7 @@ fn every_clip_ends_on_the_still() {
         &bundle,
         &VoxelMesher::default(),
         &framing,
-        DEFAULT_YAW_OFFSET_DEG,
+        &Aim::default(),
         &sun,
         &look,
     )

@@ -30,11 +30,55 @@ pub struct Framing {
     pub safe: Insets,
 }
 
+impl Insets {
+    pub const fn even(share: f32) -> Insets {
+        Insets {
+            top: share,
+            bottom: share,
+            left: share,
+            right: share,
+        }
+    }
+}
+
+/// Output size in pixels and its safe area
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Canvas {
+    pub width: u32,
+    pub height: u32,
+    pub safe: Insets,
+}
+
+impl Canvas {
+    pub const fn new(width: u32, height: u32) -> Canvas {
+        Canvas {
+            width,
+            height,
+            safe: Insets::even(0.05),
+        }
+    }
+
+    /// `None` if `scale` doesn't divide both sides
+    pub fn framing(&self, scale: u32) -> Option<Framing> {
+        let divides =
+            scale > 0 && self.width.is_multiple_of(scale) && self.height.is_multiple_of(scale);
+        divides.then(|| Framing {
+            width: self.width / scale,
+            height: self.height / scale,
+            safe: self.safe,
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Aspect {
-    /// 9:16, for Instagram stories
+    /// 9:16, for stories
     #[default]
     Story,
+    /// 9:16, clear of a short video's caption and buttons
+    Video,
+    /// 3:4, for tall posts
+    Portrait,
     /// 4:5, for feed posts
     Feed,
     Square,
@@ -43,11 +87,20 @@ pub enum Aspect {
 }
 
 impl Aspect {
-    pub const ALL: [Aspect; 4] = [Aspect::Story, Aspect::Feed, Aspect::Square, Aspect::Wide];
+    pub const ALL: [Aspect; 6] = [
+        Aspect::Story,
+        Aspect::Video,
+        Aspect::Portrait,
+        Aspect::Feed,
+        Aspect::Square,
+        Aspect::Wide,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
             Aspect::Story => "story",
+            Aspect::Video => "video",
+            Aspect::Portrait => "portrait",
             Aspect::Feed => "feed",
             Aspect::Square => "square",
             Aspect::Wide => "wide",
@@ -56,14 +109,16 @@ impl Aspect {
 
     pub fn output_size(self) -> (u32, u32) {
         match self {
-            Aspect::Story => (1080, 1920),
+            Aspect::Story | Aspect::Video => (1080, 1920),
+            Aspect::Portrait => (1080, 1440),
             Aspect::Feed => (1080, 1350),
             Aspect::Square => (1080, 1080),
             Aspect::Wide => (1920, 1080),
         }
     }
 
-    /// Story keeps clear of Instagram's header and reply bar
+    /// Story keeps clear of the header and reply bar that apps lay over
+    /// stories, and video of the caption and buttons over short videos
     pub fn safe_area(self) -> Insets {
         match self {
             Aspect::Story => Insets {
@@ -72,23 +127,82 @@ impl Aspect {
                 left: 0.05,
                 right: 0.05,
             },
-            Aspect::Feed | Aspect::Square | Aspect::Wide => Insets {
-                top: 0.05,
-                bottom: 0.05,
-                left: 0.05,
-                right: 0.05,
+            Aspect::Video => Insets {
+                top: 0.14,
+                bottom: 0.35,
+                left: 0.06,
+                right: 0.06,
             },
+            Aspect::Portrait | Aspect::Feed | Aspect::Square | Aspect::Wide => Insets::even(0.05),
+        }
+    }
+
+    pub fn canvas(self) -> Canvas {
+        let (width, height) = self.output_size();
+        Canvas {
+            width,
+            height,
+            safe: self.safe_area(),
         }
     }
 
     /// `None` if `scale` doesn't divide the output size
     pub fn framing(self, scale: u32) -> Option<Framing> {
-        let (width, height) = self.output_size();
-        (scale > 0 && width % scale == 0 && height % scale == 0).then(|| Framing {
-            width: width / scale,
-            height: height / scale,
-            safe: self.safe_area(),
-        })
+        self.canvas().framing(scale)
+    }
+}
+
+/// Where the camera looks from, and how much of the frame the slab fills
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Aim {
+    /// Compass bearing the camera looks towards, instead of the hike's
+    /// heading turned by [`DEFAULT_YAW_OFFSET_DEG`]
+    pub heading_deg: Option<f64>,
+    /// Added to the heading, whichever it is
+    pub turn_deg: f32,
+    pub pitch_deg: f32,
+    /// Multiplies the size at which the slab fits the safe area
+    pub zoom: f32,
+}
+
+impl Default for Aim {
+    fn default() -> Self {
+        Aim {
+            heading_deg: None,
+            turn_deg: 0.0,
+            pitch_deg: PITCH_DEG,
+            zoom: 1.0,
+        }
+    }
+}
+
+/// The still's view, and the turns from it that a diorama will be seen at
+#[derive(Clone, Copy, Debug)]
+pub struct Viewpoints<'a> {
+    pub aim: Aim,
+    pub yaw_offsets_deg: &'a [f32],
+}
+
+impl Aim {
+    /// Slab-frame angle the camera looks along
+    pub fn heading(&self, bundle: &SceneBundle) -> f32 {
+        let base = match self.heading_deg {
+            Some(bearing) => slab_angle(&bundle.grid, bearing),
+            None => view_heading(bundle, DEFAULT_YAW_OFFSET_DEG),
+        };
+        base + self.turn_deg.to_radians()
+    }
+
+    /// The turn that, added to the default view, looks where this aim does,
+    /// in degrees within ±180
+    pub fn as_turn(&self, bundle: &SceneBundle) -> f32 {
+        let turn = (self.heading(bundle) - Aim::default().heading(bundle)).to_degrees();
+        let turn = (turn + 180.0).rem_euclid(360.0) - 180.0;
+        if (turn - self.turn_deg).abs() < 1e-3 {
+            self.turn_deg
+        } else {
+            (turn * 100.0).round() / 100.0
+        }
     }
 }
 
@@ -110,8 +224,20 @@ impl Camera {
         points: impl IntoIterator<Item = Vec3>,
         framing: &Framing,
     ) -> Camera {
-        let fit = Fit::new(heading, points);
-        let per_pixel = fit.scale(framing);
+        Camera::aimed(heading, PITCH_DEG, 1.0, points, framing)
+    }
+
+    /// Like [`Camera::diorama`], `pitch_deg` down and `zoom` times the size
+    /// that fits
+    pub fn aimed(
+        heading: f32,
+        pitch_deg: f32,
+        zoom: f32,
+        points: impl IntoIterator<Item = Vec3>,
+        framing: &Framing,
+    ) -> Camera {
+        let fit = Fit::new(heading, pitch_deg, points);
+        let per_pixel = fit.scale(framing) / zoom;
         fit.camera(framing, per_pixel, Vec2::ZERO, false)
     }
 
@@ -124,15 +250,20 @@ impl Camera {
         framing: &Framing,
         metres_per_px: f32,
     ) -> Camera {
-        Fit::new(heading, points).camera(framing, metres_per_px.max(f32::EPSILON), Vec2::ZERO, true)
+        Fit::new(heading, PITCH_DEG, points).camera(
+            framing,
+            metres_per_px.max(f32::EPSILON),
+            Vec2::ZERO,
+            true,
+        )
     }
 
     /// The `metres_per_px` at which `points` fit the framing's safe area
     /// from every one of `headings`
-    pub fn fit_scale(headings: &[f32], points: &[Vec3], framing: &Framing) -> f32 {
+    pub fn fit_scale(headings: &[f32], pitch_deg: f32, points: &[Vec3], framing: &Framing) -> f32 {
         headings
             .iter()
-            .map(|&heading| Fit::new(heading, points.iter().copied()).scale(framing))
+            .map(|&heading| Fit::new(heading, pitch_deg, points.iter().copied()).scale(framing))
             .fold(f32::EPSILON, f32::max)
     }
 }
@@ -141,13 +272,14 @@ impl Camera {
 struct Fit {
     view: Mat4,
     forward: Vec3,
+    pitch: f32,
     min: Vec3,
     max: Vec3,
 }
 
 impl Fit {
-    fn new(heading: f32, points: impl IntoIterator<Item = Vec3>) -> Fit {
-        let pitch = PITCH_DEG.to_radians();
+    fn new(heading: f32, pitch_deg: f32, points: impl IntoIterator<Item = Vec3>) -> Fit {
+        let pitch = pitch_deg.to_radians();
         let forward = Vec3::new(
             heading.cos() * pitch.cos(),
             heading.sin() * pitch.cos(),
@@ -166,6 +298,7 @@ impl Fit {
         Fit {
             view,
             forward,
+            pitch,
             min,
             max,
         }
@@ -222,7 +355,7 @@ impl Fit {
     fn to_ground(&self, screen: Vec2) -> Vec2 {
         let along = self.forward.truncate().normalize_or(Vec2::X);
         let right = Vec2::new(along.y, -along.x);
-        right * screen.x + along * (screen.y / PITCH_DEG.to_radians().sin())
+        right * screen.x + along * (screen.y / self.pitch.sin())
     }
 }
 
@@ -268,16 +401,20 @@ impl View {
 #[derive(Clone, Debug)]
 pub struct Turntable {
     heading: f32,
+    pitch_deg: f32,
     points: Vec<Vec3>,
     framing: Framing,
     metres_per_px: f32,
 }
 
 impl Turntable {
-    /// `heading` is the still's, and the scale fits `points` from every turn
-    /// of `yaw_offsets_deg` from it
+    /// `heading` is the still's, `pitch_deg` holds for every turn, and the
+    /// scale is `zoom` times the one that fits `points` from every turn of
+    /// `yaw_offsets_deg` from it
     pub fn new(
         heading: f32,
+        pitch_deg: f32,
+        zoom: f32,
         points: Vec<Vec3>,
         framing: &Framing,
         yaw_offsets_deg: &[f32],
@@ -287,9 +424,10 @@ impl Turntable {
             .map(|offset| heading + offset.to_radians())
             .collect();
         headings.dedup();
-        let metres_per_px = Camera::fit_scale(&headings, &points, framing);
+        let metres_per_px = Camera::fit_scale(&headings, pitch_deg, &points, framing) / zoom;
         Turntable {
             heading,
+            pitch_deg,
             points,
             framing: *framing,
             metres_per_px,
@@ -381,18 +519,19 @@ impl Turntable {
     fn fit(&self, view: &View) -> Fit {
         Fit::new(
             self.heading + view.yaw_offset_deg.to_radians(),
+            self.pitch_deg,
             self.points.iter().copied(),
         )
     }
 }
 
-/// Slab-frame angle, counter-clockwise from +x, that the hike heads in: from
-/// start to finish, or from the start to the halfway point for loops and
-/// out-and-backs
 fn finite_or(value: f32, default: f32) -> f32 {
     if value.is_finite() { value } else { default }
 }
 
+/// Slab-frame angle, counter-clockwise from +x, that the hike heads in: from
+/// start to finish, or from the start to the halfway point for loops and
+/// out-and-backs
 pub fn route_heading(bundle: &SceneBundle) -> Option<f32> {
     let grid = &bundle.grid;
     let points = &bundle.route.points;
@@ -501,6 +640,33 @@ mod tests {
         assert_eq!(Aspect::Story.framing(6).unwrap().width, 180);
         assert_eq!(Aspect::Story.framing(7), None);
         assert_eq!(Aspect::Story.framing(0), None);
+    }
+
+    #[test]
+    fn new_presets_have_their_sizes_and_safe_areas() {
+        assert_eq!(Aspect::Portrait.output_size(), (1080, 1440));
+        assert_eq!(Aspect::Video.output_size(), (1080, 1920));
+        let video = Aspect::Video.safe_area();
+        assert_eq!(
+            (video.top, video.bottom, video.left, video.right),
+            (0.14, 0.35, 0.06, 0.06)
+        );
+        assert_eq!(Aspect::Portrait.safe_area(), Insets::even(0.05));
+    }
+
+    #[test]
+    fn any_canvas_divides_by_a_scale_that_divides_both_sides() {
+        let canvas = Canvas::new(1210, 770);
+        assert_eq!(
+            canvas.framing(11).map(|f| (f.width, f.height)),
+            Some((110, 70))
+        );
+        assert_eq!(
+            canvas.framing(1).map(|f| (f.width, f.height)),
+            Some((1210, 770))
+        );
+        assert_eq!(canvas.framing(3), None);
+        assert_eq!(canvas.framing(0), None);
     }
 
     #[test]
@@ -614,7 +780,7 @@ mod tests {
         let framing = Aspect::Story.framing(3).unwrap();
         let points = slab_corners(&grid, 800.0);
         let headings = [0.2, 0.5, 0.9];
-        let scale = Camera::fit_scale(&headings, &points, &framing);
+        let scale = Camera::fit_scale(&headings, PITCH_DEG, &points, &framing);
         let fits: Vec<f32> = headings
             .iter()
             .map(|&h| Camera::diorama(h, points.clone(), &framing).metres_per_px)
@@ -654,11 +820,76 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_default_aim_is_the_plain_diorama_view() {
+        let bundle = with_route(&[(2.0, 18.0), (6.0, 15.0), (10.0, 12.0)]);
+        let framing = Aspect::Story.framing(3).unwrap();
+        let points = slab_corners(&bundle.grid, 50.0);
+        let aim = Aim::default();
+        let heading = view_heading(&bundle, DEFAULT_YAW_OFFSET_DEG);
+        assert_eq!(aim.heading(&bundle), heading);
+        assert_eq!(
+            Camera::aimed(heading, aim.pitch_deg, aim.zoom, points.clone(), &framing),
+            Camera::diorama(heading, points, &framing)
+        );
+    }
+
+    #[test]
+    fn turns_add_to_the_view_and_headings_replace_it() {
+        let bundle = with_route(&[(10.0, 18.0), (10.0, 2.0)]);
+        let turned = Aim {
+            turn_deg: 45.0,
+            ..Aim::default()
+        };
+        assert_angle(
+            Some(turned.heading(&bundle)),
+            FRAC_PI_2 + (DEFAULT_YAW_OFFSET_DEG + 45.0).to_radians(),
+        );
+        assert_eq!(turned.as_turn(&bundle), 45.0);
+
+        // The test grid isn't rotated, so north is +y and east +x
+        let north = Aim {
+            heading_deg: Some(0.0),
+            ..Aim::default()
+        };
+        assert_angle(Some(north.heading(&bundle)), FRAC_PI_2);
+        let east = Aim {
+            heading_deg: Some(90.0),
+            turn_deg: 10.0,
+            ..Aim::default()
+        };
+        assert_angle(Some(east.heading(&bundle)), 10f32.to_radians());
+        assert!((north.as_turn(&bundle) + DEFAULT_YAW_OFFSET_DEG).abs() < 0.01);
+
+        // Turns also move bundles without a route
+        let routeless = with_route(&[]);
+        let base = Aim::default().heading(&routeless);
+        assert_angle(Some(turned.heading(&routeless)), base + FRAC_PI_4);
+    }
+
+    #[test]
+    fn pitch_tilts_the_camera_and_zoom_scales_the_fit() {
+        let grid = grid(200, 100, 30.0);
+        let framing = Aspect::Story.framing(3).unwrap();
+        let points = slab_corners(&grid, 800.0);
+        let steep = Camera::aimed(0.4, 70.0, 1.0, points.clone(), &framing);
+        assert!((steep.forward.z + 70f32.to_radians().sin()).abs() < 1e-5);
+        let plain = Camera::diorama(0.4, points.clone(), &framing);
+        let close = Camera::aimed(0.4, PITCH_DEG, 2.0, points.clone(), &framing);
+        assert!((close.metres_per_px * 2.0 - plain.metres_per_px).abs() < 1e-4);
+        let far = Turntable::new(0.4, PITCH_DEG, 0.5, points.clone(), &framing, &[0.0]);
+        let whole = Turntable::new(0.4, PITCH_DEG, 1.0, points, &framing, &[0.0]);
+        assert!((far.metres_per_px() - whole.metres_per_px() * 2.0).abs() < 1e-4);
+    }
+
     fn turntable() -> (Turntable, Framing) {
         let framing = Aspect::Wide.framing(3).unwrap();
         let points = slab_corners(&grid(200, 100, 30.0), 800.0);
         let turn: Vec<f32> = (0..360).step_by(5).map(|d| d as f32).collect();
-        (Turntable::new(0.4, points, &framing, &turn), framing)
+        (
+            Turntable::new(0.4, PITCH_DEG, 1.0, points, &framing, &turn),
+            framing,
+        )
     }
 
     /// Where the window shown at `view` sits in the whole-slab view, in its

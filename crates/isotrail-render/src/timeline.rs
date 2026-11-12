@@ -2,7 +2,7 @@ use std::f32::consts::PI;
 
 use isotrail_bundle::{HikeStats, ProfileSample, Route, SceneBundle};
 
-use crate::SunState;
+use crate::{Aim, SunState};
 
 /// Shares of a clip showing the scene alone and the route drawing itself;
 /// the rest holds on the finished hike
@@ -136,6 +136,8 @@ pub struct Motion {
     pub pace: Pace,
     /// Holds this sun through the clip instead of the hike's own
     pub sun: Option<SunState>,
+    /// The view the orbit settles on
+    pub aim: Aim,
 }
 
 /// What one frame of a clip shows

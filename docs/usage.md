@@ -17,6 +17,8 @@ The commands that draw or prepare a hike share their options. They are described
 | --- | --- | --- | --- | --- |
 | `--aspect` ([image](#image)) | several | one | – | one |
 | `--scale` ([image](#image)) | yes | for the poster | – | several |
+| `--size`, `--safe-area` ([image](#image)) | yes | for the poster | – | – |
+| `--pitch`, `--turn`, `--heading`, `--zoom` ([camera](#camera)) | yes | yes | – | – |
 | `--palette` ([look](#terrain-and-look)) | yes | yes | – | several |
 | `--mesher`, `--block-height`, `--background`, `--time`, `--occlusion`, `--soft-shadows`, `--god-rays` ([look](#terrain-and-look)) | yes | yes | – | – |
 | `--exaggeration` ([look](#terrain-and-look)) | yes | yes | yes | yes |
@@ -49,15 +51,30 @@ Without `-o`, the image is a PNG named after the input and written to the curren
 | Option | Default | Description |
 | --- | --- | --- |
 | `-o, --output FILE` | `<input>.png` | Where to write the image: `.png` for a still image, `.gif` or `.mp4` for an [animation](#animation) |
-| `--aspect LIST` | `story` | One or more of `story` (1080 x 1920), `feed` (1080 x 1350), `square` (1080 x 1080) and `wide` (1920 x 1080), separated by commas |
-| `--scale N` | `3` | Output pixels per drawn pixel: `2`, `3`, `5`, `6` or `10`. Lower values give finer detail; higher values give chunkier pixels |
+| `--aspect LIST` | `story` | One or more of `story` (1080 x 1920), `video` (1080 x 1920), `portrait` (1080 x 1440), `feed` (1080 x 1350), `square` (1080 x 1080) and `wide` (1920 x 1080), separated by commas |
+| `--size WxH` | none | Any size instead of an aspect, such as `1200x800`, each side from 16 to 8192 pixels. It can't be typed with `--aspect`, and it replaces an aspect from a config file |
+| `--safe-area T,R,B,L` | the aspect's | Margins the diorama and text keep clear of, in percent of the image: top, right, bottom and left, or one number for all four, each up to 45 |
+| `--scale N` | `3` | Output pixels per drawn pixel, any whole number from `1` to `16` that divides both sides of the image (`2`, `3`, `5`, `6` and `10` divide every aspect). Lower values give finer detail; higher values give chunkier pixels |
 | `--background VALUE` | `sky` | `sky` for a dithered gradient, `transparent` to place the diorama over a photo, or an exact colour such as `#1e2a33` to match a web page |
 
 The scene is drawn at the output size divided by `--scale` (360 x 640 for a story at the default scale), then enlarged without smoothing, so every pixel stays crisp.
 
 <p align="center"><img src="images/wide.png" alt="A wide render, with the title, stats and profile in a column on the left" width="80%"></p>
 
-Stories leave the top 14% and bottom 20% of the image free of text, because Instagram covers those parts with its own interface. In the `wide` format, the title, stats and profile share one column on the left, beside the diorama.
+Each aspect has a safe area that the diorama and text stay inside. Stories leave the top 14% and bottom 20% of the image free, because social apps cover those parts with their own header and reply bar. `video` has the same shape as `story` but keeps the top 14%, the bottom 35% and 6% at each side clear, for short-video feeds that lay a caption and a column of buttons over the picture. `portrait` is a tall 3:4 post. The other aspects, and `--size`, keep 5% clear on every side. `--safe-area` replaces the margins of whichever shape you render.
+
+Images wider than they are tall put the title, stats and profile in one column on the left, beside the diorama; the others put the title at the top and the stats at the bottom. An MP4 needs an even number of pixels on each side, which isotrail checks before it starts.
+
+### Camera
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--pitch DEG` | `30` | How far the camera looks down, from `10` (almost level) to `80` (almost straight down) |
+| `--turn DEG` | `0` | Moves the camera this many degrees anticlockwise round the slab, as seen from above, from `-360` to `360` |
+| `--heading DEG` | along the hike | The compass bearing the camera looks towards, from `0` (north) through `90` (east) to `360`. `--turn` is added to it |
+| `--zoom X` | `1` | The diorama's size, from `0.5` to `2` times the size that fits the safe area. Above `1`, its edges are cut off |
+
+By default the camera looks along the direction of the hike, turned a little so the trail runs up and to the right with its start in front. Animations use the same view: the orbit settles on it, so the last frames match the still.
 
 ### Terrain and look
 
@@ -173,19 +190,21 @@ The animation options only apply to `.gif` and `.mp4` output. PNG renders ignore
 | `--offline` | off | Only use data that is already in the cache |
 | `--overpass-url URL` | public Overpass API | Another [Overpass](https://overpass-api.de/) endpoint for map data (also `ISOTRAIL_OVERPASS_URL`) |
 | `--no-map-data` | off | Build the diorama from the elevation alone, without OpenStreetMap's lakes, woods and paths |
+| `--padding P[,M]` | `15,500` | Ground added round the route on each side: `P` percent of the route's length and width, and at least `M` metres |
+| `--footprint route\|north` | `route` | Which way the slab's sides run: along the route's main direction, or north-south and east-west |
 | `--no-weather` | off | Leave the weather out: don't look it up, or draw the weather a bundle holds, along with its snow and ice |
 | `--season SEASON` | `auto` | The [season](#season) to show: the hike's own, or `spring`, `summer`, `autumn` or `winter` |
 
 `--config FILE` reads settings from a TOML file; see [Configuration](configuration.md).
 
-A scene bundle already holds its terrain and map data, so `--detail`, `--offline`, `--overpass-url` and `--no-map-data` do nothing with one; isotrail warns when you type them for a bundle.
+A scene bundle already holds its terrain and map data, so `--detail`, `--offline`, `--overpass-url`, `--no-map-data`, `--padding` and `--footprint` do nothing with one; isotrail warns when you type them for a bundle.
 
 The public Overpass server is sometimes busy. isotrail then tries again six times over about two minutes, printing a line before each wait. If it still can't get the map data, it stops and suggests trying later, another server with `--overpass-url`, or `--no-map-data`, which makes the diorama from the slope and height of the ground alone: no lakes, woods, fields or paths, and no OpenStreetMap credit. A server that can't be reached at all, such as a mistyped `--overpass-url`, is given up on after a few seconds. Any download that takes longer than 10 seconds prints a line saying it is still waiting.
 
 ## bundle
 
 ```text
-isotrail bundle <hike.gpx> -o <hike.itb> [--debug-dir DIR] [--title TEXT] [--exaggeration X] [--config FILE] [--detail N] [--offline] [--overpass-url URL] [--no-map-data] [--no-weather] [--season SEASON]
+isotrail bundle <hike.gpx> -o <hike.itb> [--debug-dir DIR] [--title TEXT] [--exaggeration X] [--config FILE] [--detail N] [--offline] [--overpass-url URL] [--no-map-data] [--padding P[,M]] [--footprint route|north] [--no-weather] [--season SEASON]
 ```
 
 Downloads the elevation and OpenStreetMap data around the route and works out what covers every grid cell: from the map data where there is some, and from the slope and height of the ground elsewhere. Lakes and reservoirs get a level surface, and the sea lies flat at sea level. The result is saved with the route, its elevation profile, the hike's statistics, the sun's and moon's paths across the sky and the hour-by-hour weather during the hike as a **scene bundle**: one compact file (usually under 100 KB) that holds everything a render needs, with no further downloads.
@@ -260,7 +279,9 @@ The image inside the element shows the poster, at the element's size, on pages w
 | Option | Default | Description |
 | --- | --- | --- |
 | `-o`, `--output DIR` | required | The directory to write to, created if needed |
-| `--aspect SHAPE` | `wide` | `story` (9:16), `feed` (4:5), `square` or `wide` (16:9), for the element and its poster |
+| `--aspect SHAPE` | `wide` | `story` or `video` (9:16), `portrait` (3:4), `feed` (4:5), `square` or `wide` (16:9), for the element and its poster |
+| `--size WxH` | none | The poster's size instead of an aspect; the element takes its shape, as in `aspect="3:2"` for `1200x800` |
+| `--safe-area T,R,B,L` | the aspect's | The poster's margins, as for [`render`](#image) |
 | `--scale N` | `3` | The poster's pixel scale, as for [`render`](#image). The live diorama picks its own to suit the page |
 | `--with-runtime` | off | Also copy the web runtime into `DIR` |
 | `--runtime-dir DIR` | the `web` folder next to `isotrail` | Where to copy the runtime from: a folder with `isotrail-embed.js` and `pkg/` |
@@ -268,13 +289,13 @@ The image inside the element shows the poster, at the element's size, on pages w
 | `--runtime-url URL` | `isotrail-embed.js` in `DIR` | The address of `isotrail-embed.js`, when one copy serves every hike on the site |
 | `--exaggeration X` | automatic | As for [`render`](#terrain-and-look) |
 
-`embed` also takes `render`'s [terrain and look options](#terrain-and-look), [text and overlay options](#text-and-overlays) and [data options](#data), and reads [config files](configuration.md). The poster is drawn with all of them. The look options reach the live diorama too: each one that isn't the default becomes an attribute of the element in the snippet, as in `--palette resurrect-64 --mesher smooth`:
+`embed` also takes `render`'s [terrain and look options](#terrain-and-look), [camera options](#camera), [text and overlay options](#text-and-overlays) and [data options](#data), and reads [config files](configuration.md). The poster is drawn with all of them. The look options reach the live diorama too: each one that isn't the default becomes an attribute of the element in the snippet, as in `--palette resurrect-64 --mesher smooth`:
 
 ```html
 <isotrail-hike src="derwent-edge.itb" poster="derwent-edge.png" aspect="wide" palette="resurrect-64" mesher="smooth" …>
 ```
 
-A palette file is copied into `DIR` and the `palette` attribute points at the copy. With `--time`, the diorama keeps that light while the route plays, as an animation does. `--title` is saved in the bundle, so the live diorama is labelled with it as well as the poster.
+The camera options become the `turn`, `pitch` and `zoom` attributes, which set the view the diorama starts from and returns to when it is reset; a `--heading` is written as the `turn` that faces the same way. With `--zoom` above 1 the diorama starts zoomed in, and below 1 it leaves more room round the slab. A palette file is copied into `DIR` and the `palette` attribute points at the copy. With `--time`, the diorama keeps that light while the route plays, as an animation does. `--title` is saved in the bundle, so the live diorama is labelled with it as well as the poster.
 
 When the input is a bundle that already sits in `DIR` under the name `embed` would give it, as in `isotrail embed site/hike.itb -o site`, it is left as it is and only the poster and snippet are written. If `--title`, `--season`, `--no-weather` or `--exaggeration` would change it, the command stops instead, so the bundle you started from is never replaced; write to another folder.
 
@@ -327,7 +348,7 @@ With `--json`, the bundle's hourly samples are under `weather.samples`, with key
 ## style-lab
 
 ```text
-isotrail style-lab <hike.gpx | hike.itb> -o DIR [--aspect SHAPE] [--scale LIST] [--palette LIST] [--exaggeration X] [--config FILE] [--detail N] [--offline] [--overpass-url URL] [--no-map-data] [--no-weather] [--season SEASON]
+isotrail style-lab <hike.gpx | hike.itb> -o DIR [--aspect SHAPE] [--scale LIST] [--palette LIST] [--exaggeration X] [--config FILE] [--detail N] [--offline] [--overpass-url URL] [--no-map-data] [--padding P[,M]] [--footprint route|north] [--no-weather] [--season SEASON]
 ```
 
 Renders the hike once for every combination of mesher (`voxel`, `smooth`), pixel scale and palette, as `DIR/<mesher>-<scale>-<palette>.png`. It also writes `DIR/contact-sheet.png`, which lays them all out side by side with a label above each, so you can compare looks before choosing your `render` options.
@@ -335,8 +356,8 @@ Renders the hike once for every combination of mesher (`voxel`, `smooth`), pixel
 | Option | Default | Description |
 | --- | --- | --- |
 | `-o`, `--output DIR` | required | The directory to write to, created if needed |
-| `--aspect SHAPE` | `story` | `story`, `feed`, `square` or `wide`, for every image |
-| `--scale LIST` | `3,5,6` | The pixel scales to compare, from `2`, `3`, `5`, `6` and `10` |
+| `--aspect SHAPE` | `story` | `story`, `video`, `portrait`, `feed`, `square` or `wide`, for every image |
+| `--scale LIST` | `3,5,6` | The pixel scales to compare, each from `1` to `16` and dividing both sides of the image |
 | `--palette LIST` | every built-in palette | The palettes to compare: built-in names, `.hex` files or `none`. A file is labelled with its name without `.hex` |
 | `--exaggeration X` | automatic | As for [`render`](#terrain-and-look) |
 

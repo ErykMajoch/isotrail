@@ -1,6 +1,6 @@
 use clap::{Args, ValueEnum};
 use isotrail_export::MAX_GIF_FPS;
-use isotrail_render::{DEFAULT_FPS, DEFAULT_ORBIT_DEG, Motion, Orbit, Pace, Timeline};
+use isotrail_render::{Aim, DEFAULT_FPS, DEFAULT_ORBIT_DEG, Motion, Orbit, Pace, Timeline};
 
 use crate::usage;
 
@@ -73,6 +73,7 @@ impl AnimationArgs {
                 PaceArg::Time => Pace::Time,
             },
             sun: None,
+            aim: Aim::default(),
         })
     }
 }

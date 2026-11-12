@@ -1,8 +1,9 @@
 use chrono::{NaiveDate, NaiveTime};
 use isotrail_bundle::SceneBundle;
 use isotrail_render::{
-    BLOCK_HEIGHT_RANGE, Background, GodRays, Look, Mesher, MesherKind, OCCLUSION_RANGE, Palette,
-    SOFT_SHADOWS_RANGE, SunState, VoxelMesher, parse_within,
+    Aim, BLOCK_HEIGHT_RANGE, Background, GodRays, Look, MAX_ZOOM, Mesher, MesherKind,
+    OCCLUSION_RANGE, PITCH_RANGE, Palette, SOFT_SHADOWS_RANGE, SunState, TURN_RANGE, View,
+    VoxelMesher, ZOOM_RANGE, parse_within,
 };
 use js_sys::{Array, Function, Object, Reflect};
 use wasm_bindgen::{JsCast, JsValue};
@@ -15,6 +16,8 @@ pub struct Options {
     block_height: f32,
     /// The sun held at `time`, through playback and scrubbing
     pub held_sun: Option<SunState>,
+    /// The starting view's turn, pitch and zoom
+    aim: Aim,
 }
 
 impl Options {
@@ -43,7 +46,37 @@ impl Options {
             })
             .unwrap_or(VoxelMesher::default().block_height),
             held_sun: read(options, "time", |text| sun_at(bundle, text)),
+            aim: Aim {
+                turn_deg: read(options, "turn", |text| parse_within(text, &TURN_RANGE))
+                    .unwrap_or(0.0),
+                pitch_deg: read(options, "pitch", |text| parse_within(text, &PITCH_RANGE))
+                    .unwrap_or(Aim::default().pitch_deg),
+                zoom: read(options, "zoom", |text| parse_within(text, &ZOOM_RANGE)).unwrap_or(1.0),
+                ..Aim::default()
+            },
         }
+    }
+
+    /// The view the diorama is fitted for: zoom below 1 leaves more room
+    /// round the slab, while zoom above it starts the view magnified
+    pub fn fitted_aim(&self) -> Aim {
+        Aim {
+            zoom: self.aim.zoom.min(1.0),
+            ..self.aim
+        }
+    }
+
+    /// Where the view starts, and returns to on reset
+    pub fn start_view(&self) -> View {
+        View {
+            zoom: self.aim.zoom.clamp(1.0, MAX_ZOOM),
+            ..View::default()
+        }
+    }
+
+    /// Whether the diorama must be fitted again to go from `self` to `other`
+    pub fn refits(&self, other: &Options) -> bool {
+        self.aim != other.aim
     }
 
     pub fn mesher(&self) -> Box<dyn Mesher> {

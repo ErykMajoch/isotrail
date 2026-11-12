@@ -7,6 +7,10 @@ use crate::{Background, GodRays, Mesher, SmoothMesher, VoxelMesher};
 pub const OCCLUSION_RANGE: RangeInclusive<f32> = 0.0..=1.0;
 pub const SOFT_SHADOWS_RANGE: RangeInclusive<f32> = 0.0..=4.0;
 pub const BLOCK_HEIGHT_RANGE: RangeInclusive<f32> = 0.25..=4.0;
+pub const PITCH_RANGE: RangeInclusive<f32> = 10.0..=80.0;
+pub const TURN_RANGE: RangeInclusive<f32> = -360.0..=360.0;
+pub const HEADING_RANGE: RangeInclusive<f32> = 0.0..=360.0;
+pub const ZOOM_RANGE: RangeInclusive<f32> = 0.5..=2.0;
 
 /// A number within `range`, or why not
 pub fn parse_within(value: &str, range: &RangeInclusive<f32>) -> Result<f32, String> {

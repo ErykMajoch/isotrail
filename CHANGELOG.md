@@ -4,6 +4,18 @@ All notable changes to `isotrail` are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **Any size, and two new shapes for social media.** `--aspect video` is 9:16 with the top 14%, bottom 35% and 6% at each side kept clear of the caption and buttons laid over short videos; `--aspect portrait` is a tall 3:4 post (1080 × 1440). `--size WxH` renders any size instead, and `--safe-area TOP,RIGHT,BOTTOM,LEFT` sets the margins the diorama and text keep clear of.
+- `--scale` takes any whole number from 1 to 16 that divides both sides of the image.
+- **The camera can move.** `--pitch` tilts it from almost level to almost straight down, `--turn` turns the view round the slab, `--heading` points it at a compass bearing, and `--zoom` draws the diorama smaller or larger than the size that fits. Animations settle on the same view.
+- `--padding PERCENT[,METRES]` sets how much ground surrounds the route, and `--footprint north` cuts the slab north-south and east-west instead of along the route.
+- `embed` takes all of these for its poster, and the web embed gets `turn`, `pitch` and `zoom` attributes for the view it starts from and resets to, and takes `aspect="video"`, `"portrait"` or a ratio such as `"3:2"`.
+
+### Changed
+
+- A `--scale` that doesn't divide the image size is refused before any download, with exit code 2.
+
 ## [1.3.1] - 2026-11-11
 
 Sturdier everywhere: safe outputs, forgiving GPX reading, patient map downloads, the sea on coastal hikes, and a web embed that credits its data and takes the look of your choice.

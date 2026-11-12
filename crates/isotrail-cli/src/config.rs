@@ -22,11 +22,13 @@ const RENDER: &str = "render";
 const COMMANDS: [&str; 4] = [RENDER, "embed", "bundle", "style-lab"];
 /// What style-lab takes from [render]: the data settings, not the looks it
 /// lays side by side
-const STYLE_LAB_FROM_RENDER: [&str; 7] = [
+const STYLE_LAB_FROM_RENDER: [&str; 9] = [
     "detail",
     "offline",
     "overpass-url",
     "no-map-data",
+    "padding",
+    "footprint",
     "no-weather",
     "season",
     "exaggeration",
@@ -438,9 +440,12 @@ mod tests {
             let message = error(&format!("[render]\n{key} = \"x\"\n"));
             assert!(message.contains("unknown setting"), "{message}");
         }
-        let message = error("[render]\nscale = 4\n");
+        let message = error("[render]\nscale = 17\n");
         assert!(message.starts_with("scale in "), "{message}");
-        assert!(message.contains("must be 2, 3, 5, 6 or 10"), "{message}");
+        assert!(
+            message.contains("must be a whole number from 1 to 16"),
+            "{message}"
+        );
         let message = error("[render]\noffline = \"yes\"\n");
         assert!(message.contains("expected true or false"), "{message}");
         let message = error("palette = \"apollo\"\n");
@@ -709,12 +714,15 @@ aspect = [\"story\", \"wide\"]
     #[test]
     fn bad_values_for_other_commands_name_their_file() {
         let dir = tempfile::tempdir().unwrap();
-        let user = write(dir.path(), "user.toml", "[embed]\nscale = 4\n");
+        let user = write(dir.path(), "user.toml", "[embed]\nscale = 17\n");
         let message = format!(
             "{:#}",
             with_config(args("isotrail embed hike.gpx -o site"), found(user)).unwrap_err()
         );
         assert!(message.starts_with("scale in "), "{message}");
-        assert!(message.contains("must be 2, 3, 5, 6 or 10"), "{message}");
+        assert!(
+            message.contains("must be a whole number from 1 to 16"),
+            "{message}"
+        );
     }
 }

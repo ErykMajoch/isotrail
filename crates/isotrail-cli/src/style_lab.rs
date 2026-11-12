@@ -4,16 +4,16 @@ use anyhow::Context;
 use clap::Args;
 use isotrail_export::{encode_png, render_still, upscale};
 use isotrail_render::{
-    Aspect, DEFAULT_YAW_OFFSET_DEG, Frame, Gpu, Look, Mesher, Palette, SmoothMesher, SunState,
-    VoxelMesher,
+    Aim, Aspect, Frame, Gpu, Look, Mesher, Palette, SmoothMesher, SunState, VoxelMesher,
 };
 use tracing::info;
 
 use crate::bundle::DataArgs;
 use crate::config::Typed;
+use crate::frame::{AspectArg, parse_scale};
 use crate::look::{palette_file, read_palette};
 use crate::output;
-use crate::render::{AspectArg, Source, parse_scale};
+use crate::render::Source;
 use crate::usage;
 
 const SCALES: [u32; 3] = [3, 5, 6];
@@ -35,11 +35,13 @@ pub struct StyleLabArgs {
     #[arg(short, long, value_name = "DIR")]
     output: PathBuf,
 
-    /// Shape of the images: story (9:16), feed (4:5), square or wide (16:9)
+    /// Shape of the images: story or video (9:16), portrait (3:4), feed
+    /// (4:5), square or wide (16:9)
     #[arg(long, value_enum, default_value_t = AspectArg::Story)]
     aspect: AspectArg,
 
-    /// Pixel scales to compare, from 2, 3, 5, 6 and 10
+    /// Pixel scales to compare, each from 1 to 16 and dividing both sides of
+    /// the image
     #[arg(
         long,
         value_delimiter = ',',
@@ -101,9 +103,17 @@ impl StyleLabArgs {
     }
 
     fn scales(&self) -> anyhow::Result<Vec<u32>> {
-        for (i, scale) in self.scale.iter().enumerate() {
-            if self.scale[..i].contains(scale) {
+        let aspect = Aspect::from(self.aspect);
+        for (i, &scale) in self.scale.iter().enumerate() {
+            if self.scale[..i].contains(&scale) {
                 return Err(usage(format!("--scale lists {scale} twice")));
+            }
+            if aspect.framing(scale).is_none() {
+                let (width, height) = aspect.output_size();
+                return Err(usage(format!(
+                    "--scale {scale} doesn't divide the {width} × {height} image ({}); use                      scales that divide both sides",
+                    aspect.name()
+                )));
             }
         }
         Ok(self.scale.clone())
@@ -183,7 +193,7 @@ pub fn run(args: &StyleLabArgs, typed: &Typed) -> anyhow::Result<()> {
                     &bundle,
                     mesher.as_ref(),
                     &framing,
-                    DEFAULT_YAW_OFFSET_DEG,
+                    &Aim::default(),
                     &sun,
                     look,
                 )?;

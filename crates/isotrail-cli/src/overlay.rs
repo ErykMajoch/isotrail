@@ -1,7 +1,7 @@
 use clap::{Args, ValueEnum};
 use isotrail_bundle::{HikeStats, SceneBundle, WEATHER_ATTRIBUTION};
 use isotrail_render::{
-    Aspect, DateFormat, FitStep, Fitted, Framing, OverlayStyle, OverlayText, Overlays, PanelStyle,
+    DateFormat, FitStep, Fitted, Framing, OverlayStyle, OverlayText, Overlays, PanelStyle,
     PixelFont, Stat, StatKind, Subtitle, TitleSize,
 };
 use tracing::warn;
@@ -230,16 +230,16 @@ impl OverlayArgs {
     pub fn fit(
         &self,
         text: &OverlayText,
-        aspect: Aspect,
+        shape: &str,
         framing: &Framing,
         scale: u32,
     ) -> anyhow::Result<Fitted> {
-        let frame = format!("the {} frame at --scale {scale}", aspect.name());
+        let frame = format!("the {shape} frame at --scale {scale}");
         let fit = Overlays::fit(text, &self.style(), framing).map_err(|_| {
             usage(format!(
                 "the overlays don't fit {frame}, even with a small title, no subtitle, \
-                 no profile, no credit and one stat; use a lower --scale, fewer --stats, \
-                 or fewer --overlay parts"
+                 no profile, no credit and one stat; use a lower --scale, a larger --size or \
+                 smaller --safe-area, fewer --stats, or fewer --overlay parts"
             ))
         })?;
         if !fit.steps.is_empty() {
@@ -325,6 +325,8 @@ mod tests {
     use clap::Parser;
     use isotrail_bundle::ProfileSample;
     use isotrail_testkit::{diorama_bundle, synthetic_weather};
+
+    use isotrail_render::Aspect;
 
     use super::*;
 
@@ -412,8 +414,9 @@ mod tests {
         bundle.meta.stats.min_ele_m = Some(300.0);
         let text = args.text(&bundle).unwrap();
         assert_eq!(text.short_date.as_deref(), Some("14 Jun 2025"));
-        let fit =
-            |aspect: Aspect, scale| args.fit(&text, aspect, &aspect.framing(scale).unwrap(), scale);
+        let fit = |aspect: Aspect, scale| {
+            args.fit(&text, aspect.name(), &aspect.framing(scale).unwrap(), scale)
+        };
         assert_eq!(fit(Aspect::Story, 3).unwrap().steps, []);
         let coarse = fit(Aspect::Story, 10).unwrap();
         assert!(coarse.credit_dropped());
@@ -425,7 +428,7 @@ mod tests {
         let mut long = text.clone();
         long.stats[0] = Stat::new("123456789012345 km", "distance");
         let framing = Aspect::Square.framing(10).unwrap();
-        let refused = args.fit(&long, Aspect::Square, &framing, 10).unwrap_err();
+        let refused = args.fit(&long, "square", &framing, 10).unwrap_err();
         assert!(refused.is::<crate::UsageError>());
         let message = refused.to_string();
         assert!(

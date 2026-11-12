@@ -163,6 +163,17 @@ Object.assign(pages, {
     // Whole-pixel places, so equal frames give equal screenshots
     { head: '<style>.grid{grid-template-columns:repeat(3,288px)}</style>' },
   ),
+  '/view.html': page(
+    grid([
+      embed('id="d" src="/data/hike.itb" aspect="wide"'),
+      embed('id="v" src="/data/hike.itb" aspect="wide" turn="-45" pitch="55" zoom="1.5"'),
+      embed('id="f" src="/data/hike.itb" aspect="wide" zoom="0.6"'),
+      embed('id="b" src="/data/hike.itb" aspect="wide" pitch="5" zoom="big"'),
+      embed('id="r" src="/data/hike.itb" aspect="3:2"'),
+      embed('id="q" src="/data/hike.itb" aspect="portrait"'),
+    ]),
+    { head: '<style>.grid{grid-template-columns:repeat(3,288px)}</style>' },
+  ),
   '/many.html': page(
     Array.from({ length: 20 }, (_, i) =>
       `<isotrail-hike id="m${i}" src="/data/hike.itb" aspect="wide" backend="webgl"></isotrail-hike><p>gap</p>`,
@@ -381,6 +392,44 @@ try {
   await sleep(1000);
   check('changing the mesher builds the terrain again', (await shot('d')) !== paletteShot && (await stateOf('d')) === 'ready');
   check('no uncaught errors on the look page', cdp.exceptions.length === 0, cdp.exceptions.join(' | '));
+
+  // The starting view: turn, pitch and zoom attributes, bad values, reset,
+  // and the new aspects
+  await go('/view.html');
+  const viewed = await cdp.waitFor(`['d', 'v', 'f', 'b', 'r', 'q'].every((id) => document.getElementById(id).dataset.state === 'ready')`);
+  check('six view embeds become ready', viewed);
+  await sleep(300);
+  const defaultShot = await shot('d');
+  const viewShot = await shot('v');
+  check('turn, pitch and zoom change the starting view', viewShot !== defaultShot);
+  check('zoom below 1 leaves more room round the slab', (await shot('f')) !== defaultShot);
+  check('bad view values draw the default view', (await shot('b')) === defaultShot);
+  const viewWarnings = await cdp.evaluate('__warnings');
+  check(
+    'and each warns on the console',
+    ['pitch "5"', 'zoom "big"'].every((part) => viewWarnings.some((w) => w.includes(part))),
+    viewWarnings.join(' | '),
+  );
+  const zoomOutDisabled = (id) => cdp.evaluate(`${el(id)}.shadowRoot.querySelector('[part=zoom-out]').getAttribute('aria-disabled')`);
+  check('zoom="1.5" starts zoomed in', (await zoomOutDisabled('v')) === 'false' && (await zoomOutDisabled('d')) === 'true');
+  await cdp.evaluate(`${el('v')}.shadowRoot.querySelector('[part=zoom-in]').click()`);
+  await sleep(300);
+  check('zooming in moves away from the starting view', (await shot('v')) !== viewShot);
+  await cdp.evaluate(`${el('v')}.shadowRoot.querySelector('[part=reset]').click()`);
+  let back = false;
+  for (let i = 0; i < 30 && !back; i++) {
+    await sleep(100);
+    back = (await shot('v')) === viewShot;
+  }
+  check('reset returns to the starting view', back);
+  await cdp.evaluate(`${el('d')}.setAttribute('pitch', '55')`);
+  await sleep(1000);
+  check('changing the pitch attribute redraws the view', (await shot('d')) !== defaultShot && (await stateOf('d')) === 'ready');
+  // The grid stretches a row to its tallest element, so read the ratio set
+  const ratio = (id) => cdp.evaluate(`${el(id)}.style.getPropertyValue('--isotrail-aspect')`);
+  check('aspect="3:2" sets that ratio', (await ratio('r')) === '3 / 2', await ratio('r'));
+  check('aspect="portrait" is 3:4', (await ratio('q')) === '3 / 4', await ratio('q'));
+  check('no uncaught errors on the view page', cdp.exceptions.length === 0, cdp.exceptions.join(' | '));
 
   // The snippet's poster, with and without the script
   await go('/noscript.html');

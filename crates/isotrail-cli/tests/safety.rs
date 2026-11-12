@@ -225,9 +225,19 @@ fn data_flags_typed_for_a_bundle_are_warned_about() {
         args.extend_from_slice(extra);
         isotrail(temp.path(), &args)
     };
-    let run = render(&["--detail", "64", "--offline"]);
+    let run = render(&[
+        "--detail",
+        "64",
+        "--offline",
+        "--padding",
+        "10",
+        "--footprint",
+        "north",
+    ]);
     assert_ok(&run);
     let warnings = stderr(&run);
+    assert!(warnings.contains("--padding does nothing"), "{warnings}");
+    assert!(warnings.contains("--footprint does nothing"), "{warnings}");
     assert!(
         warnings.contains("--detail does nothing with a scene bundle"),
         "{warnings}"

@@ -1,9 +1,11 @@
+use std::f64::consts::FRAC_PI_2;
 use std::ffi::OsString;
 use std::fs::{self, File};
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+use isotrail_bundle::SceneBundle;
 use isotrail_geo::{
     Cache, CachedFetcher, Fetcher, Footprint, Grid, OPEN_METEO_ARCHIVE_URL, OVERPASS_URL,
     OpenMeteoSource, OverpassSource, RecordedFetcher, TerrariumSource, TileId, WeatherRequest,
@@ -522,12 +524,19 @@ fn every_aspect_gets_its_own_image() {
     let output = isotrail(
         &temp.path().join("cache"),
         temp.path(),
-        &["render", "hike.itb", "--aspect", "story,feed,square,wide"],
+        &[
+            "render",
+            "hike.itb",
+            "--aspect",
+            "story,video,portrait,feed,square,wide",
+        ],
     );
     assert!(output.status.success(), "{}", text(&output.stderr));
     let stdout = text(&output.stdout);
     for (aspect, size, internal) in [
         ("story", (1080, 1920), "360 × 640"),
+        ("video", (1080, 1920), "360 × 640"),
+        ("portrait", (1080, 1440), "360 × 480"),
         ("feed", (1080, 1350), "360 × 450"),
         ("square", (1080, 1080), "360 × 360"),
         ("wide", (1920, 1080), "640 × 360"),
@@ -553,7 +562,7 @@ fn every_aspect_gets_its_own_image() {
 }
 
 #[test]
-fn the_scale_must_divide_every_size() {
+fn the_scale_must_divide_both_sides() {
     let temp = with_hike();
     let cache = temp.path().join("cache");
     let output = isotrail(&cache, temp.path(), &["render", "hike.itb", "--scale", "5"]);
@@ -563,9 +572,212 @@ fn the_scale_must_divide_every_size() {
 "
     ));
     let output = isotrail(&cache, temp.path(), &["render", "hike.itb", "--scale", "4"]);
-    assert!(!output.status.success());
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert!(text(&output.stdout).starts_with("Rendered 1080 × 1920 from 270 × 480 pixels\n"));
+    let output = isotrail(&cache, temp.path(), &["render", "hike.itb", "--scale", "7"]);
+    assert_eq!(output.status.code(), Some(2));
     let stderr = text(&output.stderr);
-    assert!(stderr.contains("must be 2, 3, 5, 6 or 10"), "{stderr}");
+    assert!(
+        stderr.contains("--scale 7 doesn't divide the 1080 × 1920 image (story)"),
+        "{stderr}"
+    );
+    let output = isotrail(
+        &cache,
+        temp.path(),
+        &["render", "hike.itb", "--scale", "17"],
+    );
+    let stderr = text(&output.stderr);
+    assert!(
+        stderr.contains("must be a whole number from 1 to 16"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn any_size_renders_with_its_own_safe_area() {
+    let temp = with_hike();
+    let cache = temp.path().join("cache");
+    let output = isotrail(
+        &cache,
+        temp.path(),
+        &[
+            "render", "hike.itb", "--size", "1000x700", "--scale", "3", "-o", "a.png",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2), "{}", text(&output.stderr));
+    assert!(text(&output.stderr).contains("--scale 3 doesn't divide the 1000 × 700 image"));
+
+    let output = isotrail(
+        &cache,
+        temp.path(),
+        &[
+            "render", "hike.itb", "--size", "1000x700", "--scale", "5", "-o", "a.png",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert!(text(&output.stdout).starts_with("Rendered 1000 × 700 from 200 × 140 pixels\n"));
+    assert_eq!(png_size(&temp.path().join("a.png")), (1000, 700));
+
+    let output = isotrail(
+        &cache,
+        temp.path(),
+        &[
+            "render",
+            "hike.itb",
+            "--size",
+            "1000x700",
+            "--scale",
+            "5",
+            "--safe-area",
+            "10,30,10,5",
+            "-o",
+            "b.png",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert_ne!(
+        fs::read(temp.path().join("a.png")).unwrap(),
+        fs::read(temp.path().join("b.png")).unwrap()
+    );
+
+    // A size and an aspect can't both be typed, but a typed size beats a
+    // configured aspect
+    let output = isotrail(
+        &cache,
+        temp.path(),
+        &[
+            "render", "hike.itb", "--size", "600x400", "--aspect", "wide",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(text(&output.stderr).contains("cannot be used with"));
+    fs::write(
+        temp.path().join("user-config.toml"),
+        "[render]\naspect = [\"story\", \"wide\"]\nsafe-area = [10, 5, 10, 5]\n",
+    )
+    .unwrap();
+    let output = isotrail(
+        &cache,
+        temp.path(),
+        &[
+            "render", "hike.itb", "--size", "600x400", "--scale", "2", "-o", "c.png",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert_eq!(png_size(&temp.path().join("c.png")), (600, 400));
+
+    // An MP4 needs even sides, checked before any work
+    let output = isotrail(
+        &cache,
+        temp.path(),
+        &[
+            "render", "hike.itb", "--size", "601x400", "--scale", "1", "-o", "d.mp4",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(text(&output.stderr).contains("an even number of pixels"));
+}
+
+#[test]
+fn the_camera_can_turn_tilt_and_zoom() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("hill.itb"),
+        diorama_bundle().to_bytes().unwrap(),
+    )
+    .unwrap();
+    let cache = temp.path().join("cache");
+    let render = |image: &str, extra: &[&str]| {
+        let mut args = vec!["render", "hill.itb", "--scale", "6", "-o", image];
+        args.extend_from_slice(extra);
+        isotrail(&cache, temp.path(), &args)
+    };
+    let mut images = Vec::new();
+    for (image, extra) in [
+        ("plain.png", &[][..]),
+        ("steep.png", &["--pitch", "60"][..]),
+        ("turned.png", &["--turn", "-90"][..]),
+        ("north.png", &["--heading", "0"][..]),
+        ("close.png", &["--zoom", "1.5"][..]),
+    ] {
+        let output = render(image, extra);
+        assert!(output.status.success(), "{image}: {}", text(&output.stderr));
+        images.push(fs::read(temp.path().join(image)).unwrap());
+    }
+    for (i, a) in images.iter().enumerate() {
+        for b in &images[i + 1..] {
+            assert_ne!(a, b);
+        }
+    }
+
+    // The defaults spelled out change nothing
+    let output = render("same.png", &["--pitch", "30", "--turn", "0", "--zoom", "1"]);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert_eq!(fs::read(temp.path().join("same.png")).unwrap(), images[0]);
+
+    // From a config file too
+    fs::write(
+        temp.path().join("user-config.toml"),
+        "[render]\npitch = 60\n",
+    )
+    .unwrap();
+    let output = render("steep-config.png", &[]);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert_eq!(
+        fs::read(temp.path().join("steep-config.png")).unwrap(),
+        images[1]
+    );
+
+    for (flag, value, reason) in [
+        ("--pitch", "85", "between 10 and 80"),
+        ("--turn", "400", "between -360 and 360"),
+        ("--heading", "400", "between 0 and 360"),
+        ("--zoom", "3", "between 0.5 and 2"),
+    ] {
+        let output = render("bad.png", &[flag, value]);
+        assert_eq!(output.status.code(), Some(2), "{flag} {value}");
+        let stderr = text(&output.stderr);
+        assert!(stderr.contains(reason), "{stderr}");
+    }
+}
+
+#[test]
+fn the_slab_can_be_padded_and_turned_north() {
+    let temp = tempfile::tempdir().unwrap();
+    let cache_dir = temp.path().join("cache");
+    warm(&cache_dir);
+    let gpx = fixtures().join("gpx/snowdon.gpx");
+    let bundle = |name: &str, extra: &[&str]| {
+        let mut args = vec![
+            "bundle",
+            gpx.to_str().unwrap(),
+            "-o",
+            name,
+            "--detail",
+            "32",
+            "--offline",
+            "--no-map-data",
+            "--no-weather",
+        ];
+        args.extend_from_slice(extra);
+        let output = isotrail(&cache_dir, temp.path(), &args);
+        assert!(output.status.success(), "{name}: {}", text(&output.stderr));
+        SceneBundle::from_bytes(&fs::read(temp.path().join(name)).unwrap()).unwrap()
+    };
+    let plain = bundle("plain.itb", &[]);
+    let north = bundle("north.itb", &["--footprint", "north"]);
+    assert_ne!(plain.grid.rotation_rad, 0.0);
+    assert!(
+        north.grid.rotation_rad.abs() < 1e-9 || (north.grid.rotation_rad - FRAC_PI_2).abs() < 1e-9
+    );
+    let tight = bundle("tight.itb", &["--padding", "5,200"]);
+    let length = |b: &SceneBundle| b.grid.cols as f64 * b.grid.cell_size_m;
+    assert!(
+        length(&tight) < length(&plain),
+        "{} {}",
+        length(&tight),
+        length(&plain)
+    );
 }
 
 #[test]

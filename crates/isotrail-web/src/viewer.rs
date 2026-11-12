@@ -5,7 +5,7 @@ use glam::Vec2;
 use isotrail_bundle::{BundleError, SceneBundle};
 use isotrail_render::{
     Diorama, Framing, Gpu, Insets, OffscreenTarget, Pace, PixelGrid, Present, SunState,
-    TerrainMesh, TerrainRenderer, View, Walk, credit_line, mesh_within,
+    TerrainMesh, TerrainRenderer, View, Viewpoints, Walk, credit_line, mesh_within,
 };
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
@@ -128,6 +128,7 @@ impl Viewer {
         let sun = options
             .held_sun
             .unwrap_or_else(|| SunState::for_hike(&bundle));
+        let view = options.start_view();
         Ok(Viewer {
             gpu,
             surface,
@@ -139,7 +140,7 @@ impl Viewer {
             options,
             stage: None,
             walk,
-            view: View::default(),
+            view,
             progress: 1.0,
             share: None,
             sun,
@@ -197,12 +198,15 @@ impl Viewer {
         self.build_stage(grid)
     }
 
-    /// Changes the look: an object with any of `palette` (a built-in
+    /// Changes the look and the starting view: an object with any of
+    /// `palette` (a built-in
     /// palette's name, `"none"`, or the text of a Lospec .hex file), `mesher`
     /// (`"voxel"` or `"smooth"`), `blockHeight`, `occlusion`, `softShadows`,
     /// `godRays` (`"auto"`, `"on"` or `"off"`), `background` (`"sky"`,
     /// `"transparent"` or `"#rrggbb"`) and `time` (`"HH:MM"`, local to the
-    /// hike, which then holds the sun through playback). Values may be
+    /// hike, which then holds the sun through playback), and `turn`
+    /// (degrees, -360 to 360), `pitch` (degrees, 10 to 80) and `zoom` (0.5
+    /// to 2) for the view it starts from and resets to. Values may be
     /// strings or numbers; one it can't use stays at its default with a
     /// console warning. Fails with reason `"gpu"` when the GPU can't hold
     /// the terrain the new options build
@@ -210,6 +214,7 @@ impl Viewer {
     pub fn set_options(&mut self, options: JsValue) -> Result<(), JsValue> {
         let options = Options::read(&options, &self.bundle);
         let remesh = self.options.remeshes(&options);
+        let refit = self.options.refits(&options);
         self.options = options;
         if remesh {
             self.mesh = mesh_within(
@@ -218,9 +223,14 @@ impl Viewer {
                 self.gpu.max_buffer_size(),
             )
             .map_err(|err| failure("gpu", err))?;
-            if let Some(grid) = self.stage.take().map(|stage| stage.grid) {
-                self.build_stage(grid)?;
-            }
+        }
+        if refit {
+            self.view = self.options.start_view();
+        }
+        if (remesh || refit)
+            && let Some(grid) = self.stage.take().map(|stage| stage.grid)
+        {
+            self.build_stage(grid)?;
         }
         self.light();
         Ok(())
@@ -241,7 +251,10 @@ impl Viewer {
             &self.bundle,
             self.mesh.clone(),
             &framing,
-            &turn,
+            &Viewpoints {
+                aim: self.options.fitted_aim(),
+                yaw_offsets_deg: &turn,
+            },
             self.sun,
         )
         .map_err(|err| failure("gpu", err))?;
@@ -323,10 +336,13 @@ impl Viewer {
         }
     }
 
-    /// Back to the whole slab from the still's heading
+    /// Back to the starting view
     #[wasm_bindgen(js_name = resetView)]
     pub fn reset_view(&mut self) {
-        self.view = View::default();
+        self.view = self.options.start_view();
+        if let Some(stage) = &self.stage {
+            self.view = stage.diorama.turntable().clamp(self.view);
+        }
     }
 
     /// Draws a frame into the canvas

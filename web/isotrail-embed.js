@@ -6,8 +6,16 @@ const QUERY = new URL(import.meta.url).search;
 const RUNTIME = new URL(`./pkg/isotrail_web.js${QUERY}`, import.meta.url);
 const WASM = new URL(`./pkg/isotrail_web_bg.wasm${QUERY}`, import.meta.url);
 
-const ASPECTS = { story: '9 / 16', feed: '4 / 5', square: '1 / 1', wide: '16 / 9' };
-// The look attributes, by the name the renderer takes them under
+const ASPECTS = {
+  story: '9 / 16',
+  video: '9 / 16',
+  portrait: '3 / 4',
+  feed: '4 / 5',
+  square: '1 / 1',
+  wide: '16 / 9',
+};
+// The look and starting-view attributes, by the name the renderer takes
+// them under
 const LOOK = {
   palette: 'palette',
   mesher: 'mesher',
@@ -17,6 +25,9 @@ const LOOK = {
   'god-rays': 'godRays',
   background: 'background',
   time: 'time',
+  turn: 'turn',
+  pitch: 'pitch',
+  zoom: 'zoom',
 };
 const INTRO_S = 0.5;
 const DRAW_S = 8;
@@ -79,6 +90,13 @@ function hasGpu() {
 
 function reducedMotion() {
   return matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+// A preset's name, or a width and height such as 3:2
+function aspectRatio(value) {
+  const ratio = /^\s*(\d+)\s*:\s*(\d+)\s*$/.exec(value ?? '');
+  if (ratio && Number(ratio[1]) > 0 && Number(ratio[2]) > 0) return `${ratio[1]} / ${ratio[2]}`;
+  return ASPECTS[value] ?? ASPECTS.wide;
 }
 
 // Slow at both ends, as the animation's camera settles
@@ -428,7 +446,7 @@ class IsotrailHike extends HTMLElement {
 
   attributeChangedCallback(name, _old, value) {
     if (name === 'aspect') {
-      const ratio = ASPECTS[value] ?? ASPECTS.wide;
+      const ratio = aspectRatio(value);
       this.style.setProperty('--isotrail-aspect', ratio);
       // The snippet sizes the element before the script runs; keep it in step
       if (this.style.aspectRatio) this.style.aspectRatio = ratio;
@@ -565,6 +583,7 @@ class IsotrailHike extends HTMLElement {
     const look = await this.#look();
     if (this.#viewer !== viewer || change !== this.#lookChanges) return;
     this.#guard(() => viewer.setOptions(look));
+    this.#syncZoom();
     this.#schedule();
   }
 

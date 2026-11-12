@@ -20,8 +20,45 @@ pub struct Footprint {
     pub width_m: f64,
 }
 
+/// Which way the slab's sides run
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Orientation {
+    /// Along the route's main direction
+    #[default]
+    Route,
+    /// North-south and east-west
+    North,
+}
+
+/// How the slab is cut around the route
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FootprintOptions {
+    /// Share of the route's extent added on each side, per axis
+    pub padding_fraction: f64,
+    /// Least padding on each side
+    pub min_padding_m: f64,
+    pub orientation: Orientation,
+}
+
+impl Default for FootprintOptions {
+    fn default() -> Self {
+        FootprintOptions {
+            padding_fraction: PADDING_FRACTION,
+            min_padding_m: MIN_PADDING_M,
+            orientation: Orientation::Route,
+        }
+    }
+}
+
 impl Footprint {
     pub fn from_track(track: &Track) -> Result<Footprint, GeoError> {
+        Footprint::from_track_with(track, &FootprintOptions::default())
+    }
+
+    pub fn from_track_with(
+        track: &Track,
+        options: &FootprintOptions,
+    ) -> Result<Footprint, GeoError> {
         let first = track.points().next().ok_or(GeoError::EmptyTrack)?;
         let provisional = LocalProjection::new(first.lat, first.lon);
         let (min, max) = bounds(track.points().map(|p| provisional.project(p.lat, p.lon)));
@@ -38,7 +75,10 @@ impl Footprint {
                     .collect()
             })
             .collect();
-        let angle = principal_angle(&segments);
+        let angle = match options.orientation {
+            Orientation::Route => principal_angle(&segments),
+            Orientation::North => 0.0,
+        };
         let (cos, sin) = (angle.cos(), angle.sin());
         let (min, max) = bounds(
             segments
@@ -49,7 +89,9 @@ impl Footprint {
         let (mid_u, mid_v) = ((min.0 + max.0) / 2.0, (min.1 + max.1) / 2.0);
         let center = (mid_u * cos - mid_v * sin, mid_u * sin + mid_v * cos);
 
-        let pad = |extent: f64| extent + 2.0 * (PADDING_FRACTION * extent).max(MIN_PADDING_M);
+        let pad = |extent: f64| {
+            extent + 2.0 * (options.padding_fraction * extent).max(options.min_padding_m)
+        };
         let (mut length_m, mut width_m) = (pad(max.0 - min.0), pad(max.1 - min.1));
         let mut rotation_rad = angle;
         if width_m > length_m {
@@ -244,6 +286,45 @@ mod tests {
         let footprint = Footprint::from_track(&reversed).unwrap();
         assert!(close(footprint.long_axis_bearing_deg(), 135.0, 0.01));
         assert!(close(footprint.rotation_rad.to_degrees(), -45.0, 0.01));
+    }
+
+    #[test]
+    fn padding_and_orientation_can_be_chosen() {
+        let rising = track(&[line((-3_000.0, -3_000.0), (3_000.0, 3_000.0), 60)]);
+        let north = Footprint::from_track_with(
+            &rising,
+            &FootprintOptions {
+                orientation: Orientation::North,
+                ..FootprintOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(close(north.rotation_rad, 0.0, 1e-9), "{north:?}");
+        assert!(close(north.length_m, 6_000.0 * 1.3, 1e-3), "{north:?}");
+        assert!(close(north.width_m, 6_000.0 * 1.3, 1e-3), "{north:?}");
+
+        let line = track(&[line((0.0, -5_000.0), (0.0, 5_000.0), 100)]);
+        let tight = Footprint::from_track_with(
+            &line,
+            &FootprintOptions {
+                padding_fraction: 0.05,
+                min_padding_m: 100.0,
+                ..FootprintOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(close(tight.length_m, 11_000.0, 1e-3), "{tight:?}");
+        assert!(close(tight.width_m, 5_500.0, 1e-3), "{tight:?}");
+        let wide = Footprint::from_track_with(
+            &line,
+            &FootprintOptions {
+                padding_fraction: 0.0,
+                min_padding_m: 2_000.0,
+                ..FootprintOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(close(wide.length_m, 14_000.0, 1e-3), "{wide:?}");
     }
 
     #[test]

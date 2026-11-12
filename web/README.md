@@ -107,7 +107,7 @@ import Hike from '../components/Hike.astro';
 |---|---|
 | `src` | The scene bundle (`.itb`) to show |
 | `poster` | An image shown straight away, and kept if the browser can't draw the diorama |
-| `aspect` | `story` (9:16), `feed` (4:5), `square` or `wide` (16:9, the default). The element fills its container's width at this aspect |
+| `aspect` | `story` or `video` (9:16), `portrait` (3:4), `feed` (4:5), `square`, `wide` (16:9, the default), or a width and height such as `3:2`. The element fills its container's width at this aspect |
 | `autoplay` | Plays the route once as soon as the diorama is ready, unless the visitor prefers reduced motion |
 | `backend` | `webgl` forces the WebGL2 fallback, for testing it in a browser that has WebGPU |
 | `credit` | `none` hides the data credit line. Only use it when the page credits the data itself (see below) |
@@ -125,9 +125,17 @@ The look attributes choose how the diorama is drawn, like `isotrail render`'s op
 | `background` | `sky`, `transparent` (the page shows through) or a colour such as `#1e2a33` |
 | `time` | the start of the hike, or a local time such as `20:30` on the day of the hike, which then lights the diorama while it plays |
 
-Changing one of them on a running element redraws it; a new `mesher` or `block-height` builds the terrain again. A value the element can't use, such as an unknown palette name or a `.hex` file that doesn't load, is left at its default, with a warning in the console.
+The view attributes set where the diorama starts, and where the reset button, 0 and Home take it back to, like `isotrail render`'s camera options. `isotrail embed` writes them for its `--turn`, `--heading`, `--pitch` and `--zoom`.
 
-The poster shows at once. The renderer (about 1.2 MB gzipped) only downloads when the element comes near the screen, and it downloads once however many hikes are on the page. When an element has been well off screen for a few seconds it frees its renderer and shows its poster, and starts again when it comes back; browsers only give a page about 16 WebGL contexts, so a page with many hikes keeps working as it scrolls. A view the visitor turned or zoomed starts again from the default when this happens.
+| Attribute | Values (default first) |
+|---|---|
+| `turn` | `0`, or `-360` to `360`: degrees the camera moves anticlockwise round the slab, as seen from above, from the view along the hike |
+| `pitch` | `30`, or `10` to `80`: how far the camera looks down, in degrees |
+| `zoom` | `1`, or `0.5` to `2`: above 1 the diorama starts zoomed in; below 1 it leaves more room round the slab |
+
+Changing one of them on a running element redraws it; a new `mesher` or `block-height` builds the terrain again, and a new `turn`, `pitch` or `zoom` goes to the new starting view. A value the element can't use, such as an unknown palette name or a `.hex` file that doesn't load, is left at its default, with a warning in the console.
+
+The poster shows at once. The renderer (about 1.2 MB gzipped) only downloads when the element comes near the screen, and it downloads once however many hikes are on the page. When an element has been well off screen for a few seconds it frees its renderer and shows its poster, and starts again when it comes back; browsers only give a page about 16 WebGL contexts, so a page with many hikes keeps working as it scrolls. A view the visitor turned or zoomed starts again from the starting view when this happens.
 
 If the GPU is lost while the page is open, for instance when its driver resets or the browser reclaims a WebGL context, the element starts again. If that happens again within a minute, it keeps the poster.
 
@@ -242,9 +250,9 @@ viewer.setProgress(0.5);                      // how far through drawing the rou
 viewer.setYaw(30);                            // degrees turned from the still image's view
 viewer.zoomBy(1.5, x, y);                     // zoom, keeping canvas pixel (x, y) in place
 viewer.pan(dx, dy);                           // move with a drag of (dx, dy) canvas pixels
-viewer.resetView();                           // the whole slab, from the still image's view
+viewer.resetView();                           // back to the starting view
 viewer.setTime(performance.now() / 1000);     // moves rain, snow and clouds on: any steadily rising clock, in seconds
-viewer.setOptions({ mesher: 'smooth', time: '20:30' });   // changes the look
+viewer.setOptions({ mesher: 'smooth', time: '20:30' });   // changes the look and starting view
 viewer.draw();
 console.log(viewer.backend, viewer.zoom, viewer.title);   // "webgpu" or "gl", 1 to 3, the hike's name
 console.log(viewer.credit);                   // the data credits, joined with " · "
@@ -255,7 +263,7 @@ viewer.free();                                // releases the GPU memory at once
 
 Nothing is drawn until the first `resize`. Until the first `setProgress`, the whole route shows under the light at the start, as on the poster; `setProgress` draws the route at an even speed with a pause for each night of a multi-day trek, lit by the time at its head. Each art pixel covers a whole number of device pixels, chosen so that the frame's long side is at most 640 pixels, as in a still rendered at `--scale 3`. Call `resize` again whenever the canvas changes size, and `draw` after any change. While `weatherMoves` is true, keep calling `setTime` and `draw` every frame for the rain and snow to fall.
 
-The look is an object with any of `palette` (a built-in name, `none`, or the text of a `.hex` file: the element fetches files for you, the API doesn't), `mesher`, `blockHeight`, `occlusion`, `softShadows`, `godRays`, `background` and `time`, taking the same values as the element's attributes, as strings or numbers. Each one left out or unusable takes its default; unusable ones also warn in the console. `setOptions` replaces the whole look, and throws an error with reason `"gpu"` if the GPU can't hold the terrain a new mesher builds.
+The look is an object with any of `palette` (a built-in name, `none`, or the text of a `.hex` file: the element fetches files for you, the API doesn't), `mesher`, `blockHeight`, `occlusion`, `softShadows`, `godRays`, `background` and `time`, and the starting view's `turn`, `pitch` and `zoom`, taking the same values as the element's attributes, as strings or numbers. Each one left out or unusable takes its default; unusable ones also warn in the console. `setOptions` replaces the whole look, and throws an error with reason `"gpu"` if the GPU can't hold the terrain a new mesher builds.
 
 Arguments that aren't finite numbers, such as `NaN`, are ignored. `Viewer.load` rejects with an `Error` whose `reason` is `"version"`, `"damaged"` or `"gpu"`, as in [When something fails](#when-something-fails); `resize` throws one with reason `"gpu"` if the GPU can't hold the diorama at that size. After any error from the viewer, free it. `onLost` is only called on WebGPU; on WebGL2, listen for `webglcontextlost` on the canvas.
 
