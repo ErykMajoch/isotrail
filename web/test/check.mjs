@@ -188,6 +188,9 @@ Object.assign(pages, {
       embed('id="r" src="/data/hike.itb" aspect="wide" route-colour="#2050e0" route-width="4" markers="none" credit-extra="Walked by A. Hiker"'),
       embed('id="u" src="/data/hike.itb" aspect="wide" paths="maybe" weather="sunny" route-colour="red" markers="flag"'),
       embed('id="n" src="/data/hike.itb" aspect="wide" sun="200,-20" weather-effects="none"'),
+      embed('id="rc" src="/data/hike.itb" aspect="wide" route-color="#2050e0" route-width="4" markers="none" credit-extra="Walked by A. Hiker"'),
+      embed('id="rb" src="/data/hike.itb" aspect="wide" route-colour="#2050e0" route-color="#00ff00" route-width="4" markers="none" credit-extra="Walked by A. Hiker"'),
+      embed('id="ua" src="/data/hike.itb" aspect="wide" route-color="pink"'),
     ]),
     { head: '<style>.grid{grid-template-columns:repeat(3,288px)}</style>' },
   ),
@@ -257,6 +260,16 @@ Object.assign(pages, {
     ]),
     { head: '<style>.grid{grid-template-columns:repeat(3,288px)}</style>' },
   ),
+  '/sizes.html': page(
+    grid([
+      embed('id="abc" src="/data/hike.itb" aspect="abc"'),
+      embed('id="obj" src="/data/hike.itb" aspect="constructor"'),
+      embed('id="zero" src="/data/hike.itb" aspect="0:0"'),
+      embed('id="ch" src="/data/hike.itb" aspect="wide" credit="hidden"'),
+      '<isotrail-hike id="bm" src="/data/hike.itb" aspect="wide" backend="metal"></isotrail-hike>',
+    ]) + `<div style="width:300px">${embed('id="tall" src="/data/hike.itb" aspect="1:1000000"')}</div>`,
+    { head: '<style>.grid{grid-template-columns:repeat(3,288px)}</style>' },
+  ),
   '/many.html': page(
     Array.from({ length: 20 }, (_, i) =>
       `<isotrail-hike id="m${i}" src="/data/hike.itb" aspect="wide" backend="webgl"></isotrail-hike><p>gap</p>`,
@@ -271,6 +284,9 @@ const INSTRUMENT = `
   window.__warnings = [];
   const warn = console.warn;
   console.warn = function (...a) { __warnings.push(a.map(String).join(' ')); return warn.apply(this, a); };
+  window.__errors = [];
+  const error = console.error;
+  console.error = function (...a) { __errors.push(a.map(String).join(' ')); return error.apply(this, a); };
   for (const name of ['isotrail-ready', 'isotrail-error', 'isotrail-play', 'isotrail-pause', 'isotrail-ended', 'isotrail-progress']) {
     addEventListener(name, (e) => __events.push({ name, id: e.target.id, ...e.detail }));
   }
@@ -459,7 +475,7 @@ try {
   const warnings = await cdp.evaluate('__warnings');
   check(
     'and each warns on the console',
-    ['palette "nope"', 'godRays "sometimes"'].every((part) => warnings.some((w) => w.includes(part))),
+    ['palette "nope"', 'god-rays "sometimes"'].every((part) => warnings.some((w) => w.includes(part))),
     warnings.join(' | '),
   );
   check('time="22:30" relights the diorama', (await shot('t')) !== (await shot('tn')));
@@ -517,19 +533,22 @@ try {
   // Scene, light and route attributes, the extra credit line, bad values
   // and a change on a live element
   await go('/scene.html');
-  const scened = await cdp.waitFor(`['d', 's', 'w', 'r', 'u', 'n'].every((id) => document.getElementById(id).dataset.state === 'ready')`);
-  check('six scene embeds become ready', scened);
+  const scened = await cdp.waitFor(`['d', 's', 'w', 'r', 'u', 'n', 'rc', 'rb', 'ua'].every((id) => document.getElementById(id).dataset.state === 'ready')`);
+  check('nine scene embeds become ready', scened);
   await sleep(300);
   const sceneShot = await shot('d');
   check('strata, props, paths and base-blocks change the terrain', (await shot('s')) !== sceneShot);
   check('weather, outlines and shadows change the light', (await shot('w')) !== sceneShot);
   check('route-colour, route-width and markers change the route', (await shot('r')) !== sceneShot);
   check('a hand-set sun relights the diorama', (await shot('n')) !== sceneShot);
+  check('route-color draws the same pixels as route-colour', (await shot('rc')) === (await shot('r')));
+  check('with both, route-colour wins', (await shot('rb')) === (await shot('r')));
+  check('a bad route-color draws the default', (await shot('ua')) === sceneShot);
   check('bad scene values draw the default', (await shot('u')) === sceneShot);
   const sceneWarnings = await cdp.evaluate('__warnings');
   check(
     'and each warns on the console',
-    ['paths "maybe"', 'weather "sunny"', 'routeColour "red"', 'markers "flag"'].every((part) => sceneWarnings.some((w) => w.includes(part))),
+    ['paths "maybe"', 'weather "sunny"', 'route-colour "red"', 'route-color "pink"', 'route-color "#00ff00", as route-colour is set too', 'markers "flag"'].every((part) => sceneWarnings.some((w) => w.includes(part))),
     sceneWarnings.join(' | '),
   );
   const extraOf = (id) => cdp.evaluate(`${el(id)}.shadowRoot.querySelector('[part="credit"] .extra')?.textContent ?? null`);
@@ -538,6 +557,8 @@ try {
   const routeOf = (id) => cdp.evaluate(`getComputedStyle(${el(id)}.shadowRoot.querySelector('input')).getPropertyValue('--route').trim()`);
   check('the progress line takes the route colour', (await routeOf('r')) === '#2050e0', await routeOf('r'));
   check('a bad route colour leaves the progress line in the default colour', (await routeOf('u')) === '#d64834', await routeOf('u'));
+  check('the progress line takes route-color too', (await routeOf('rc')) === '#2050e0', await routeOf('rc'));
+  check('and route-colour over route-color', (await routeOf('rb')) === '#2050e0', await routeOf('rb'));
   await cdp.evaluate(`${el('d')}.setAttribute('credit-extra', 'My site')`);
   check('changing credit-extra updates the line', (await extraOf('d')) === 'My site', String(await extraOf('d')));
   await cdp.evaluate(`${el('d')}.setAttribute('strata', 'off')`);
@@ -606,7 +627,7 @@ try {
   const playWarnings = await cdp.evaluate('__warnings');
   check(
     'bad playback values warn on the console',
-    ['duration "0"', 'orbit "400"', 'loop "many"', 'pace "walk"', 'maxZoom "9"', 'controls "map"', 'ignored intro and hold', 'paces by distance'].every((part) =>
+    ['duration "0"', 'orbit "400"', 'loop "many"', 'pace "walk"', 'max-zoom "9"', 'controls "map"', 'ignored intro and hold', 'paces by distance'].every((part) =>
       playWarnings.some((w) => w.includes(part)),
     ),
     playWarnings.join(' | '),
@@ -718,6 +739,30 @@ try {
   }
   check('setting theme on a live element redraws in it', themed);
   check('no uncaught errors on the theme page', cdp.exceptions.length === 0, cdp.exceptions.join(' | '));
+
+  // Sizes past the GPU's largest texture, and shapes and values that can't
+  // be read
+  await go('/sizes.html');
+  const tallReady = await cdp.waitFor(`${el('tall')}.dataset.state === 'ready'`);
+  const tall = await cdp.evaluate(`(() => { const e = ${el('tall')}; const c = e.shadowRoot.querySelector('canvas'); return { css: e.getBoundingClientRect().height, width: c?.width, height: c?.height }; })()`);
+  check('a 1:1000000 embed ends ready', tallReady && (await errorsOf('tall')).length === 0, `${await stateOf('tall')} ${JSON.stringify(await errorsOf('tall'))}`);
+  check('its canvas is drawn within the largest texture', tall.css > 1e6 && tall.height > 0 && tall.height <= 32768 && tall.width >= 1, JSON.stringify(tall));
+  const sizeLogs = [...(await cdp.evaluate('__warnings')), ...(await cdp.evaluate('__errors'))];
+  check('and nothing panics', !sizeLogs.some((line) => line.includes('panicked')), sizeLogs.join(' | '));
+  const sizeWarnings = await cdp.evaluate('__warnings');
+  const warnedFor = (part) => sizeWarnings.filter((w) => w.includes(part)).length;
+  check('aspect="abc" warns once', warnedFor('aspect "abc"') === 1, sizeWarnings.join(' | '));
+  check(
+    'aspect="constructor" and aspect="0:0" warn and fall back to wide',
+    warnedFor('aspect "constructor"') === 1 &&
+      warnedFor('aspect "0:0"') === 1 &&
+      (await ratio('obj')) === '16 / 9' &&
+      (await ratio('zero')) === '16 / 9' &&
+      (await ratio('abc')) === '16 / 9',
+    `${await ratio('obj')} ${await ratio('zero')} | ${sizeWarnings.join(' | ')}`,
+  );
+  check('credit="hidden" and backend="metal" warn once each', warnedFor('credit "hidden"') === 1 && warnedFor('backend "metal"') === 1, sizeWarnings.join(' | '));
+  check('no uncaught errors on the sizes page', cdp.exceptions.length === 0, cdp.exceptions.join(' | '));
 
   // The snippet's poster, with and without the script
   await go('/noscript.html');

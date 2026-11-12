@@ -62,7 +62,7 @@ pub use post::{
     Background, DEFAULT_OCCLUSION, DEFAULT_SOFT_SHADOWS, Edges, GodRays, HiddenRoute, Look,
     Markers, ROUTE_COLOUR, RouteStyle, SKY_BOTTOM, SKY_DITHER, SKY_TOP,
 };
-pub use present::{MAX_CANVAS_FRAME_PX, PixelGrid, Present};
+pub use present::{MAX_CANVAS_FRAME_PX, PixelGrid, Present, canvas_within};
 pub use route::{RouteLine, RouteVertex};
 pub use target::{OffscreenTarget, TARGET_FORMAT};
 pub use terrain::{GpuMesh, SHADOW_MAP_SIZE, Scene, TerrainRenderer};

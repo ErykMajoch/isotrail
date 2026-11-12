@@ -54,7 +54,7 @@ impl Options {
             shadows: read(options, "shadows", parse_switch).unwrap_or(defaults.shadows),
             night_sky: read(options, "nightSky", parse_switch).unwrap_or(defaults.night_sky),
             route: RouteStyle {
-                colour: read(options, "routeColour", parse_colour).unwrap_or(defaults.route.colour),
+                colour: route_colour(options).unwrap_or(defaults.route.colour),
                 width_px: read(options, "routeWidth", |text| {
                     parse_count(text, &ROUTE_WIDTH_RANGE)
                 })
@@ -187,28 +187,58 @@ fn pace(options: &JsValue, bundle: &SceneBundle) -> Pace {
 
 /// The option `key` parsed, or none when it is missing, empty or bad
 fn read<T>(options: &JsValue, key: &str, parse: impl Fn(&str) -> Result<T, String>) -> Option<T> {
-    if !options.is_object() {
-        return None;
-    }
-    let value = Reflect::get(options, &key.into()).ok()?;
-    let text = value
-        .as_string()
-        .or_else(|| value.as_f64().map(|number| number.to_string()))?;
-    if text.trim().is_empty() {
-        return None;
-    }
+    let (name, text) = given(options, key)?;
     match parse(&text) {
         Ok(parsed) => Some(parsed),
         Err(error) => {
-            let shown: String = text.chars().take(40).collect();
-            web_sys::console::warn_1(
-                &format!(
-                    "<isotrail-hike> ignored {key} {shown:?}, so it uses the default: {error}"
-                )
-                .into(),
-            );
+            ignored(&name, &text, &format!("so it uses the default: {error}"));
             None
         }
+    }
+}
+
+/// The name an option was given under and its text, when it isn't empty: a
+/// script uses `key`, such as `maxZoom`, and the element passes its
+/// attributes' names, such as `max-zoom`, so warnings name what the page wrote
+fn given(options: &JsValue, key: &str) -> Option<(String, String)> {
+    if !options.is_object() {
+        return None;
+    }
+    [key.to_owned(), attribute(key)]
+        .into_iter()
+        .find_map(|name| {
+            let value = Reflect::get(options, &name.as_str().into()).ok()?;
+            let text = value
+                .as_string()
+                .or_else(|| value.as_f64().map(|number| number.to_string()))?;
+            (!text.trim().is_empty()).then_some((name, text))
+        })
+}
+
+fn attribute(key: &str) -> String {
+    key.chars()
+        .flat_map(|c| {
+            let dash = c.is_ascii_uppercase().then_some('-');
+            dash.into_iter()
+                .chain(std::iter::once(c.to_ascii_lowercase()))
+        })
+        .collect()
+}
+
+fn ignored(name: &str, text: &str, reason: &str) {
+    let shown: String = text.chars().take(40).collect();
+    web_sys::console::warn_1(&format!("<isotrail-hike> ignored {name} {shown:?}, {reason}").into());
+}
+
+/// `routeColour`, or its American spelling when only that is given
+fn route_colour(options: &JsValue) -> Option<[u8; 3]> {
+    match (given(options, "routeColour"), given(options, "routeColor")) {
+        (Some((british, _)), Some((american, text))) => {
+            ignored(&american, &text, &format!("as {british} is set too"));
+            read(options, "routeColour", parse_colour)
+        }
+        (None, Some(_)) => read(options, "routeColor", parse_colour),
+        _ => read(options, "routeColour", parse_colour),
     }
 }
 

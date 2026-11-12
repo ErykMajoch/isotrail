@@ -26,6 +26,18 @@ impl PixelGrid {
     }
 }
 
+/// A canvas's drawing buffer shrunk, keeping its shape, until neither side
+/// passes `max_side`, the GPU's largest texture
+pub fn canvas_within(width: u32, height: u32, max_side: u32) -> (u32, u32) {
+    let long = width.max(height);
+    if long <= max_side {
+        return (width, height);
+    }
+    let shrink =
+        |side: u32| ((u64::from(side) * u64::from(max_side) / u64::from(long)) as u32).max(1);
+    (shrink(width), shrink(height))
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Uniforms {
@@ -190,6 +202,25 @@ mod tests {
         assert_eq!(grid(300, 200), (300, 200, 1));
         assert_eq!(grid(1281, 721), (427, 241, 3));
         assert_eq!(grid(0, 0), (1, 1, 1));
+    }
+
+    #[test]
+    fn buffers_shrink_to_the_largest_texture() {
+        assert_eq!(canvas_within(1920, 1080, 8192), (1920, 1080));
+        assert_eq!(canvas_within(8192, 100, 8192), (8192, 100));
+        assert_eq!(canvas_within(800, 33_554_432, 16384), (1, 16384));
+        assert_eq!(canvas_within(20000, 10000, 16384), (16384, 8192));
+        assert_eq!(canvas_within(3000, 60000, 2048), (102, 2048));
+        for long in [16385, 40000, 1_000_000, u32::MAX] {
+            for short in [0, 1, 333, 16384] {
+                let (w, h) = canvas_within(long, short, 16384);
+                assert_eq!(w, 16384);
+                assert!((1..=16384).contains(&h));
+                let (w, h) = canvas_within(short, long, 4096);
+                assert_eq!(h, 4096);
+                assert!((1..=4096).contains(&w));
+            }
+        }
     }
 
     #[test]

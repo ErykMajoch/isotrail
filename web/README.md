@@ -138,7 +138,7 @@ The scene, light and route attributes work the same way, for `isotrail render`'s
 | `weather-effects` | `clouds,shade,rain,snow,haze`, fewer of them, or `none` |
 | `weather` | the recorded weather, or `clear`, `cloudy`, `overcast`, `rain`, `snow` or `fog` |
 | `sun` | the hike's sun, or a compass bearing and elevation in degrees such as `250,8`, which then lights the diorama while it plays |
-| `route-colour` | `#d64834`, or another colour; the progress line follows it unless the page sets `--isotrail-progress` |
+| `route-colour` | `#d64834`, or another colour; the progress line follows it unless the page sets `--isotrail-progress`. `route-color` works too |
 | `route-width` | `2`, or `1` to `4` pixels |
 | `route-hidden` | `dashed`, `dim`, `solid` or `off`: the parts of the route behind ridges |
 | `markers` | `start,finish,head`, fewer of them, or `none` |
@@ -355,7 +355,7 @@ viewer.free();                                // releases the GPU memory at once
 
 Nothing is drawn until the first `resize`. Until the first `setProgress`, the whole route shows under the light at the start, as on the poster; `setProgress` draws the route at an even speed with a pause for each night of a multi-day trek, lit by the time at its head. Each art pixel covers a whole number of device pixels, chosen so that the frame's long side is at most 640 pixels, as in a still rendered at `--scale 3`. Call `resize` again whenever the canvas changes size, and `draw` after any change. While `weatherMoves` is true, keep calling `setTime` and `draw` every frame for the rain and snow to fall.
 
-The look is an object with any of `palette` (a built-in name, `none`, or the text of a `.hex` file: the element fetches files for you, the API doesn't), `mesher`, `blockHeight`, `occlusion`, `softShadows`, `godRays`, `background` and `time`, the scene, light and route options, the starting view's `turn`, `pitch` and `zoom`, `maxZoom`, `pace` (for `setProgress`) and `theme` (the text of a theme file, under all the others), taking the same values as the element's attributes, as strings or numbers. Each one left out or unusable takes its default; unusable ones also warn in the console. `setOptions` replaces the whole look, and throws an error with reason `"gpu"` if the GPU can't hold the terrain a new mesher builds.
+The look is an object with any of `palette` (a built-in name, `none`, or the text of a `.hex` file: the element fetches files for you, the API doesn't), `mesher`, `blockHeight`, `occlusion`, `softShadows`, `godRays`, `background` and `time`, the scene, light and route options (`routeColor` works too), the starting view's `turn`, `pitch` and `zoom`, `maxZoom`, `pace` (for `setProgress`) and `theme` (the text of a theme file, under all the others), taking the same values as the element's attributes, as strings or numbers. Each one left out or unusable takes its default; unusable ones also warn in the console. `setOptions` replaces the whole look, and throws an error with reason `"gpu"` if the GPU can't hold the terrain a new mesher builds.
 
 Arguments that aren't finite numbers, such as `NaN`, are ignored. `Viewer.load` rejects with an `Error` whose `reason` is `"version"`, `"damaged"` or `"gpu"`, as in [When something fails](#when-something-fails); `resize` throws one with reason `"gpu"` if the GPU can't hold the diorama at that size. After any error from the viewer, free it. `onLost` is only called on WebGPU; on WebGL2, listen for `webglcontextlost` on the canvas.
 

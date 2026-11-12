@@ -14,38 +14,39 @@ const ASPECTS = {
   square: '1 / 1',
   wide: '16 / 9',
 };
-// The look and starting-view attributes, by the name the renderer takes
-// them under
-const LOOK = {
-  palette: 'palette',
-  mesher: 'mesher',
-  'block-height': 'blockHeight',
-  occlusion: 'occlusion',
-  'soft-shadows': 'softShadows',
-  'god-rays': 'godRays',
-  background: 'background',
-  time: 'time',
-  turn: 'turn',
-  pitch: 'pitch',
-  zoom: 'zoom',
-  'prop-density': 'propDensity',
-  paths: 'paths',
-  streams: 'streams',
-  strata: 'strata',
-  'base-blocks': 'baseBlocks',
-  outlines: 'outlines',
-  shadows: 'shadows',
-  'night-sky': 'nightSky',
-  'weather-effects': 'weatherEffects',
-  weather: 'weather',
-  sun: 'sun',
-  'route-colour': 'routeColour',
-  'route-width': 'routeWidth',
-  'route-hidden': 'routeHidden',
-  markers: 'markers',
-};
+// The look and starting-view attributes; the renderer takes them under
+// these names, and names them in its warnings
+const LOOK = [
+  'palette',
+  'mesher',
+  'block-height',
+  'occlusion',
+  'soft-shadows',
+  'god-rays',
+  'background',
+  'time',
+  'turn',
+  'pitch',
+  'zoom',
+  'prop-density',
+  'paths',
+  'streams',
+  'strata',
+  'base-blocks',
+  'outlines',
+  'shadows',
+  'night-sky',
+  'weather-effects',
+  'weather',
+  'sun',
+  'route-colour',
+  'route-color',
+  'route-width',
+  'route-hidden',
+  'markers',
+];
 // Attributes the renderer takes besides the look
-const VIEWER = { ...LOOK, pace: 'pace', 'max-zoom': 'maxZoom' };
+const VIEWER = [...LOOK, 'pace', 'max-zoom'];
 const CLIP = ['duration', 'intro', 'hold', 'loop-back', 'orbit', 'loop'];
 const CONTROLS = ['play', 'zoom', 'reset', 'scrubber'];
 const ROUTE_COLOUR = /^#[0-9a-f]{6}$/i;
@@ -157,7 +158,11 @@ function reducedMotion() {
 function aspectRatio(value) {
   const ratio = /^\s*(\d+)\s*:\s*(\d+)\s*$/.exec(value ?? '');
   if (ratio && Number(ratio[1]) > 0 && Number(ratio[2]) > 0) return `${ratio[1]} / ${ratio[2]}`;
-  return ASPECTS[value] ?? ASPECTS.wide;
+  if (Object.hasOwn(ASPECTS, value ?? '')) return ASPECTS[value];
+  if (value?.trim()) {
+    ignored('aspect', value, `expected ${Object.keys(ASPECTS).join(', ')} or a width and height such as 3:2`);
+  }
+  return ASPECTS.wide;
 }
 
 // Slow at both ends, as the animation's camera settles
@@ -556,13 +561,15 @@ class IsotrailHike extends HTMLElement {
     'src',
     'poster',
     'aspect',
+    'backend',
+    'credit',
     'credit-extra',
     'theme',
     'controls',
     'lang',
     'strings',
     ...CLIP,
-    ...Object.keys(VIEWER),
+    ...VIEWER,
   ];
 
   #frameBox;
@@ -594,6 +601,7 @@ class IsotrailHike extends HTMLElement {
   #resize = null;
   #frame = 0;
   #drawn = false;
+  #sized = false;
   #restartedAt = null;
   #lookChanges = 0;
   #ready = null;
@@ -675,6 +683,10 @@ class IsotrailHike extends HTMLElement {
         this.#setState('poster');
         if (this.#near) this.#start();
       }
+    } else if (name === 'backend') {
+      if (value?.trim() && !['auto', 'webgl'].includes(value)) ignored(name, value, 'expected auto or webgl');
+    } else if (name === 'credit') {
+      if (value?.trim() && value !== 'none') ignored(name, value, 'expected none, which hides the credit line');
     } else if (name === 'credit-extra') {
       if (this.#viewer) this.#showCredit(this.#creditText);
     } else if (name === 'lang' || name === 'strings') {
@@ -687,10 +699,11 @@ class IsotrailHike extends HTMLElement {
       this.#time = this.#playing
         ? Math.min(this.#time, this.#clip.duration)
         : this.#clip.intro + this.#progress * this.#clip.draw;
-    } else if (name in VIEWER || name === 'theme') {
-      if (name === 'route-colour') {
+    } else if (VIEWER.includes(name) || name === 'theme') {
+      if (name === 'route-colour' || name === 'route-color') {
         // The progress line follows the route unless the page sets its own
-        const colour = ROUTE_COLOUR.test(value ?? '') ? value : null;
+        const given = this.getAttribute('route-colour')?.trim() || this.getAttribute('route-color');
+        const colour = ROUTE_COLOUR.test(given ?? '') ? given : null;
         if (colour) this.#scrubber.style.setProperty('--route', colour);
         else this.#scrubber.style.removeProperty('--route');
       }
@@ -904,9 +917,9 @@ class IsotrailHike extends HTMLElement {
   // palette and a theme file in place of their addresses
   async #look() {
     const look = {};
-    for (const [attribute, key] of Object.entries(VIEWER)) {
+    for (const attribute of VIEWER) {
       const value = this.getAttribute(attribute);
-      if (value !== null) look[key] = value;
+      if (value !== null) look[attribute] = value;
     }
     const theme = this.getAttribute('theme');
     const [palette, text] = await Promise.all([
@@ -1007,6 +1020,7 @@ class IsotrailHike extends HTMLElement {
     this.#canvas?.remove();
     this.#canvas = null;
     this.#drawn = false;
+    this.#sized = false;
     this.#pointers.clear();
     this.#progress = 1;
     this.#moved = false;
@@ -1081,8 +1095,8 @@ class IsotrailHike extends HTMLElement {
     const width = box ? box.inlineSize : Math.round(entry.contentRect.width * devicePixelRatio);
     const height = box ? box.blockSize : Math.round(entry.contentRect.height * devicePixelRatio);
     if (!this.#viewer) return;
-    this.#canvas.width = width;
-    this.#canvas.height = height;
+    // The viewer sizes the canvas's buffer, within the GPU's largest texture
+    this.#sized = width > 0 && height > 0;
     this.#guard((viewer) => viewer.resize(width, height));
     if (!this.#viewer) return;
     this.#syncZoom();
@@ -1108,7 +1122,7 @@ class IsotrailHike extends HTMLElement {
       return true;
     });
     if (!drawn) return;
-    if (!this.#drawn && this.#canvas.width > 0) {
+    if (!this.#drawn && this.#sized) {
       this.#drawn = true;
       this.#setState('ready');
       const detail = { backend: this.#guard((viewer) => viewer.backend) };

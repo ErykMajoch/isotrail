@@ -5,7 +5,7 @@ use glam::Vec2;
 use isotrail_bundle::{BundleError, SceneBundle};
 use isotrail_render::{
     Diorama, Framing, Gpu, Insets, OffscreenTarget, PixelGrid, Present, SunState, TerrainMesh,
-    TerrainRenderer, View, Viewpoints, Walk, When, credit_line, mesh_within,
+    TerrainRenderer, View, Viewpoints, Walk, When, canvas_within, credit_line, mesh_within,
 };
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
@@ -195,13 +195,16 @@ impl Viewer {
     }
 
     /// Sets the canvas's drawing buffer size in device pixels, and the pixel
-    /// grid that fits it; fails with reason `"gpu"` when the GPU can't hold
-    /// the diorama at that size
+    /// grid that fits it; a size past the GPU's largest texture is shrunk to
+    /// it, keeping its shape, and the browser stretches the canvas. Fails
+    /// with reason `"gpu"` when the GPU can't hold the diorama at that size
     pub fn resize(&mut self, width: u32, height: u32) -> Result<(), JsValue> {
         if width == 0 || height == 0 {
             self.stage = None;
             return Ok(());
         }
+        let largest = self.gpu.device().limits().max_texture_dimension_2d;
+        let (width, height) = canvas_within(width, height, largest);
         (self.config.width, self.config.height) = (width, height);
         self.surface.configure(self.gpu.device(), &self.config);
         let grid = PixelGrid::for_canvas(width, height);
@@ -223,7 +226,8 @@ impl Viewer {
     /// to 2), `weatherEffects` (`"clouds,shade,rain,snow,haze"` or fewer, or
     /// `"none"`), `weather` (`"clear"`, `"cloudy"`, `"overcast"`, `"rain"`,
     /// `"snow"` or `"fog"`) and `sun` (`"AZIMUTH,ELEVATION"` in degrees,
-    /// held like `time`); the route's `routeColour` (`"#rrggbb"`),
+    /// held like `time`); the route's `routeColour` (`"#rrggbb"`;
+    /// `routeColor` works too),
     /// `routeWidth` (1 to 4), `routeHidden` (`"dashed"`, `"dim"`, `"solid"`
     /// or `"off"`) and `markers` (`"start,finish,head"` or fewer, or
     /// `"none"`); `turn` (degrees, -360 to 360), `pitch` (degrees, 10 to
