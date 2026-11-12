@@ -155,7 +155,7 @@ The playback attributes set how the route plays, like `isotrail render`'s [anima
 
 | Attribute | Values (default first) |
 |---|---|
-| `duration` | `10`, or `1` to `180` seconds for one play, split as in an animation: 0.5 s on the scene and 8 s drawing the route for every 10 s, then 1.5 s on the finished hike, which only shows between loops |
+| `duration` | `10`, or `1` to `180` seconds for one play, split as in an animation: 0.5s on the scene and 8s drawing the route for every 10s, then 1.5s on the finished hike, which only shows between loops |
 | `intro`, `hold` | 5% and 15% of `duration`, or `0` to `180` seconds: on the scene before the route draws, and on the finished hike before the next play. Together they must leave half a second to draw the route |
 | `loop-back` | on its own: between plays, the route undraws and the camera turns back, so a loop runs on without a jump |
 | `orbit` | `30`, or `-360` to `360`: degrees the camera turns while the route draws, easing back to the starting view; `0` keeps it still |
@@ -198,7 +198,7 @@ Every word the element shows or reads out to screen readers can be replaced with
 
 Words left out keep the built-in ones for the language, or English.
 
-The poster shows at once. The renderer (about 1.2 MB gzipped) only downloads when the element comes near the screen, and it downloads once however many hikes are on the page. When an element has been well off screen for a few seconds it frees its renderer and shows its poster, and starts again when it comes back; browsers only give a page about 16 WebGL contexts, so a page with many hikes keeps working as it scrolls. A view the visitor turned or zoomed starts again from the starting view when this happens.
+The poster shows at once. The renderer (about 1.2MB gzipped) only downloads when the element comes near the screen, and it downloads once however many hikes are on the page. When an element has been well off screen for a few seconds it frees its renderer and shows its poster, and starts again when it comes back; browsers only give a page about 16 WebGL contexts, so a page with many hikes keeps working as it scrolls. A view the visitor turned or zoomed starts again from the starting view when this happens.
 
 If the GPU is lost while the page is open, for instance when its driver resets or the browser reclaims a WebGL context, the element starts again. If that happens again within a minute, it keeps the poster.
 
@@ -246,7 +246,7 @@ The line can be restyled with `::part(credit)`. If you hide it, with `credit="no
 | | Mouse and trackpad | Touch | Keyboard (the diorama focused) |
 |---|---|---|---|
 | Turn | drag (Shift-drag or right-drag when zoomed in) | drag, or twist two fingers | ← → |
-| Zoom (up to 3×, or `max-zoom`) | Ctrl/⌘ + scroll, pinch, or the − + buttons | pinch | + − |
+| Zoom (up to 3x, or `max-zoom`) | Ctrl/⌘ + scroll, pinch, or the − + buttons | pinch | + − |
 | Move around when zoomed in | drag | drag | Shift + arrows |
 | Back to the start view | the reset button | the reset button | 0 or Home |
 | Play and pause | the play button | the play button | Space or K |

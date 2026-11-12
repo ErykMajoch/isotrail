@@ -156,7 +156,7 @@ fn decode(tile: TileId, bytes: &[u8]) -> Result<Vec<f32>, DemError> {
 
     if (frame.width, frame.height) != (TILE_SIZE, TILE_SIZE) {
         return Err(format_error(format!(
-            "{} × {} pixels instead of {TILE_SIZE} × {TILE_SIZE}",
+            "{} x {} pixels instead of {TILE_SIZE} x {TILE_SIZE}",
             frame.width, frame.height
         )));
     }
@@ -186,7 +186,7 @@ pub(super) mod tests {
         out
     }
 
-    /// Exact for heights on a 1/256 m step within the terrarium range
+    /// Exact for heights on a 1/256m step within the terrarium range
     pub fn terrarium_rgb(height_m: f64) -> [u8; 3] {
         let v = ((height_m + 32768.0) * 256.0).round() as u32;
         [(v >> 16) as u8, (v >> 8) as u8, v as u8]

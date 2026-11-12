@@ -324,7 +324,7 @@ impl Sheet {
     }
 }
 
-/// A 3 × 5 letter, its rows top to bottom in 3-bit groups; a solid block for
+/// A 3 x 5 letter, its rows top to bottom in 3-bit groups; a solid block for
 /// characters it doesn't know
 #[rustfmt::skip]
 fn glyph(c: char) -> u16 {

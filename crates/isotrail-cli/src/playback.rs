@@ -162,7 +162,7 @@ impl PlaybackArgs {
         let draw_s = timeline.draw_s();
         if draw_s < MIN_DRAW_S - 1e-4 {
             return Err(usage(format!(
-                "a {}s play leaves {:.2} s to draw the route after the intro{} and the hold; it needs at least {MIN_DRAW_S} s, so shorten --intro or --hold or lengthen --duration",
+                "a {}s play leaves {:.2}s to draw the route after the intro{} and the hold; it needs at least {MIN_DRAW_S}s, so shorten --intro or --hold or lengthen --duration",
                 self.duration,
                 draw_s.max(0.0),
                 if self.loop_back { ", the rewind" } else { "" }
@@ -363,7 +363,7 @@ mod tests {
         }
         let squeezed = args(&["--duration", "2", "--intro", "1", "--hold", "0.8"]).check();
         let message = squeezed.unwrap_err().to_string();
-        assert!(message.contains("leaves 0.20 s to draw"), "{message}");
+        assert!(message.contains("leaves 0.20s to draw"), "{message}");
         assert!(args(&["--duration", "2", "--intro", "1"]).check().is_ok());
     }
 

@@ -256,7 +256,7 @@ fn clouds(pixel: vec2<i32>, sky: vec3<f32>, t: f32) -> vec3<f32> {
     return mix(uniforms.cloud_lit.rgb, uniforms.cloud_shade.rgb, 0.3);
 }
 
-// Whether a `width` × `length` particle covers the pixel. Particles fall
+// Whether a `width` x `length` particle covers the pixel. Particles fall
 // through a grid of `cell`-sized cells, `fallen` pixels so far and `slant`
 // pixels sideways for each pixel down, and a cell holds one with a chance
 // of `chance`

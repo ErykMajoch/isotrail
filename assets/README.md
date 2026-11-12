@@ -14,7 +14,7 @@ The palettes are published on Lospec for anyone to use in their artwork, without
 
 ## Font
 
-`fonts/monogram.png` is a grid of 8 × 13 pixel glyph cells, and `fonts/monogram.txt` lists the characters in the grid, one line per row. Together they hold [monogram](https://datagoblin.itch.io/monogram) by Vinícius Menézio (datagoblin), released under [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/): ASCII, Latin-1, Latin Extended-A and a few symbols. The glyphs come from monogram extended, by way of its bitmap source in [monogram-extended-ua](https://github.com/dmitriy-shmilo/monogram-extended-ua) (also CC0). Two changes were made: the middle dot (`·`) sits at the middle of the capitals instead of at their top, and the non-Latin scripts were left out.
+`fonts/monogram.png` is a grid of 8 x 13 pixel glyph cells, and `fonts/monogram.txt` lists the characters in the grid, one line per row. Together they hold [monogram](https://datagoblin.itch.io/monogram) by Vinícius Menézio (datagoblin), released under [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/): ASCII, Latin-1, Latin Extended-A and a few symbols. The glyphs come from monogram extended, by way of its bitmap source in [monogram-extended-ua](https://github.com/dmitriy-shmilo/monogram-extended-ua) (also CC0). Two changes were made: the middle dot (`·`) sits at the middle of the capitals instead of at their top, and the non-Latin scripts were left out.
 
 ## Sprites
 

@@ -63,7 +63,7 @@ impl AnimationArgs {
     pub fn motion(&self, gif: bool) -> anyhow::Result<Motion> {
         if gif && self.duration > MAX_GIF_DURATION_S {
             return Err(usage(format!(
-                "a GIF can be at most 60 s long, not {}s; an MP4 can be up to 180 s",
+                "a GIF can be at most 60s long, not {}s; an MP4 can be up to 180s",
                 self.duration
             )));
         }
@@ -93,7 +93,7 @@ impl AnimationArgs {
         let draw_s = timeline.draw_s();
         if draw_s < MIN_DRAW_S - 1e-4 {
             return Err(usage(format!(
-                "a {}s animation leaves {:.2} s to draw the route after the intro{} and the hold; it needs at least {MIN_DRAW_S} s, so shorten --intro or --hold or lengthen --duration",
+                "a {}s animation leaves {:.2}s to draw the route after the intro{} and the hold; it needs at least {MIN_DRAW_S}s, so shorten --intro or --hold or lengthen --duration",
                 self.duration,
                 draw_s.max(0.0),
                 if self.loop_back { ", the rewind" } else { "" }
@@ -196,7 +196,7 @@ mod tests {
         let long = args(&["--duration", "90"]);
         assert!(long.motion(false).is_ok());
         let message = long.motion(true).unwrap_err().to_string();
-        assert!(message.contains("60 s"), "{message}");
+        assert!(message.contains("60s"), "{message}");
         let fast = args(&["--fps", "60"]);
         assert_eq!(fast.motion(false).unwrap().timeline.fps, 60);
         let message = fast.motion(true).unwrap_err().to_string();

@@ -66,7 +66,7 @@ fn keep_one_clock(times: &mut [Option<i64>]) {
 }
 
 /// Drops points far from both neighbours while those neighbours lie close
-/// together: legs faster than 100 m/s, or for untimed legs longer than 50
+/// together: legs faster than 100m/s, or for untimed legs longer than 50
 /// median steps. A first or last point goes when its one leg is suspect and
 /// the next one isn't, and for an untimed leg only when it is also 50 times
 /// longer than the rest of the track. Returns how many were dropped
@@ -155,7 +155,7 @@ mod tests {
     use crate::Segment;
 
     const START_S: i64 = 1_750_000_000;
-    /// About 11 m north per step
+    /// About 11m north per step
     const STEP_DEG: f64 = 0.0001;
 
     fn walk(n: usize, every_s: Option<i64>) -> Vec<TrackPoint> {
@@ -270,7 +270,7 @@ mod tests {
 
     #[test]
     fn fast_legs_and_single_long_jumps_are_kept() {
-        // A ferry at 15 m/s
+        // A ferry at 15m/s
         let mut t = track(vec![
             walk(10, Some(1))
                 .into_iter()

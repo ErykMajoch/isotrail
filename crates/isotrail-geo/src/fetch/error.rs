@@ -38,7 +38,7 @@ pub enum FetchError {
     },
 
     /// The answer is larger than isotrail is willing to hold in memory
-    #[error("the answer from {url} is larger than {} MB", limit / 1_000_000)]
+    #[error("the answer from {url} is larger than {}MB", limit / 1_000_000)]
     TooLarge { url: String, limit: u64 },
 
     /// Reading or writing the on-disk cache failed

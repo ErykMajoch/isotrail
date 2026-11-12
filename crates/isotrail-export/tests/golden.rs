@@ -837,7 +837,7 @@ fn every_clip_ends_on_the_still() {
         let share = differing_share(last.rgba(), still.rgba(), Tolerance::default());
         assert!(
             share <= Tolerance::default().max_diff_fraction,
-            "{duration_s} s at {fps} fps, {step_fps:?}: {:.2}% differs",
+            "{duration_s}s at {fps} fps, {step_fps:?}: {:.2}% differs",
             share * 100.0
         );
     }

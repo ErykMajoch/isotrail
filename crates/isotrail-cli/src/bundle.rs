@@ -486,7 +486,7 @@ pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
     }
 
     say!(
-        "Heightmap {} × {} cells of {:.1} m from {tiles} terrain tile{} at zoom {}",
+        "Heightmap {} x {} cells of {:.1}m from {tiles} terrain tile{} at zoom {}",
         grid.cols,
         grid.rows,
         grid.cell_size_m,
@@ -494,7 +494,7 @@ pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
         grid.dem_zoom()
     );
     say!(
-        "Elevation {min:.0} – {max:.0} m, drawn {:.1}× taller",
+        "Elevation {min:.0} – {max:.0}m, drawn {:.1}x taller",
         bundle.grid.exaggeration
     );
     match features {
@@ -534,7 +534,7 @@ pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
     );
     for (path, size) in written {
         match size {
-            Some(bytes) => say!("Wrote {} ({} KB)", shown(&path), bytes.div_ceil(1024)),
+            Some(bytes) => say!("Wrote {} ({}KB)", shown(&path), bytes.div_ceil(1024)),
             None => say!("Wrote {}", shown(&path)),
         }
         report.add(Written::file(&path));

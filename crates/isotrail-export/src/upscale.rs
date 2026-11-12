@@ -2,7 +2,7 @@ use isotrail_render::Frame;
 
 use crate::ExportError;
 
-/// Enlarges a frame by an integer factor, each pixel becoming a `scale × scale` square
+/// Enlarges a frame by an integer factor, each pixel becoming a `scale x scale` square
 pub fn upscale(frame: &Frame, scale: u32) -> Result<Frame, ExportError> {
     if scale == 0 {
         return Err(ExportError::ZeroScale);

@@ -269,8 +269,8 @@ pub fn write_table(
 
 fn temperature(celsius: f32, units: Units) -> String {
     match units {
-        Units::Metric => format!("{celsius:.1} °C"),
-        Units::Imperial => format!("{:.0} °F", celsius * 1.8 + 32.0),
+        Units::Metric => format!("{celsius:.1}°C"),
+        Units::Imperial => format!("{:.0}°F", celsius * 1.8 + 32.0),
     }
 }
 
@@ -281,37 +281,37 @@ fn temperature_range(min: f32, max: f32, units: Units) -> String {
     };
     let (min, max) = (format!("{min:.0}"), format!("{max:.0}"));
     if min == max {
-        format!("{max} {unit}")
+        format!("{max}{unit}")
     } else {
-        format!("{min} – {max} {unit}")
+        format!("{min} – {max}{unit}")
     }
 }
 
 fn precipitation(mm: f32, units: Units) -> String {
     match units {
-        Units::Metric => format!("{mm:.1} mm"),
+        Units::Metric => format!("{mm:.1}mm"),
         Units::Imperial => format!("{:.2} in", mm / 25.4),
     }
 }
 
 fn snowfall(cm: f32, units: Units) -> String {
     match units {
-        Units::Metric => format!("{cm:.1} cm"),
+        Units::Metric => format!("{cm:.1}cm"),
         Units::Imperial => format!("{:.1} in", cm / 2.54),
     }
 }
 
 fn snow_depth(m: f32, units: Units) -> String {
     match units {
-        Units::Metric => format!("{:.0} cm", m * 100.0),
+        Units::Metric => format!("{:.0}cm", m * 100.0),
         Units::Imperial => format!("{:.0} in", m / 0.0254),
     }
 }
 
 fn wind(m_s: f32, from_deg: f32, units: Units) -> String {
     let speed = match units {
-        Units::Metric => format!("{:.0} km/h", m_s * 3.6),
-        Units::Imperial => format!("{:.0} mph", m_s / 0.447_04),
+        Units::Metric => format!("{:.0}km/h", m_s * 3.6),
+        Units::Imperial => format!("{:.0}mph", m_s / 0.447_04),
     };
     format!("{speed} {}", compass(from_deg))
 }
@@ -403,7 +403,7 @@ mod tests {
         assert_eq!(summary.wind, (8.0, 250.0));
         assert_eq!(
             summary.line(WeatherDataset::Archive),
-            "snow showers, 2 – 8 °C, 0.6 mm rain, 0.3 cm snow (Open-Meteo archive)"
+            "snow showers, 2 – 8°C, 0.6mm rain, 0.3cm snow (Open-Meteo archive)"
         );
     }
 
@@ -425,22 +425,22 @@ mod tests {
             text.contains("  Weather    snow showers (Open-Meteo archive)\n"),
             "{text}"
         );
-        assert!(text.contains("  Temp       2 – 8 °C\n"), "{text}");
-        assert!(text.contains("  Wind       up to 29 km/h WSW\n"), "{text}");
-        assert!(text.contains("  Snow depth 5 cm\n"), "{text}");
+        assert!(text.contains("  Temp       2 – 8°C\n"), "{text}");
+        assert!(text.contains("  Wind       up to 29km/h WSW\n"), "{text}");
+        assert!(text.contains("  Snow depth 5cm\n"), "{text}");
         assert!(
             text.contains("  Credit     Weather data by Open-Meteo.com\n"),
             "{text}"
         );
         assert!(text.contains("  Mon 16 Jun 2025\n"), "{text}");
-        assert!(text.contains("  11:00    2.0 °C  partly cloudy"), "{text}");
+        assert!(text.contains("  11:00     2.0°C  partly cloudy"), "{text}");
         assert!(text.contains("light rain"), "{text}");
-        assert_eq!(text.matches(" °C  ").count(), 5, "{text}");
+        assert_eq!(text.matches("°C  ").count(), 5, "{text}");
 
         let mut out = Vec::new();
         write_table(&mut out, &weather, span, None, Units::Imperial).unwrap();
         let text = String::from_utf8(out).unwrap();
-        assert!(text.contains("  Temp       36 – 46 °F\n"), "{text}");
+        assert!(text.contains("  Temp       36 – 46°F\n"), "{text}");
         assert!(text.contains("  UTC "), "{text}");
         assert!(text.contains("  09:00 "), "{text}");
     }

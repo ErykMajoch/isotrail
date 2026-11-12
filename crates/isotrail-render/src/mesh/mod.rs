@@ -134,9 +134,9 @@ pub fn mesh_within(
         let needed_mb = vertices.saturating_mul(VERTEX_BYTES).div_ceil(1 << 20);
         return Err(RenderError::MeshTooLarge {
             needed: if vertices > limit {
-                format!("over {needed_mb} MB")
+                format!("over {needed_mb}MB")
             } else {
-                format!("up to {needed_mb} MB")
+                format!("up to {needed_mb}MB")
             },
             allowed_mb: max_bytes >> 20,
         });
@@ -148,7 +148,7 @@ pub(crate) fn check_size(mesh: &TerrainMesh, max_bytes: u64) -> Result<(), Rende
     let bytes = (mesh.vertices.len() as u64).saturating_mul(VERTEX_BYTES);
     if bytes > max_bytes {
         return Err(RenderError::MeshTooLarge {
-            needed: format!("{} MB", bytes.div_ceil(1 << 20)),
+            needed: format!("{}MB", bytes.div_ceil(1 << 20)),
             allowed_mb: max_bytes >> 20,
         });
     }
@@ -193,7 +193,7 @@ impl TerrainMesh {
         self.push_triangle([a, c, d], colour);
     }
 
-    /// A vertical wall over `from` → `to`, facing `(to − from) × z`
+    /// A vertical wall over `from` → `to`, facing the cross product of `to − from` and `z`
     fn push_wall(&mut self, [from, to]: [Vec2; 2], bottom: f32, top: f32, colour: [u8; 4]) {
         self.push_quad(
             [
@@ -253,7 +253,7 @@ impl Side {
 }
 
 /// Slab-frame position of a fractional grid position, where cell (c, r)
-/// spans [c, c + 1) × [r, r + 1)
+/// spans [c, c + 1) x [r, r + 1)
 pub(crate) fn slab_position(grid: &GridInfo, col: f64, row: f64) -> Vec2 {
     Vec2::new(
         (col * grid.cell_size_m - grid.length_m() / 2.0) as f32,
@@ -419,7 +419,7 @@ mod tests {
         assert!(check_size(&mesh, bytes).is_ok());
         let message = check_size(&mesh, bytes - 1).unwrap_err().to_string();
         assert!(
-            message.contains("needs 1 MB") && message.contains("(0 MB)"),
+            message.contains("needs 1MB") && message.contains("(0MB)"),
             "{message}"
         );
 

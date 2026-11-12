@@ -75,7 +75,7 @@ impl Mesher for SmoothMesher {
     }
 }
 
-/// Exaggerated heights above the lowest terrain at the `(cols + 1) × (rows + 1)`
+/// Exaggerated heights above the lowest terrain at the `(cols + 1) x (rows + 1)`
 /// cell corners, row-major. A corner is the mean of the cells around it, except
 /// next to water, where it takes the water's level so lakes stay flat
 fn corner_heights(bundle: &SceneBundle) -> Vec<f32> {
@@ -198,7 +198,7 @@ mod tests {
 
     #[test]
     fn lakes_stay_flat_at_their_level() {
-        // A 4 × 3 hillside with a lake in the two middle cells of the middle row
+        // A 4 x 3 hillside with a lake in the two middle cells of the middle row
         #[rustfmt::skip]
         let heights = [
             90.0, 80.0, 80.0, 90.0,

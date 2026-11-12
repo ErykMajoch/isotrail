@@ -22,7 +22,7 @@ pub enum DemError {
         source: png::DecodingError,
     },
 
-    /// The tile decoded but isn't a 256 × 256 RGB(A) terrarium tile
+    /// The tile decoded but isn't a 256 x 256 RGB(A) terrarium tile
     #[error("elevation tile {tile} has an unexpected format: {reason}")]
     Format { tile: TileId, reason: String },
 

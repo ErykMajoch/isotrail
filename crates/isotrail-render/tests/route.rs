@@ -15,7 +15,7 @@ const HEADING: f32 = 0.15;
 const HEAD_CORE: [u8; 3] = [235, 237, 233];
 const HEAD_RING: [u8; 3] = [232, 193, 112];
 
-/// A grass slab with a 150 m ridge across its middle, at column 40
+/// A grass slab with a 150m ridge across its middle, at column 40
 fn ridge(route: &[(f32, f32)], breaks: Vec<u32>) -> SceneBundle {
     let heights: Vec<f32> = (0..COLS * ROWS)
         .map(|i| {

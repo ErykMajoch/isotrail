@@ -36,7 +36,7 @@ impl Treeline {
     }
 }
 
-/// About 2100 m in the Alps, 1700 m in the Tatras and 670 m in Scotland
+/// About 2100m in the Alps, 1700m in the Tatras and 670m in Scotland
 pub fn latitude_treeline_m(lat_deg: f64) -> f64 {
     (2100.0 - 130.0 * (lat_deg.abs() - 46.0)).clamp(0.0, 4000.0)
 }

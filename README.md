@@ -47,7 +47,7 @@ isotrail turns a recorded hike into a small pixel-art model of the real landscap
     <td align="center">Stars and the moon<br><code>--time 21:45</code></td>
   </tr>
   <tr>
-    <td width="33%"><img src="docs/images/gallery-snow.png" alt="A 100 km trek across the Peak District under snow, seen from higher up, with snowflakes falling"></td>
+    <td width="33%"><img src="docs/images/gallery-snow.png" alt="A 100km trek across the Peak District under snow, seen from higher up, with snowflakes falling"></td>
     <td width="33%"><img src="docs/images/gallery-autumn.gif" alt="An animation of a Tatra hike in autumn colours: the route draws itself and the stats count up while the camera turns"></td>
     <td width="33%"><img src="docs/images/gallery-smooth.png" alt="Derwent Edge drawn with smooth low-poly terrain instead of blocks"></td>
   </tr>

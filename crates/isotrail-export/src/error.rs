@@ -26,7 +26,7 @@ pub enum ExportError {
     #[error("a GIF can show at most 50 frames a second, not {0}")]
     GifFps(u32),
 
-    #[error("a GIF can be at most 65535 pixels wide and high, not {width} × {height}")]
+    #[error("a GIF can be at most 65535 pixels wide and high, not {width} x {height}")]
     GifSize { width: u32, height: u32 },
 
     #[error(
@@ -43,12 +43,12 @@ pub enum ExportError {
     Ffmpeg { status: ExitStatus, stderr: String },
 
     #[error(
-        "ffmpeg made no progress for {seconds} s, so it was stopped{}",
+        "ffmpeg made no progress for {seconds}s, so it was stopped{}",
         last_words(.stderr)
     )]
     FfmpegStalled { seconds: u64, stderr: String },
 
-    #[error("an MP4 must be an even number of pixels wide and high, not {width} × {height}")]
+    #[error("an MP4 must be an even number of pixels wide and high, not {width} x {height}")]
     Mp4Size { width: u32, height: u32 },
 
     #[error("an MP4 can show at most 60 frames a second, not {0}")]
@@ -60,7 +60,7 @@ pub enum ExportError {
     #[error("MP4 output can't be transparent; use --background sky or a colour such as #1e2a33")]
     Mp4Transparent,
 
-    #[error("expected a {} × {} frame, got {} × {}", expected.0, expected.1, actual.0, actual.1)]
+    #[error("expected a {} x {} frame, got {} x {}", expected.0, expected.1, actual.0, actual.1)]
     FrameSize {
         expected: (u32, u32),
         actual: (u32, u32),

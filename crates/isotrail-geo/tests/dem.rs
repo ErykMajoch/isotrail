@@ -41,8 +41,8 @@ fn recorded_tiles_give_a_plausible_mountain() {
     assert_eq!((heightmap.cols, heightmap.rows), (grid.cols, grid.rows));
     assert!(heightmap.heights_m.iter().all(|h| h.is_finite()));
     let (min, max) = heightmap.range();
-    assert!((950.0..1100.0).contains(&max), "summit at {max} m");
-    assert!((100.0..600.0).contains(&min), "valley floor at {min} m");
+    assert!((950.0..1100.0).contains(&max), "summit at {max}m");
+    assert!((100.0..600.0).contains(&min), "valley floor at {min}m");
 
     let summit = (0..grid.rows)
         .flat_map(|row| (0..grid.cols).map(move |col| (col, row)))
@@ -54,7 +54,7 @@ fn recorded_tiles_give_a_plausible_mountain() {
     let off = (x - sx).hypot(y - sy);
     assert!(
         off < 2.0 * grid.cell_size_m,
-        "highest cell {off:.0} m from the summit"
+        "highest cell {off:.0}m from the summit"
     );
 }
 
@@ -70,8 +70,5 @@ fn neighbouring_cells_stay_continuous_across_the_seam() {
         }
     }
     let grade = f64::from(steepest) / grid.cell_size_m;
-    assert!(
-        grade < 1.5,
-        "a {steepest} m jump between neighbouring cells"
-    );
+    assert!(grade < 1.5, "a {steepest}m jump between neighbouring cells");
 }

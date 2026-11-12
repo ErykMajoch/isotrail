@@ -1,5 +1,5 @@
 //! Rasterising in fractional cell space, where cell (c, r) spans
-//! [c, c + 1) × [r, r + 1)
+//! [c, c + 1) x [r, r + 1)
 
 /// Calls `cell` for every cell whose centre is inside the rings, even-odd,
 /// so inner rings cut holes

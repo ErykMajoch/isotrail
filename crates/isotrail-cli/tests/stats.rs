@@ -29,10 +29,10 @@ fn table_in_metric_units() {
     let text = stdout(&isotrail(&["stats", file.to_str().unwrap()]));
     assert!(text.starts_with("Synthetic Ridge Loop\n"), "{text}");
     for line in [
-        "Distance   0.34 km",
-        "Gain       10 m",
-        "Loss       4 m",
-        "Elevation  2000 – 2012 m",
+        "Distance   0.34km",
+        "Gain       10m",
+        "Loss       4m",
+        "Elevation  2000 – 2012m",
         "Elapsed    1h 05m",
         "Moving     0m 27s",
         "Start      2025-07-01 10:00 CEST · 2025-07-01 08:00 UTC",
@@ -51,8 +51,8 @@ fn table_in_imperial_units() {
         "--units",
         "imperial",
     ]));
-    assert!(text.contains("Distance   0.21 mi"), "{text}");
-    assert!(text.contains("Elevation  6562 – 6601 ft"), "{text}");
+    assert!(text.contains("Distance   0.21mi"), "{text}");
+    assert!(text.contains("Elevation  6562 – 6601ft"), "{text}");
 }
 
 #[test]
@@ -156,7 +156,7 @@ fn glitched_times_and_stray_points_are_reported() {
         "stray-points.gpx",
         &["dropped 2 stray points far from their neighbours"],
     );
-    assert!(text.contains("Distance   0.24 km"), "{text}");
+    assert!(text.contains("Distance   0.24km"), "{text}");
 }
 
 #[test]

@@ -124,7 +124,7 @@ fn offline_bundle_writes_the_bundle_and_debug_images_from_the_cache() {
     assert!(output.status.success(), "{}", text(&output.stderr));
     let stdout = text(&output.stdout);
     assert!(
-        stdout.starts_with("Heightmap 32 × 16 cells of 118.3 m from 2 terrain tiles at zoom 11"),
+        stdout.starts_with("Heightmap 32 x 16 cells of 118.3m from 2 terrain tiles at zoom 11"),
         "{stdout}"
     );
     let features = OverpassSource::new(RecordedFetcher::new(fixtures().join("osm")))
@@ -140,13 +140,13 @@ fn offline_bundle_writes_the_bundle_and_debug_images_from_the_cache() {
     assert!(stdout.contains(", bare rock "), "{stdout}");
     assert!(stdout.contains("levelled\n"), "{stdout}");
     assert!(
-        stdout.contains("\nWeather: drizzle, 9 – 10 °C, 0.6 mm rain (Open-Meteo archive)\n"),
+        stdout.contains("\nWeather: drizzle, 9 – 10°C, 0.6mm rain (Open-Meteo archive)\n"),
         "{stdout}"
     );
     assert!(stdout.contains("\nRoute: "), "{stdout}");
     let size = std::fs::metadata(&itb).unwrap().len().div_ceil(1024);
     assert!(
-        stdout.contains(&format!("Wrote {} ({size} KB)\n", itb.display())),
+        stdout.contains(&format!("Wrote {} ({size}KB)\n", itb.display())),
         "{stdout}"
     );
     let bundle = SceneBundle::from_bytes(&std::fs::read(&itb).unwrap()).unwrap();
@@ -549,13 +549,13 @@ fn stats_show_the_weather_hour_by_hour() {
     let stdout = text(&output.stdout);
     for line in [
         "  Weather    drizzle (Open-Meteo archive)\n",
-        "  Temp       9 – 10 °C\n",
-        "  Rain       0.6 mm\n",
+        "  Temp       9 – 10°C\n",
+        "  Rain       0.6mm\n",
         "  Snowfall   none\n",
         "  Credit     Weather data by Open-Meteo.com\n",
         "  Sat 14 Jun 2025\n",
-        "  10:00    9.6 °C  light drizzle",
-        "  11:00    8.6 °C  drizzle",
+        "  10:00     9.6°C  light drizzle",
+        "  11:00     8.6°C  drizzle",
     ] {
         assert!(stdout.contains(line), "{line} in {stdout}");
     }
@@ -626,7 +626,7 @@ fn exaggeration_can_be_set_by_hand() {
     ];
     let output = isotrail(&cache_dir, &args);
     assert!(output.status.success(), "{}", text(&output.stderr));
-    assert!(text(&output.stdout).contains(" m, drawn 7.5× taller\n"));
+    assert!(text(&output.stdout).contains("m, drawn 7.5x taller\n"));
     let bundle = SceneBundle::from_bytes(&std::fs::read(&itb).unwrap()).unwrap();
     assert_eq!(bundle.grid.exaggeration, 7.5);
 

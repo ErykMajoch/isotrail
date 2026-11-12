@@ -113,7 +113,7 @@ impl GridInfo {
 /// Per-cell layers, row-major
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Terrain {
-    /// Height is `offset + value × scale` metres
+    /// Height is `offset + value * scale` metres
     pub heights: Vec<u16>,
     pub height_scale_m: f32,
     pub height_offset_m: f32,
@@ -176,7 +176,7 @@ pub struct Route {
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct RoutePoint {
-    /// Fractional grid position; cell (c, r) spans [c, c + 1) × [r, r + 1)
+    /// Fractional grid position; cell (c, r) spans [c, c + 1) x [r, r + 1)
     pub col: f32,
     pub row: f32,
     /// Along the full-resolution track

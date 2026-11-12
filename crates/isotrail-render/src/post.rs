@@ -407,7 +407,7 @@ impl Sky {
                 haze_colour: sky_bottom.lerp(cloud_lit, 0.5),
                 rain,
                 snow,
-                // Raindrops fall at about 6 m/s and snowflakes at about 1.5
+                // Raindrops fall at about 6m/s and snowflakes at about 1.5
                 rain_slant: (across / 6.0).clamp(-0.8, 0.8),
                 snow_slant: (across / 1.5).clamp(-1.5, 1.5),
                 time_s,

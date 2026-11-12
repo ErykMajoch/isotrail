@@ -210,7 +210,7 @@ function readClip(element) {
   let [introS, drawS, holdS] = parts();
   if (drawS < MIN_DRAW_S - 1e-4) {
     console.warn(
-      `<isotrail-hike> ignored intro and hold, so they use the default: a ${duration} s clip would leave ${Math.max(drawS, 0).toFixed(2)} s to draw the route, and it needs at least ${MIN_DRAW_S} s`,
+      `<isotrail-hike> ignored intro and hold, so they use the default: a ${duration}s clip would leave ${Math.max(drawS, 0).toFixed(2)}s to draw the route, and it needs at least ${MIN_DRAW_S}s`,
     );
     intro = null;
     hold = null;

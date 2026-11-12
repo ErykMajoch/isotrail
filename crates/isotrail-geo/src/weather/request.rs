@@ -35,7 +35,7 @@ pub enum RequestError {
 pub struct WeatherLocation {
     pub lat: f64,
     pub lon: f64,
-    /// Mean track elevation over the stretch, rounded to 10 m, so the
+    /// Mean track elevation over the stretch, rounded to 10m, so the
     /// temperature is for the height walked rather than the model's terrain
     pub ele_m: Option<f64>,
 }

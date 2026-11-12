@@ -449,7 +449,7 @@ impl Turntable {
         }
     }
 
-    /// At 1×
+    /// At 1x
     pub fn metres_per_px(&self) -> f32 {
         self.metres_per_px
     }
@@ -610,7 +610,7 @@ mod tests {
         )
     }
 
-    /// A flat 20 × 20 slab of 10 m cells with a route through the given
+    /// A flat 20 x 20 slab of 10m cells with a route through the given
     /// (col, row) positions
     fn with_route(cells: &[(f32, f32)]) -> SceneBundle {
         let mut bundle = bundle(

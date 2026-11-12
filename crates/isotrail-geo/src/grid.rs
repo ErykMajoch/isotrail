@@ -41,7 +41,7 @@ impl Grid {
         self.footprint.to_local(u, v)
     }
 
-    /// Fractional (col, row) of a local point; cell (c, r) spans [c, c + 1) × [r, r + 1)
+    /// Fractional (col, row) of a local point; cell (c, r) spans [c, c + 1) x [r, r + 1)
     pub fn local_to_cell(&self, x: f64, y: f64) -> (f64, f64) {
         let (u, v) = self.footprint.from_local(x, y);
         (
@@ -202,8 +202,8 @@ mod tests {
     #[test]
     fn zoom_matches_day_hikes_and_long_treks() {
         for lat in [47.0, 50.0, 53.0] {
-            assert_eq!(dem_zoom(30.0, lat), 13, "30 m at {lat}°");
-            assert_eq!(dem_zoom(250.0, lat), 10, "250 m at {lat}°");
+            assert_eq!(dem_zoom(30.0, lat), 13, "30m at {lat}°");
+            assert_eq!(dem_zoom(250.0, lat), 10, "250m at {lat}°");
         }
         assert_eq!(dem_zoom(30.0, 0.0), 14);
     }

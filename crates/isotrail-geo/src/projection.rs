@@ -75,7 +75,7 @@ mod tests {
                 let (bx, by) = projection.project(lat, lon);
                 let (lat2, lon2) = projection.unproject(bx, by);
                 let error = haversine_m(&at(lat, lon), &at(lat2, lon2));
-                assert!(error < 0.5, "{error} m at ({lat0}, {lon0}) + ({x}, {y})");
+                assert!(error < 0.5, "{error}m at ({lat0}, {lon0}) + ({x}, {y})");
                 assert!((bx - x).hypot(by - y) < 0.5);
                 assert!((-180.0..180.0).contains(&lon));
             }

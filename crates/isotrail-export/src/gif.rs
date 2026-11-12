@@ -126,7 +126,7 @@ pub fn check_gif_look(look: &Look) -> Result<(), ExportError> {
 }
 
 impl<W: Write> GifWriter<W> {
-    /// Frames are `width × height` internal pixels, coloured from `look`'s
+    /// Frames are `width x height` internal pixels, coloured from `look`'s
     /// palette and background
     pub fn new(
         writer: W,

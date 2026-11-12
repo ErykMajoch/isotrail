@@ -103,12 +103,12 @@ impl SceneBundle {
         let sides = 1..=MAX_GRID_SIDE;
         if !(sides.contains(&grid.cols) && sides.contains(&grid.rows)) {
             return Err(format!(
-                "a grid of {} × {} cells (each side takes 1 to {MAX_GRID_SIDE})",
+                "a grid of {} x {} cells (each side takes 1 to {MAX_GRID_SIDE})",
                 grid.cols, grid.rows
             ));
         }
         if !(grid.cell_size_m > 0.0 && grid.cell_size_m <= MAX_CELL_SIZE_M) {
-            return Err(format!("cell size {} m", grid.cell_size_m));
+            return Err(format!("cell size {}m", grid.cell_size_m));
         }
         if !EXAGGERATION.contains(&grid.exaggeration) {
             return Err(format!("exaggeration {}", grid.exaggeration));
@@ -212,7 +212,7 @@ impl SceneBundle {
         }
         for (what, seconds) in [("elapsed", stats.elapsed_s), ("moving", stats.moving_s)] {
             if let Some(seconds) = seconds.filter(|s| !(0..=MAX_SPAN_S).contains(s)) {
-                return Err(format!("{what} time of {seconds} s"));
+                return Err(format!("{what} time of {seconds}s"));
             }
         }
         for (what, time) in [("start", stats.start), ("end", stats.end)] {
@@ -227,7 +227,7 @@ impl SceneBundle {
         if let (Some(first), Some(last)) = (times.iter().min(), times.iter().max())
             && last - first > MAX_SPAN_S
         {
-            return Err(format!("route times {} s apart", last - first));
+            return Err(format!("route times {}s apart", last - first));
         }
         Ok(())
     }
@@ -558,8 +558,8 @@ mod tests {
             ("height offset", |b| {
                 b.terrain.height_offset_m = f32::NEG_INFINITY;
             }),
-            ("a grid of 0 × 4 cells", |b| b.grid.cols = 0),
-            ("a grid of 6 × 2048 cells", |b| b.grid.rows = 2048),
+            ("a grid of 0 x 4 cells", |b| b.grid.cols = 0),
+            ("a grid of 6 x 2048 cells", |b| b.grid.rows = 2048),
             ("cell size", |b| b.grid.cell_size_m = f64::NAN),
             ("cell size", |b| b.grid.cell_size_m = -30.0),
             ("cell size", |b| b.grid.cell_size_m = 1e9),

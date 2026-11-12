@@ -93,7 +93,7 @@ pub fn bundle(grid: GridInfo, heights_m: &[f32], landcover: &[Landcover]) -> Sce
     bundle
 }
 
-/// A turned 96 × 48 slab with a tilted plain, a rocky hill ringed by scree, a
+/// A turned 96 x 48 slab with a tilted plain, a rocky hill ringed by scree, a
 /// levelled lake fed by a stream, two forests, a path and a road, and a
 /// straight route from the lake shore to the summit
 pub fn diorama_bundle() -> SceneBundle {

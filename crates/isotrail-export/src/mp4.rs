@@ -97,7 +97,7 @@ pub struct Mp4Writer {
 }
 
 impl Mp4Writer {
-    /// Frames are `width × height` internal pixels
+    /// Frames are `width x height` internal pixels
     pub fn create(
         ffmpeg: &Ffmpeg,
         path: &Path,

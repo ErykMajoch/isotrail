@@ -121,7 +121,7 @@ impl HttpFetcher {
                 Err(error) if error.is_transient() && attempt < self.retry.max_attempts => {
                     let delay = self.retry.delay(attempt - 1, error.retry_after());
                     warn!(
-                        "{error} (attempt {attempt} of {}), retrying in {:.1} s",
+                        "{error} (attempt {attempt} of {}), retrying in {:.1}s",
                         self.retry.max_attempts,
                         delay.as_secs_f64()
                     );
@@ -141,7 +141,7 @@ impl HttpFetcher {
             scope.spawn(move || {
                 if let Err(RecvTimeoutError::Timeout) = finished.recv_timeout(slow_after) {
                     warn!(
-                        "still waiting for {} after {:.0} s",
+                        "still waiting for {} after {:.0}s",
                         origin(url),
                         slow_after.as_secs_f64()
                     );

@@ -128,7 +128,7 @@ fn renders_a_gpx_file_from_cached_data_as_a_story_png() {
     assert!(output.status.success(), "{}", text(&output.stderr));
     let stdout = text(&output.stdout);
     assert!(
-        stdout.starts_with("Rendered 1080 × 1920 from 360 × 640 pixels\n"),
+        stdout.starts_with("Rendered 1080 x 1920 from 360 x 640 pixels\n"),
         "{stdout}"
     );
     assert!(
@@ -324,7 +324,7 @@ fn renders_an_animated_gif() {
     assert!(output.status.success(), "{}", text(&output.stderr));
     let stdout = text(&output.stdout);
     assert!(
-        stdout.starts_with("Rendered 5 frames of 1080 × 1080 from 108 × 108 pixels\n"),
+        stdout.starts_with("Rendered 5 frames of 1080 x 1080 from 108 x 108 pixels\n"),
         "{stdout}"
     );
     // The synthetic hike has no times to pace by
@@ -366,7 +366,7 @@ fn renders_an_mp4() {
     let stdout = text(&output.stdout);
     assert!(
         stdout.starts_with(
-            "Rendered 5 frames of 1080 × 1080 from 108 × 108 pixels
+            "Rendered 5 frames of 1080 x 1080 from 108 x 108 pixels
 "
         ),
         "{stdout}"
@@ -592,12 +592,12 @@ fn every_aspect_gets_its_own_image() {
     assert!(output.status.success(), "{}", text(&output.stderr));
     let stdout = text(&output.stdout);
     for (aspect, size, internal) in [
-        ("story", (1080, 1920), "360 × 640"),
-        ("video", (1080, 1920), "360 × 640"),
-        ("portrait", (1080, 1440), "360 × 480"),
-        ("feed", (1080, 1350), "360 × 450"),
-        ("square", (1080, 1080), "360 × 360"),
-        ("wide", (1920, 1080), "640 × 360"),
+        ("story", (1080, 1920), "360 x 640"),
+        ("video", (1080, 1920), "360 x 640"),
+        ("portrait", (1080, 1440), "360 x 480"),
+        ("feed", (1080, 1350), "360 x 450"),
+        ("square", (1080, 1080), "360 x 360"),
+        ("wide", (1920, 1080), "640 x 360"),
     ] {
         let image = temp.path().join(format!("hike-{aspect}.png"));
         assert_eq!(png_size(&image), size, "{aspect}");
@@ -626,17 +626,17 @@ fn the_scale_must_divide_both_sides() {
     let output = isotrail(&cache, temp.path(), &["render", "hike.itb", "--scale", "5"]);
     assert!(output.status.success(), "{}", text(&output.stderr));
     assert!(text(&output.stdout).starts_with(
-        "Rendered 1080 × 1920 from 216 × 384 pixels
+        "Rendered 1080 x 1920 from 216 x 384 pixels
 "
     ));
     let output = isotrail(&cache, temp.path(), &["render", "hike.itb", "--scale", "4"]);
     assert!(output.status.success(), "{}", text(&output.stderr));
-    assert!(text(&output.stdout).starts_with("Rendered 1080 × 1920 from 270 × 480 pixels\n"));
+    assert!(text(&output.stdout).starts_with("Rendered 1080 x 1920 from 270 x 480 pixels\n"));
     let output = isotrail(&cache, temp.path(), &["render", "hike.itb", "--scale", "7"]);
     assert_eq!(output.status.code(), Some(2));
     let stderr = text(&output.stderr);
     assert!(
-        stderr.contains("--scale 7 doesn't divide the story image (1080 × 1920); use --scale 1, 2"),
+        stderr.contains("--scale 7 doesn't divide the story image (1080 x 1920); use --scale 1, 2"),
         "{stderr}"
     );
     let output = isotrail(
@@ -665,7 +665,7 @@ fn any_size_renders_with_its_own_safe_area() {
     assert_eq!(output.status.code(), Some(2), "{}", text(&output.stderr));
     assert!(
         text(&output.stderr)
-            .contains("--scale 3 doesn't divide 1000 × 700; use --scale 1, 2, 4, 5 or 10")
+            .contains("--scale 3 doesn't divide 1000 x 700; use --scale 1, 2, 4, 5 or 10")
     );
 
     let output = isotrail(
@@ -676,7 +676,7 @@ fn any_size_renders_with_its_own_safe_area() {
         ],
     );
     assert!(output.status.success(), "{}", text(&output.stderr));
-    assert!(text(&output.stdout).starts_with("Rendered 1000 × 700 from 200 × 140 pixels\n"));
+    assert!(text(&output.stdout).starts_with("Rendered 1000 x 700 from 200 x 140 pixels\n"));
     assert_eq!(png_size(&temp.path().join("a.png")), (1000, 700));
 
     let output = isotrail(
@@ -1259,7 +1259,7 @@ no-attribution = true
     let stdout = text(&output.stdout);
     assert!(
         stdout.starts_with(
-            "Rendered 1080 × 1080 from 180 × 180 pixels
+            "Rendered 1080 x 1080 from 180 x 180 pixels
 "
         ),
         "{stdout}"
@@ -1271,7 +1271,7 @@ no-attribution = true
     let output = isotrail(&cache, temp.path(), &["render", "hike.itb"]);
     assert!(output.status.success(), "{}", text(&output.stderr));
     assert!(text(&output.stdout).starts_with(
-        "Rendered 1920 × 1080 from 384 × 216 pixels
+        "Rendered 1920 x 1080 from 384 x 216 pixels
 "
     ));
 
@@ -1391,7 +1391,7 @@ fn clips_take_an_intro_a_hold_a_loop_count_and_a_smaller_gif() {
         "once",
     ]);
     assert!(
-        stdout.starts_with("Rendered 5 frames of 108 × 108\n"),
+        stdout.starts_with("Rendered 5 frames of 108 x 108\n"),
         "{stdout}"
     );
     let bytes = fs::read(temp.path().join("small.gif")).unwrap();
@@ -1456,7 +1456,7 @@ fn gif_limits_and_squeezed_clips_are_refused_before_any_work() {
         text(&output.stderr)
     };
     let stderr = refused(&["-o", "a.gif", "--duration", "61"]);
-    assert!(stderr.contains("a GIF can be at most 60 s"), "{stderr}");
+    assert!(stderr.contains("a GIF can be at most 60s"), "{stderr}");
     let stderr = refused(&["-o", "a.gif", "--fps", "55"]);
     assert!(
         stderr.contains("--fps 55 is too fast for a GIF"),

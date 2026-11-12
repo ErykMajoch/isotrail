@@ -109,7 +109,7 @@ fn flat_ground_is_one_colour_without_acne() {
 
 #[test]
 fn a_tower_casts_its_shadow_away_from_the_sun() {
-    // A 30 Ã— 30 m tower, 200 m tall
+    // A 30 x 30m tower, 200m tall
     let tower = slab(|c, r| {
         if c.abs() <= 1 && r.abs() <= 1 {
             200.0
@@ -130,7 +130,7 @@ fn a_tower_casts_its_shadow_away_from_the_sun() {
         };
         let open = ground(0.0, 120.0);
         assert_eq!(ground(0.0, -120.0), open, "{name}");
-        // The shadow is about 240 m long
+        // The shadow is about 240m long
         let shade = ground(-80.0, 0.0);
         assert_ne!(shade, open, "{name}");
         assert_eq!(ground(-160.0, 0.0), shade, "{name}");

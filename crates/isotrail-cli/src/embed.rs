@@ -232,7 +232,7 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
         let bytes = bundle.to_bytes()?;
         output::write(&bundle_path, |file| Ok(file.write_all(&bytes)?))?;
         say!(
-            "Wrote {} ({} KB)",
+            "Wrote {} ({}KB)",
             shown(&bundle_path),
             bytes.len().div_ceil(1024)
         );

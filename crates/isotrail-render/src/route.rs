@@ -340,7 +340,7 @@ impl RoutePass {
     }
 }
 
-/// Pixel position of a slab-frame point in a `width × height` frame, from
+/// Pixel position of a slab-frame point in a `width x height` frame, from
 /// the top-left corner
 pub(crate) fn to_pixel(camera: &Camera, point: Vec3, width: u32, height: u32) -> Vec2 {
     let ndc = camera.view_proj.project_point3(point);
@@ -383,7 +383,7 @@ mod tests {
     use super::*;
     use crate::{Mesher, SmoothMesher, VoxelMesher};
 
-    /// A 10 × 10 slab of 10 m cells, `heights` per cell, with a route through
+    /// A 10 x 10 slab of 10m cells, `heights` per cell, with a route through
     /// the (col, row) points
     fn routed(heights: &[f32], points: &[(f32, f32)], breaks: Vec<u32>) -> SceneBundle {
         let mut bundle = bundle(grid(10, 10, 10.0), heights, &[Landcover::Grassland; 100]);
@@ -410,7 +410,7 @@ mod tests {
         bundle
     }
 
-    /// Cells in columns 5 and up are 10 m higher
+    /// Cells in columns 5 and up are 10m higher
     fn step() -> Vec<f32> {
         (0..100)
             .map(|i| if i % 10 >= 5 { 10.0 } else { 0.0 })

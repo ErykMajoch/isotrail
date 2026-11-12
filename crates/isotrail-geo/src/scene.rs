@@ -254,7 +254,7 @@ mod tests {
         }
     }
 
-    /// East-west pieces at y = 0, every 100 m, climbing 1 m per 10 m east
+    /// East-west pieces at y = 0, every 100m, climbing 1m per 10m east
     fn track(pieces: &[(f64, f64)], with_ele: bool) -> Track {
         let projection = LocalProjection::new(ORIGIN.0, ORIGIN.1);
         let mut secs = 0;
@@ -285,7 +285,7 @@ mod tests {
         }
     }
 
-    /// The grid, and ground rising 1 m per 20 m east
+    /// The grid, and ground rising 1m per 20m east
     fn terrain(track: &Track) -> (Grid, Heightmap, LandcoverMap) {
         let grid = Grid::new(
             &Footprint::from_track(track).unwrap(),

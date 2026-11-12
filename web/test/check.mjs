@@ -396,7 +396,7 @@ try {
   await sleep(4000);
   const madeAfter = await cdp.evaluate('__gpu.made');
   check('playing creates no GPU objects', madeAfter === madeBefore, `${madeBefore} -> ${madeAfter}`);
-  check('the route is still playing after 4 s', await cdp.evaluate(`${el('a')}.playing`));
+  check('the route is still playing after 4s', await cdp.evaluate(`${el('a')}.playing`));
   check('no uncaught errors', cdp.exceptions.length === 0, cdp.exceptions.join(' | '));
 
   // A lost GPU: one restart, then the poster
@@ -684,10 +684,10 @@ try {
   const clickZoom = (id, times) => cdp.evaluate(`for (let i = 0; i < ${times}; i++) ${part(id, 'zoom-in')}.click()`);
   await clickZoom('d', 5);
   await clickZoom('mz', 5);
-  check('the default zoom stops at 3×', (await zoomInDisabled('d')) === 'true');
+  check('the default zoom stops at 3x', (await zoomInDisabled('d')) === 'true');
   check('max-zoom="6" goes further', (await zoomInDisabled('mz')) === 'false');
   await clickZoom('mz', 4);
-  check('and stops at 6×', (await zoomInDisabled('mz')) === 'true');
+  check('and stops at 6x', (await zoomInDisabled('mz')) === 'true');
   await cdp.evaluate(`${el('ps')}.setAttribute('controls', 'zoom')`);
   check('changing controls updates them', (await shown('ps')) === 'zoom-in,zoom-out,credit', await shown('ps'));
 
@@ -902,7 +902,7 @@ async function launch(attempt = 1) {
   }
   stopBrowser(child, profile);
   await rm(profile, { recursive: true, force: true, maxRetries: 5 }).catch(() => {});
-  const why = failed === null ? 'opened no DevTools port within 60 s' : `exited with ${failed} before opening its DevTools port`;
+  const why = failed === null ? 'opened no DevTools port within 60s' : `exited with ${failed} before opening its DevTools port`;
   console.error(`${BROWSER} (${browserPath()}) ${why}${output.trim() ? `. Its last output:\n${output.trim()}` : ', with no output'}`);
   if (attempt < 3) return launch(attempt + 1);
   console.error(`could not start ${BROWSER} after 3 tries`);

@@ -138,12 +138,12 @@ fn write_table(
     stats: &TrackStats,
     units: Units,
 ) -> io::Result<()> {
-    let elevation = |m: f64| format!("{:.0} {}", units.elevation(m), units.elevation_unit());
+    let elevation = |m: f64| format!("{:.0}{}", units.elevation(m), units.elevation_unit());
     let rows = [
         (
             "Distance",
             format!(
-                "{:.2} {}",
+                "{:.2}{}",
                 units.distance(stats.distance_m),
                 units.distance_unit()
             ),

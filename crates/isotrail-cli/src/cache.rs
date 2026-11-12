@@ -129,9 +129,9 @@ fn size(bytes: u64) -> String {
     let bytes = bytes as f64;
     match bytes {
         b if b < 1e3 => format!("{b} B"),
-        b if b < 1e6 => format!("{:.1} kB", b / 1e3),
-        b if b < 1e9 => format!("{:.1} MB", b / 1e6),
-        b => format!("{:.2} GB", b / 1e9),
+        b if b < 1e6 => format!("{:.1}kB", b / 1e3),
+        b if b < 1e9 => format!("{:.1}MB", b / 1e6),
+        b => format!("{:.2}GB", b / 1e9),
     }
 }
 
@@ -143,9 +143,9 @@ mod tests {
     fn sizes() {
         assert_eq!(size(0), "0 B");
         assert_eq!(size(999), "999 B");
-        assert_eq!(size(48_213), "48.2 kB");
-        assert_eq!(size(3_250_000), "3.2 MB");
-        assert_eq!(size(1_500_000_000), "1.50 GB");
+        assert_eq!(size(48_213), "48.2kB");
+        assert_eq!(size(3_250_000), "3.2MB");
+        assert_eq!(size(1_500_000_000), "1.50GB");
     }
 
     #[test]
@@ -161,7 +161,7 @@ mod tests {
             bytes: 2_000,
             others: 3,
         };
-        assert_eq!(describe(many), "4 files (2.0 kB)");
+        assert_eq!(describe(many), "4 files (2.0kB)");
         assert_eq!(left_alone(0), "");
         assert_eq!(left_alone(1), "; left 1 other file alone");
         assert_eq!(left_alone(3), "; left 3 other files alone");

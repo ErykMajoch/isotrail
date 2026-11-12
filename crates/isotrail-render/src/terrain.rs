@@ -562,7 +562,7 @@ fn cloud_shadows(mesh: &GpuMesh, sun: &SunState, time_s: f32) -> ([f32; 4], [f32
     };
     let (min, max) = (mesh.corners[0], mesh.corners[7]);
     let size_m = ((max - min).truncate().max_element() / 5.0).max(mesh.cell_m);
-    // A 5 m/s wind carries a cloud its own size in about eight seconds
+    // A 5m/s wind carries a cloud its own size in about eight seconds
     let drift = weather.wind * time_s * size_m / 40.0;
     (
         [

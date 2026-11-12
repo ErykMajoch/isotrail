@@ -6,7 +6,7 @@ use glam::Vec2;
 pub enum Surface {
     /// One flat top per cell, row-major
     Steps { cols: usize, tops: Vec<f32> },
-    /// Heights at the `(cols + 1) × (rows + 1)` cell corners, row-major, with
+    /// Heights at the `(cols + 1) x (rows + 1)` cell corners, row-major, with
     /// each cell split from its bottom-left to its top-right corner
     Triangles { cols: usize, corners: Vec<f32> },
 }

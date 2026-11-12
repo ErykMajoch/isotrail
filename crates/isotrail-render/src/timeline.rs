@@ -671,8 +671,8 @@ mod tests {
 
     use super::*;
 
-    /// A straight 1 km route along a flat slab, `(distance, seconds)` per
-    /// point, with a profile that climbs 100 m to the middle and drops 50 m
+    /// A straight 1km route along a flat slab, `(distance, seconds)` per
+    /// point, with a profile that climbs 100m to the middle and drops 50m
     fn hike(points: &[(f32, Option<i64>)], breaks: Vec<u32>) -> SceneBundle {
         let mut bundle = bundle(
             grid(10, 10, 100.0),
@@ -704,7 +704,7 @@ mod tests {
         bundle
     }
 
-    /// 1 km in 1000 s of walking with an hour's stop halfway
+    /// 1km in 1000s of walking with an hour's stop halfway
     fn paused() -> SceneBundle {
         hike(
             &[
@@ -777,7 +777,7 @@ mod tests {
     fn orbits_ease_back_to_the_still_view_by_the_hold() {
         let orbit = Orbit::default();
         assert_eq!(orbit.sweep_deg, 30.0);
-        // Over a 1 s clip, seconds and shares are the same
+        // Over a 1s clip, seconds and shares are the same
         let clip = Timeline {
             duration_s: 1.0,
             ..Timeline::default()
@@ -860,7 +860,7 @@ mod tests {
             ..Motion::default()
         };
         let timeline = motion.timeline;
-        // 0.5 s intro, 6.5 s drawing, 1.5 s hold, 1.5 s rewind
+        // 0.5s intro, 6.5s drawing, 1.5s hold, 1.5s rewind
         assert_near(timeline.draw_s(), 6.5);
         assert_near(timeline.hold_start_s(), 7.0);
         assert_near(timeline.rewind_start_s(), 8.5);
@@ -902,7 +902,7 @@ mod tests {
     #[test]
     fn time_pacing_cuts_stops_to_a_minute() {
         let walk = Walk::new(&paused());
-        // 500 s walking, 60 s of the stop, 500 s walking
+        // 500s walking, 60s of the stop, 500s walking
         let total = 1_060.0;
         assert_near(walk.progress(Pace::Time, 250.0 / total), 0.25);
         assert_near(walk.progress(Pace::Time, 530.0 / total), 0.5);
@@ -938,7 +938,7 @@ mod tests {
         assert_near(walk.progress(Pace::Time, 460.0 / total), 0.6);
     }
 
-    /// 400 m on the first evening, a night until 50 000 s, then 600 m
+    /// 400m on the first evening, a night until 50 000s, then 600m
     fn overnight() -> SceneBundle {
         hike(
             &[
@@ -992,7 +992,7 @@ mod tests {
         );
         assert_step(walk.step(Pace::Distance, 1.0), 1.0, 50_400.0);
 
-        // By time the night is halfway through 800 s of walking
+        // By time the night is halfway through 800s of walking
         assert_step(walk.step(Pace::Time, 0.25 * 0.94), 0.2, 200.0);
         assert_step(walk.step(Pace::Time, 0.5 * 0.94 + 0.03), 0.4, 25_200.0);
         assert_step(
@@ -1022,7 +1022,7 @@ mod tests {
 
     #[test]
     fn many_nights_share_at_most_thirty_percent_of_the_drawing() {
-        // Ten days of 100 m, each followed by a night
+        // Ten days of 100m, each followed by a night
         let points: Vec<(f32, Option<i64>)> = (0..20)
             .map(|i| {
                 let day = i / 2;
@@ -1149,7 +1149,7 @@ mod tests {
         assert_eq!(last.yaw_offset_deg, 0.0);
     }
 
-    /// Six days of 100 m, each but the last followed by a night
+    /// Six days of 100m, each but the last followed by a night
     fn six_days() -> SceneBundle {
         let points: Vec<(f32, Option<i64>)> = (0..12)
             .map(|i| {
@@ -1183,7 +1183,7 @@ mod tests {
                             };
                             let count = motion.timeline.frame_count();
                             let last = motion.moment(&walk, count - 1);
-                            let case = format!("{duration_s} s, {fps} fps, {step_fps:?}, {pace:?}");
+                            let case = format!("{duration_s}s, {fps} fps, {step_fps:?}, {pace:?}");
                             assert_eq!(last.progress, 1.0, "{case}");
                             assert_eq!(last.yaw_offset_deg, 0.0, "{case}");
                             assert_eq!(last.hike_time_s, Some(finish), "{case}");

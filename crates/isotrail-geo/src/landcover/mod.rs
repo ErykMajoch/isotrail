@@ -251,7 +251,7 @@ mod tests {
     use super::*;
     use crate::{Area, Footprint, Line, LocalProjection, OsmId, OsmKind, Polygon, Ring, Tags};
 
-    /// North-up, 52 × 26 cells of 200 m
+    /// North-up, 52 x 26 cells of 200m
     fn grid() -> Grid {
         let projection = LocalProjection::new(46.5, 10.0);
         let points = [(0.0, 0.0), (8_000.0, 0.0)]

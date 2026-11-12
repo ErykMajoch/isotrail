@@ -229,7 +229,7 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
     report.finish(args.overlay.caption_credit(&bundle, dropped).as_deref())
 }
 
-/// `Rendered 300 frames of 1080 × 1920 from 360 × 640 pixels`, without the
+/// `Rendered 300 frames of 1080 x 1920 from 360 x 640 pixels`, without the
 /// frames for a still or the drawn size when nothing was enlarged
 fn rendered(frames: Option<u32>, size: (u32, u32), drawn: (u32, u32)) -> String {
     let frames = match frames {
@@ -240,9 +240,9 @@ fn rendered(frames: Option<u32>, size: (u32, u32), drawn: (u32, u32)) -> String 
     let from = if size == drawn {
         String::new()
     } else {
-        format!(" from {} × {} pixels", drawn.0, drawn.1)
+        format!(" from {} x {} pixels", drawn.0, drawn.1)
     };
-    format!("Rendered {frames}{} × {}{from}", size.0, size.1)
+    format!("Rendered {frames}{} x {}{from}", size.0, size.1)
 }
 
 /// Output pixels per drawn pixel in the clip: a GIF may be smaller
@@ -511,16 +511,16 @@ mod tests {
     fn rendered_lines_count_frames_and_name_the_drawn_size_when_enlarged() {
         assert_eq!(
             rendered(None, (1080, 1920), (360, 640)),
-            "Rendered 1080 × 1920 from 360 × 640 pixels"
+            "Rendered 1080 x 1920 from 360 x 640 pixels"
         );
-        assert_eq!(rendered(None, (360, 640), (360, 640)), "Rendered 360 × 640");
+        assert_eq!(rendered(None, (360, 640), (360, 640)), "Rendered 360 x 640");
         assert_eq!(
             rendered(Some(1), (1080, 1080), (108, 108)),
-            "Rendered 1 frame of 1080 × 1080 from 108 × 108 pixels"
+            "Rendered 1 frame of 1080 x 1080 from 108 x 108 pixels"
         );
         assert_eq!(
             rendered(Some(300), (360, 640), (360, 640)),
-            "Rendered 300 frames of 360 × 640"
+            "Rendered 300 frames of 360 x 640"
         );
     }
 

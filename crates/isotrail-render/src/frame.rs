@@ -9,12 +9,12 @@ pub struct Frame {
 impl Frame {
     /// # Panics
     ///
-    /// If `rgba` doesn't hold exactly `width × height` pixels
+    /// If `rgba` doesn't hold exactly `width x height` pixels
     pub fn new(width: u32, height: u32, rgba: Vec<u8>) -> Self {
         assert_eq!(
             rgba.len(),
             width as usize * height as usize * 4,
-            "RGBA buffer doesn't match a {width} × {height} frame"
+            "RGBA buffer doesn't match a {width} x {height} frame"
         );
         Self {
             width,

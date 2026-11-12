@@ -77,7 +77,7 @@ fn svg(track: &Track, grid: &Grid) -> String {
     let _ = writeln!(
         out,
         "<text x=\"10\" y=\"24\" font-family=\"monospace\" font-size=\"16\">N ↑  \
-         {} × {} cells of {:.1} m, long side {:.1}°, yaw {:.1}°, dashed = row 0</text>\n</svg>",
+         {} x {} cells of {:.1}m, long side {:.1}°, yaw {:.1}°, dashed = row 0</text>\n</svg>",
         grid.cols,
         grid.rows,
         grid.cell_size_m,
@@ -121,8 +121,8 @@ fn real_recordings_get_a_framed_grid() {
             .fold(f64::INFINITY, f64::min);
         let aspect = footprint.length_m / footprint.width_m;
         eprintln!(
-            "{name}\n  slab {:.2} × {:.2} km (aspect {aspect:.2}), long side {:.1}°, yaw {:.1}°\n  \
-             grid {} × {}, cell {:.1} m, DEM zoom {}, tightest margin {margin:.0} m",
+            "{name}\n  slab {:.2} x {:.2}km (aspect {aspect:.2}), long side {:.1}°, yaw {:.1}°\n  \
+             grid {} x {}, cell {:.1}m, DEM zoom {}, tightest margin {margin:.0}m",
             grid.footprint.length_m / 1000.0,
             grid.footprint.width_m / 1000.0,
             footprint.long_axis_bearing_deg(),
@@ -134,7 +134,7 @@ fn real_recordings_get_a_framed_grid() {
         );
 
         if margin < 0.0 {
-            failures.push(format!("{name}: route leaves the slab by {:.0} m", -margin));
+            failures.push(format!("{name}: route leaves the slab by {:.0}m", -margin));
         }
         if aspect > MAX_ASPECT + 1e-9 {
             failures.push(format!("{name}: aspect {aspect:.3}"));

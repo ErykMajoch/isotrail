@@ -120,7 +120,7 @@ impl<F: Fetcher> FeatureSource for OverpassSource<F> {
                 Some((policy, reason)) if attempt < policy.max_attempts => {
                     let delay = policy.delay(attempt - 1, retry_after(&error));
                     warn!(
-                        "{reason}; trying again in {:.0} s (attempt {attempt} of {})",
+                        "{reason}; trying again in {:.0}s (attempt {attempt} of {})",
                         delay.as_secs_f64(),
                         policy.max_attempts
                     );

@@ -42,7 +42,7 @@ fn clear_with_yes_deletes_cached_files() {
     let temp = filled_cache();
     let output = isotrail(temp.path(), &["cache", "clear", "--yes"]);
     assert!(output.status.success(), "{}", text(&output.stderr));
-    assert_eq!(text(&output.stdout).trim_end(), "Deleted 2 files (1.5 kB)");
+    assert_eq!(text(&output.stdout).trim_end(), "Deleted 2 files (1.5kB)");
     assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 0);
 }
 
@@ -77,7 +77,7 @@ fn clear_leaves_other_files_alone_and_counts_them() {
     assert!(output.status.success(), "{}", text(&output.stderr));
     assert_eq!(
         text(&output.stdout).trim_end(),
-        "Deleted 2 files (1.5 kB); left 3 other files alone"
+        "Deleted 2 files (1.5kB); left 3 other files alone"
     );
     let mut left: Vec<String> = fs::read_dir(temp.path())
         .unwrap()

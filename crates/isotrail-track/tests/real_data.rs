@@ -134,8 +134,8 @@ fn real_recordings_stats_match_expectations() {
             .moving
             .map_or(f64::NAN, |d| d.num_seconds() as f64 / 60.0);
         eprintln!(
-            "{name}\n  {distance_km:.2} km, gain {gain:.0} m, loss {:.0} m, \
-             elevation {:?}..{:?} m\n  elapsed {:?}, moving {moving_min:.0} min, zone {:?}",
+            "{name}\n  {distance_km:.2}km, gain {gain:.0}m, loss {:.0}m, \
+             elevation {:?}..{:?}m\n  elapsed {:?}, moving {moving_min:.0}min, zone {:?}",
             stats.loss_m.unwrap_or(f64::NAN),
             stats.min_ele_m,
             stats.max_ele_m,

@@ -32,6 +32,7 @@ All notable changes to `isotrail` are documented here.
 - `--help` groups the options under the same headings as the usage guide and gives the range of every number option.
 - `--help` shows list defaults as you type them, such as `title,date,stats,profile`, and its lines are shorter and wrap to the terminal's width.
 - `isotrail --help` lists `render` first and ends with an example.
+- Sizes and units in what isotrail prints are written as `1080 x 1920`, `12.40km`, `11°C` and `84KB`. The stats drawn on images keep their look.
 - The first download of a run prints one line saying what it fetches. Runs that find everything in the cache stay quiet.
 - Some messages are shorter and say what to do. They cover weather missing from the cache with `--offline`, a `--step-fps` above `--fps`, overlays that give way, and characters the font can't draw.
 - A palette file that is missing, can't be read or has a bad line is a usage mistake, with exit code 2, found before any download.

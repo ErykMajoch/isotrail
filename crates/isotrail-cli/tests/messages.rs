@@ -360,6 +360,6 @@ fn other_exit_codes_stay_as_they_were() {
     assert_error(
         &output,
         2,
-        "--scale 3 doesn't divide 1200 × 800; use --scale 1, 2, 4, 5, 8, 10 or 16",
+        "--scale 3 doesn't divide 1200 x 800; use --scale 1, 2, 4, 5, 8, 10 or 16",
     );
 }

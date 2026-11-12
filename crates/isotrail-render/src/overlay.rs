@@ -461,7 +461,7 @@ impl Fitted {
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[error(
-    "the overlays don't fit a {width} × {height} frame, even with a small title, no \
+    "the overlays don't fit a {width} x {height} frame, even with a small title, no \
      subtitle, no profile, no credit and a single stat"
 )]
 pub struct OverlaysDontFit {
@@ -2027,7 +2027,7 @@ mod tests {
             (lopsided, 3, true),
         ] {
             let framing = canvas.framing(scale).unwrap();
-            let case = format!("{} × {} at scale {scale}", canvas.width, canvas.height);
+            let case = format!("{} x {} at scale {scale}", canvas.width, canvas.height);
             cases.push((case, framing, must_fit));
         }
         for (case, framing, must_fit) in cases {

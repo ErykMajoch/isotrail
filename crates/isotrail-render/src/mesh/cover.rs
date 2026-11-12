@@ -125,7 +125,7 @@ mod tests {
         top_colours(bundle, &Seasonal::plain(bundle), &Terrain::default())
     }
 
-    /// A 12 × 12 lake with a 2-cell dry rim
+    /// A 12 x 12 lake with a 2-cell dry rim
     fn lake(seed: u64) -> (SceneBundle, Vec<[u8; 4]>) {
         let mut classes = vec![Landcover::Grassland; 16 * 16];
         for row in 2..14 {
@@ -169,7 +169,7 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         let all: Vec<_> = (0..40).flat_map(glints).collect();
-        // 10 × 10 open cells per lake, 3% of them
+        // 10 x 10 open cells per lake, 3% of them
         let share = all.len() as f32 / (40.0 * 100.0);
         assert!((0.015..0.05).contains(&share), "{share}");
         for cell in all {

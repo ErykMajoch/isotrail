@@ -164,7 +164,7 @@ mod tests {
             .map(|t| t[0].position[2])
             .collect();
         assert_eq!(tops.len(), 12);
-        // (height − 103) × 2, rounded to tens
+        // (height − 103) * 2, rounded to tens
         for expected in [0.0, 20.0, 50.0, 60.0, 10.0] {
             assert!(tops.contains(&expected), "{expected} in {tops:?}");
         }

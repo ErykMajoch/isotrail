@@ -48,7 +48,7 @@ mod tests {
         Grid::new(&footprint, NonZeroU32::new(detail).unwrap())
     }
 
-    /// A tilted plane in global pixel space, on the terrarium 1/256 m step
+    /// A tilted plane in global pixel space, on the terrarium 1/256m step
     fn plane(origin: (f64, f64), px: f64, py: f64) -> f64 {
         1000.0 + 0.5 * (px - origin.0) - 0.25 * (py - origin.1)
     }
@@ -112,7 +112,7 @@ mod tests {
         let span = |v: &[u32]| v.iter().max().unwrap() - v.iter().min().unwrap() + 1;
         assert!(
             (tiles.len() as u32) < span(&xs) * span(&ys),
-            "{} tiles in a {} × {} box",
+            "{} tiles in a {} x {} box",
             tiles.len(),
             span(&xs),
             span(&ys)

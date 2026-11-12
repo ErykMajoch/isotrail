@@ -111,7 +111,7 @@ fn check(paths: &Paths, actual: &Image, tolerance: Tolerance, update: bool) -> R
     assert_eq!(
         actual.rgba.len(),
         actual.width as usize * actual.height as usize * 4,
-        "RGBA buffer doesn't match {} × {}",
+        "RGBA buffer doesn't match {} x {}",
         actual.width,
         actual.height
     );
@@ -129,7 +129,7 @@ fn check(paths: &Paths, actual: &Image, tolerance: Tolerance, update: bool) -> R
     if (width, height) != (actual.width, actual.height) {
         let actual_path = write_failure(paths, "actual", actual);
         return Err(format!(
-            "golden {} is {width} × {height} but the image is {} × {}; actual written to {}",
+            "golden {} is {width} x {height} but the image is {} x {}; actual written to {}",
             paths.name,
             actual.width,
             actual.height,
@@ -333,7 +333,7 @@ mod tests {
             rgba: &small,
         };
         let message = check(&s.paths, &other, Tolerance::default(), false).unwrap_err();
-        assert!(message.contains("40 × 25"), "{message}");
+        assert!(message.contains("40 x 25"), "{message}");
     }
 
     #[test]

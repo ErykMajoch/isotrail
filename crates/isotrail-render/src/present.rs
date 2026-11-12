@@ -119,7 +119,7 @@ impl Present {
         self.format
     }
 
-    /// Draws `frame` centred on `view`, a `width` × `height` texture in
+    /// Draws `frame` centred on `view`, a `width` x `height` texture in
     /// [`Present::format`], at `scale` pixels per frame pixel, with alpha
     /// premultiplied; whatever the frame doesn't cover stays transparent
     pub fn draw(

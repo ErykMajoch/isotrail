@@ -25,7 +25,7 @@ pub struct BoundingBox {
 }
 
 impl BoundingBox {
-    /// Encloses the grid's slab, rounded outward to 5 decimals (about 1 m)
+    /// Encloses the grid's slab, rounded outward to 5 decimals (about 1m)
     /// so the query text, and with it the cache key, is stable. A slab
     /// across the antimeridian gets one box on each side of it
     pub fn around(grid: &Grid) -> Vec<BoundingBox> {

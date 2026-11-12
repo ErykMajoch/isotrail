@@ -125,7 +125,7 @@ fn damaged_payloads_are_refused_or_render_without_panicking() {
     );
 }
 
-/// A 1024 × 1024 slab of jagged peaks, as tall as the exaggeration goes
+/// A 1024 x 1024 slab of jagged peaks, as tall as the exaggeration goes
 fn jagged() -> SceneBundle {
     let grid = GridInfo {
         exaggeration: 100.0,
@@ -146,10 +146,7 @@ fn a_mesh_too_big_for_the_gpu_is_refused_before_it_is_made() {
     match mesh_within(&mesher, &huge, max) {
         Err(err @ RenderError::MeshTooLarge { .. }) => {
             let message = err.to_string();
-            assert!(
-                message.contains(&format!("({} MB)", max >> 20)),
-                "{message}"
-            );
+            assert!(message.contains(&format!("({}MB)", max >> 20)), "{message}");
             assert!(message.contains("--exaggeration"), "{message}");
         }
         other => panic!("{:?}", other.map(|mesh| mesh.vertices.len())),

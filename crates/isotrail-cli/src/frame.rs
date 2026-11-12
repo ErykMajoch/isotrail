@@ -88,7 +88,7 @@ impl Shape {
     pub fn label(&self) -> String {
         match self {
             Shape::Aspect(aspect) => aspect.name().to_owned(),
-            Shape::Size(width, height) => format!("{width} × {height}"),
+            Shape::Size(width, height) => format!("{width} x {height}"),
         }
     }
 }
@@ -144,15 +144,15 @@ impl FrameArgs {
     }
 }
 
-/// Why `scale` can't make a `width` × `height` image, and the scales that can
+/// Why `scale` can't make a `width` x `height` image, and the scales that can
 pub(crate) fn scale_mismatch(scale: u32, width: u32, height: u32, aspect: Option<&str>) -> String {
     let fits: Vec<String> = SCALE_RANGE
         .filter(|s| width.is_multiple_of(*s) && height.is_multiple_of(*s))
         .map(|s| s.to_string())
         .collect();
     let image = match aspect {
-        Some(name) => format!("the {name} image ({width} × {height})"),
-        None => format!("{width} × {height}"),
+        Some(name) => format!("the {name} image ({width} x {height})"),
+        None => format!("{width} x {height}"),
     };
     let size_hint = match aspect {
         Some(_) => String::new(),
@@ -292,17 +292,17 @@ mod tests {
     fn a_scale_that_doesnt_divide_names_those_that_do() {
         assert_eq!(
             scale_mismatch(3, 1200, 800, None),
-            "--scale 3 doesn't divide 1200 × 800; use --scale 1, 2, 4, 5, 8, 10 or 16, \
+            "--scale 3 doesn't divide 1200 x 800; use --scale 1, 2, 4, 5, 8, 10 or 16, \
              or a size that is a multiple of 3"
         );
         assert_eq!(
             scale_mismatch(7, 1080, 1920, Some("story")),
-            "--scale 7 doesn't divide the story image (1080 × 1920); use --scale 1, 2, 3, 4, 5, \
+            "--scale 7 doesn't divide the story image (1080 x 1920); use --scale 1, 2, 3, 4, 5, \
              6, 8, 10, 12 or 15"
         );
         assert_eq!(
             scale_mismatch(2, 17, 17, None),
-            "--scale 2 doesn't divide 17 × 17; use --scale 1, or a size that is a multiple of 2"
+            "--scale 2 doesn't divide 17 x 17; use --scale 1, or a size that is a multiple of 2"
         );
     }
 

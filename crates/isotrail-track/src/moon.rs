@@ -198,7 +198,7 @@ mod tests {
 
     #[test]
     fn matches_meeus_example_47a() {
-        // 1992 April 12, 0h TD: λ 133.162655°, β −3.229126°, Δ 368409.7 km
+        // 1992 April 12, 0h TD: λ 133.162655°, β −3.229126°, Δ 368409.7km
         let moon = Lunar::at(2_448_724.5);
         assert!(
             (moon.longitude_deg - 133.162655).abs() < 0.02,

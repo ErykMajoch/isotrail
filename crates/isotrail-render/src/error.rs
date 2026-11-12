@@ -26,7 +26,7 @@ pub enum RenderError {
     Readback,
 
     #[error(
-        "the terrain needs {needed} of GPU memory, more than this GPU allows ({allowed_mb} MB); \
+        "the terrain needs {needed} of GPU memory, more than this GPU allows ({allowed_mb}MB); \
          lower --exaggeration or --detail, or raise --block-height"
     )]
     MeshTooLarge { needed: String, allowed_mb: u64 },
