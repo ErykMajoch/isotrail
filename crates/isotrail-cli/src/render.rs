@@ -19,10 +19,12 @@ use tracing::{info, warn};
 use crate::animation::AnimationArgs;
 use crate::bundle::DataArgs;
 use crate::config::Typed;
+use crate::encoding::{Clip as ClipKind, EncodingArgs};
 use crate::frame::{AspectArg, FrameArgs, Shape, parse_scale};
 use crate::look::LookArgs;
 use crate::output::{self, Pending};
 use crate::overlay::OverlayArgs;
+use crate::report::{Report, ReportArgs, Written, say};
 use crate::scene::SceneArgs;
 use crate::usage;
 
@@ -80,7 +82,13 @@ pub struct RenderArgs {
     animation: AnimationArgs,
 
     #[command(flatten)]
+    encoding: EncodingArgs,
+
+    #[command(flatten)]
     data: DataArgs,
+
+    #[command(flatten)]
+    report: ReportArgs,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,6 +111,7 @@ impl RenderArgs {
 }
 
 pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
+    let mut report = Report::new(&args.report);
     let shapes = args.shapes()?;
     let framings = args.frame.framings(&shapes, args.scale)?;
     let (outputs, format) = output_paths(&args.file, args.output.as_deref(), &shapes)?;
@@ -114,8 +123,14 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
     output::plan(outputs.iter().map(PathBuf::as_path), &inputs)?;
     let mut motion = match format {
         Format::Png => None,
-        Format::Gif | Format::Mp4 => Some(args.animation.motion()?),
+        Format::Gif | Format::Mp4 => Some(args.animation.motion(format == Format::Gif)?),
     };
+    let clip_kind = match format {
+        Format::Png => None,
+        Format::Gif => Some(ClipKind::Gif),
+        Format::Mp4 => Some(ClipKind::Mp4),
+    };
+    args.encoding.check(clip_kind, args.scale, typed)?;
     args.overlay.check()?;
     let mesher = args.look.mesher(typed, args.scene.terrain());
     let look = args.scene.apply(args.look.look()?);
@@ -132,7 +147,7 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
                 return Err(usage(ExportError::Mp4Size { width, height }.to_string()));
             }
         }
-        Some(Ffmpeg::find()?)
+        Some(args.encoding.ffmpeg()?)
     } else {
         None
     };
@@ -191,20 +206,35 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
                 motion,
             };
             let frames = write_clip(args, &clip, output, ffmpeg.as_ref())?;
-            println!("Rendered {frames} frames of {size}");
+            let scale = clip_scale(args, motion, ffmpeg.is_some());
+            let size = (framing.width * scale, framing.height * scale);
+            say!(
+                "Rendered {frames} frames of {} × {} from {} × {} pixels",
+                size.0,
+                size.1,
+                framing.width,
+                framing.height
+            );
+            report.wrote(Written::clip(output, size, frames));
         } else {
             let frame = still(&gpu, &bundle, mesher.as_ref(), overlays, &aim, &sun, &look)?;
             let image = upscale(&frame, args.scale)?;
             output::write(output, |file| Ok(encode_png(&image, file)?))?;
-            println!("Rendered {size}");
+            say!("Rendered {size}");
+            report.wrote(Written::image(output, (width, height)));
         }
-        println!("Wrote {}", output.display());
     }
     let dropped = fitted.iter().any(Fitted::credit_dropped);
-    if let Some(credit) = args.overlay.caption_credit(&bundle, dropped) {
-        println!("Credit for the caption: {credit}");
+    report.finish(args.overlay.caption_credit(&bundle, dropped).as_deref())
+}
+
+/// Output pixels per drawn pixel in the clip: a GIF may be smaller
+fn clip_scale(args: &RenderArgs, motion: &Motion, mp4: bool) -> u32 {
+    if mp4 {
+        args.scale
+    } else {
+        args.encoding.gif(args.scale, motion.timeline.fps).scale
     }
-    Ok(())
 }
 
 /// Renders the still with its overlays at internal resolution
@@ -251,6 +281,7 @@ impl ClipWriter {
         pending: &Pending,
         clip: &Clip,
         scale: u32,
+        encoding: &EncodingArgs,
         ffmpeg: Option<&Ffmpeg>,
     ) -> anyhow::Result<ClipWriter> {
         let framing = clip.overlays.diorama_framing();
@@ -262,16 +293,14 @@ impl ClipWriter {
                 pending.temp(),
                 width,
                 height,
-                scale,
-                fps,
+                encoding.mp4(scale, fps),
             )?),
             None => ClipWriter::Gif(GifWriter::new(
                 pending.open()?,
                 width,
                 height,
-                scale,
                 clip.look,
-                fps,
+                encoding.gif(scale, fps),
             )?),
         })
     }
@@ -302,7 +331,7 @@ fn write_clip(
 ) -> anyhow::Result<u32> {
     let write = || -> anyhow::Result<u32> {
         let pending = Pending::new(output);
-        let mut writer = ClipWriter::open(&pending, clip, args.scale, ffmpeg)?;
+        let mut writer = ClipWriter::open(&pending, clip, args.scale, &args.encoding, ffmpeg)?;
         let frames = draw_clip(args, clip, |frame| Ok(writer.push(frame)?))?;
         writer.finish()?;
         pending.commit()?;
@@ -471,7 +500,7 @@ mod tests {
             &args.overlay.style(args.scene.route_colour()),
             &framing,
         );
-        let motion = args.animation.motion().unwrap();
+        let motion = args.animation.motion(true).unwrap();
         let gpu = isotrail_testkit::gpu();
         let clip = Clip {
             gpu: &gpu,
@@ -486,7 +515,7 @@ mod tests {
         fs::write(&target, "good").unwrap();
 
         let pending = Pending::new(&target);
-        let mut writer = ClipWriter::open(&pending, &clip, 10, None).unwrap();
+        let mut writer = ClipWriter::open(&pending, &clip, 10, &args.encoding, None).unwrap();
         let mut pushed = 0;
         let drawn = draw_clip(&args, &clip, |frame| {
             pushed += 1;

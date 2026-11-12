@@ -36,6 +36,9 @@ pub enum ExportError {
     )]
     FfmpegMissing,
 
+    #[error("could not run ffmpeg at {}; check --ffmpeg or ISOTRAIL_FFMPEG", path.display())]
+    FfmpegAt { path: PathBuf },
+
     #[error("ffmpeg failed ({status}): {stderr}")]
     Ffmpeg { status: ExitStatus, stderr: String },
 
@@ -47,6 +50,12 @@ pub enum ExportError {
 
     #[error("an MP4 must be an even number of pixels wide and high, not {width} × {height}")]
     Mp4Size { width: u32, height: u32 },
+
+    #[error("an MP4 can show at most 60 frames a second, not {0}")]
+    Mp4Fps(u32),
+
+    #[error("the MP4 quality (CRF) goes from 0 to 51, not {0}")]
+    Mp4Crf(u8),
 
     #[error("MP4 output can't be transparent; use --background sky or a colour such as #1e2a33")]
     Mp4Transparent,

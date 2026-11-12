@@ -14,6 +14,7 @@ use crate::frame::{AspectArg, parse_scale};
 use crate::look::{palette_file, read_palette};
 use crate::output;
 use crate::render::Source;
+use crate::report::{Report, ReportArgs, Written};
 use crate::usage;
 
 const SCALES: [u32; 3] = [3, 5, 6];
@@ -69,6 +70,9 @@ pub struct StyleLabArgs {
 
     #[command(flatten)]
     data: DataArgs,
+
+    #[command(flatten)]
+    report: ReportArgs,
 }
 
 /// A palette on the sheet: its label and what `--palette` said
@@ -121,6 +125,7 @@ impl StyleLabArgs {
 }
 
 pub fn run(args: &StyleLabArgs, typed: &Typed) -> anyhow::Result<()> {
+    let mut report = Report::new(&args.report);
     let dir = &args.output;
     let meshers: [(&str, Box<dyn Mesher>); 2] = [
         ("voxel", Box::new(VoxelMesher::default())),
@@ -200,7 +205,7 @@ pub fn run(args: &StyleLabArgs, typed: &Typed) -> anyhow::Result<()> {
                 let frame = upscale(&frame, scale)?;
                 let path = image(mesher_name, scale, palette);
                 write_png(&path, &frame)?;
-                println!("Wrote {}", path.display());
+                report.wrote(Written::image(&path, (frame.width(), frame.height())));
                 sheet.place(
                     index,
                     &format!("{mesher_name} / scale {scale} / {palette}"),
@@ -211,9 +216,10 @@ pub fn run(args: &StyleLabArgs, typed: &Typed) -> anyhow::Result<()> {
         }
     }
 
-    write_png(&sheet_path, &sheet.into_frame())?;
-    println!("Wrote {}", sheet_path.display());
-    Ok(())
+    let sheet = sheet.into_frame();
+    write_png(&sheet_path, &sheet)?;
+    report.wrote(Written::image(&sheet_path, (sheet.width(), sheet.height())));
+    report.finish(None)
 }
 
 fn write_png(path: &Path, frame: &Frame) -> anyhow::Result<()> {

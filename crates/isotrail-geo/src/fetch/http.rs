@@ -7,7 +7,7 @@ use reqwest::blocking::{Client, RequestBuilder, Response};
 use reqwest::header::{CONTENT_TYPE, RETRY_AFTER};
 use tracing::warn;
 
-use super::{FetchError, Fetcher, origin};
+use super::{FetchError, Fetcher, origin, redact};
 
 pub const USER_AGENT: &str = concat!(
     "isotrail/",
@@ -112,9 +112,11 @@ impl HttpFetcher {
     }
 
     fn send(&self, url: &str, request: impl Fn() -> RequestBuilder) -> Result<Vec<u8>, FetchError> {
+        // Errors and logs only ever see the URL with its secrets masked
+        let shown = redact(url);
         let mut attempt = 1;
         loop {
-            match self.watched(url, request()) {
+            match self.watched(&shown, request()) {
                 Ok(bytes) => return Ok(bytes),
                 Err(error) if error.is_transient() && attempt < self.retry.max_attempts => {
                     let delay = self.retry.delay(attempt - 1, error.retry_after());
@@ -154,7 +156,7 @@ impl HttpFetcher {
     fn attempt(&self, url: &str, request: RequestBuilder) -> Result<Vec<u8>, FetchError> {
         let response = request.send().map_err(|source| FetchError::Network {
             url: url.to_owned(),
-            source,
+            source: source.without_url(),
         })?;
         let status = response.status();
         if !status.is_success() {

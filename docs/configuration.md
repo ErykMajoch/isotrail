@@ -24,6 +24,11 @@ route-colour = "#2a6fdb"
 sun = [250, 8]                 # azimuth, elevation
 credit-extra = "photos and walks: example.org"
 orbit = 0                      # animation settings only apply to .gif and .mp4 output
+hold = "3s"
+loop = "once"                  # or "forever", or a number of plays
+gif-scale = 1
+crf = 23
+cache-dir = "D:/isotrail-cache"
 ```
 
 A `size` typed on the command line replaces the `aspect` from a file, as the two can't be combined.
@@ -36,7 +41,7 @@ A `size` typed on the command line replaces the `aspect` from a file, as the two
 | --- | --- |
 | `embed` | Everything that is also an `embed` option: the look, camera, text and overlays, data, `scale`, `size` and `safe-area` (for the poster) and `aspect` when it names one shape |
 | `bundle` | `title`, `exaggeration` and the data settings |
-| `style-lab` | `exaggeration` and the data settings (including `padding` and `footprint`) only, so the palette and scale you render with don't narrow its comparison |
+| `style-lab` | `exaggeration` and the data settings (including `padding`, `footprint` and the server and cache settings) only, so the palette and scale you render with don't narrow its comparison |
 
 A command's own table, `[embed]`, `[bundle]` or `[style-lab]`, holds its own options and wins over `[render]` for that command:
 
@@ -73,7 +78,7 @@ isotrail reads two files, if they exist:
 
 From highest to lowest:
 
-1. Options on the command line, and environment variables such as `ISOTRAIL_OVERPASS_URL`
+1. Options on the command line, and environment variables such as `ISOTRAIL_OVERPASS_URL` or `ISOTRAIL_CACHE_DIR`
 2. The `--config` file
 3. The user config file
 4. Built-in defaults
@@ -85,7 +90,7 @@ An option you type also wins over settings it can't be combined with: with `date
 ### Rules
 
 - Only the `[render]`, `[embed]`, `[bundle]` and `[style-lab]` tables are allowed, so typos don't go unnoticed.
-- Each table only takes its command's options: an unknown key is an error, and so are `output`, `config`, `debug-dir`, `verbose`, `help` and `version`, which only make sense for one run.
+- Each table only takes its command's options: an unknown key is an error, and so are `output`, `config`, `debug-dir`, `verbose`, `quiet`, `json`, `help` and `version`, which only make sense for one run.
 - A bad value is reported with the name of the file it came from, for example `scale in hike.toml: must be a whole number from 1 to 16`.
 - `--background` in a config file keeps its exact colour, just as it does on the command line.
 - `time` can be a string (`"07:30"`) or a TOML time (`07:30:00`).
@@ -97,6 +102,10 @@ An option you type also wins over settings it can't be combined with: with `date
 | Variable | Effect |
 | --- | --- |
 | `ISOTRAIL_CONFIG` | Path of the user config file, which must exist. Empty means none |
-| `ISOTRAIL_CACHE_DIR` | Directory for downloaded elevation, map data and weather (see [`cache`](usage.md#cache)) |
+| `ISOTRAIL_CACHE_DIR` | Directory for downloaded elevation, map data and weather, the same as `--cache-dir` (see [`cache`](usage.md#cache)) |
 | `ISOTRAIL_OVERPASS_URL` | Overpass API endpoint for OpenStreetMap data, the same as `--overpass-url` |
+| `ISOTRAIL_TERRAIN_URL` | Server for terrarium elevation tiles, the same as `--terrain-url` |
+| `ISOTRAIL_WEATHER_URL` | Server with Open-Meteo's API, the same as `--weather-url` |
+| `ISOTRAIL_OPEN_METEO_KEY` | An [Open-Meteo](https://open-meteo.com/en/pricing) API key. The weather then comes from Open-Meteo's servers for customers, or from `--weather-url` with the key added. It can only be set here, never in a config file or on the command line |
+| `ISOTRAIL_FFMPEG` | The ffmpeg program for MP4 output, the same as `--ffmpeg` |
 | `ISOTRAIL_GPU` | `auto` (default), `hardware` or `software`. `software` forces a software renderer (WARP on Windows, lavapipe on Linux), which is useful on servers without a GPU |

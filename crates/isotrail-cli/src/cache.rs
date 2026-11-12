@@ -1,11 +1,13 @@
-use std::env;
 use std::io::{self, BufRead, IsTerminal, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, bail};
 use clap::{Args, Subcommand};
 use isotrail_geo::{Cache, CacheStats};
+
+use crate::report::say;
+use crate::servers::CacheDirArg;
 
 const DIR_ENV: &str = "ISOTRAIL_CACHE_DIR";
 
@@ -13,11 +15,15 @@ const DIR_ENV: &str = "ISOTRAIL_CACHE_DIR";
 pub struct CacheArgs {
     #[command(subcommand)]
     command: CacheCommand,
+
+    #[command(flatten)]
+    cache_dir: CacheDirArg,
 }
 
 #[derive(Debug, Subcommand)]
 enum CacheCommand {
-    /// Print the cache directory (set ISOTRAIL_CACHE_DIR to use another one)
+    /// Print the cache directory (--cache-dir or ISOTRAIL_CACHE_DIR use
+    /// another one)
     Path,
     /// Delete cached downloads; map data stays cached until cleared
     Clear {
@@ -32,7 +38,7 @@ enum CacheCommand {
 }
 
 pub fn run(args: &CacheArgs) -> anyhow::Result<()> {
-    let cache = Cache::new(dir()?);
+    let cache = Cache::new(dir(args.cache_dir.get())?);
     match args.command {
         CacheCommand::Path => println!("{}", cache.dir().display()),
         CacheCommand::Clear { yes, older_than } => clear(&cache, yes, older_than)?,
@@ -40,12 +46,16 @@ pub fn run(args: &CacheArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn dir() -> anyhow::Result<PathBuf> {
-    env::var_os(DIR_ENV)
-        .filter(|dir| !dir.is_empty())
-        .map(PathBuf::from)
+/// `given` by --cache-dir or the environment, or the user's cache folder
+pub fn dir(given: Option<&Path>) -> anyhow::Result<PathBuf> {
+    given
+        .map(Path::to_owned)
         .or_else(Cache::default_dir)
-        .with_context(|| format!("could not find a cache directory for this user; set {DIR_ENV}"))
+        .with_context(|| {
+            format!(
+                "could not find a cache directory for this user; set {DIR_ENV} or pass --cache-dir"
+            )
+        })
 }
 
 fn clear(cache: &Cache, yes: bool, older_than: Option<u32>) -> anyhow::Result<()> {
@@ -55,11 +65,11 @@ fn clear(cache: &Cache, yes: bool, older_than: Option<u32>) -> anyhow::Result<()
     let left = left_alone(stats.others);
     if stats.files == 0 {
         match older_than {
-            Some(days) => println!(
+            Some(days) => say!(
                 "Nothing in the cache at {dir} is older than {}{left}",
                 plural(days.into(), "day")
             ),
-            None => println!("The cache at {dir} is empty{left}"),
+            None => say!("The cache at {dir} is empty{left}"),
         }
         return Ok(());
     }
@@ -77,12 +87,12 @@ fn clear(cache: &Cache, yes: bool, older_than: Option<u32>) -> anyhow::Result<()
         let mut answer = String::new();
         stdin.lock().read_line(&mut answer)?;
         if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
-            println!("Nothing deleted");
+            say!("Nothing deleted");
             return Ok(());
         }
     }
     let cleared = cache.clear(age)?;
-    println!(
+    say!(
         "Deleted {}{older}{}",
         describe(cleared),
         left_alone(cleared.others)

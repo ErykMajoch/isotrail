@@ -7,7 +7,7 @@ use directories::ProjectDirs;
 use serde::Serialize;
 use tracing::{debug, warn};
 
-use super::{FetchError, Fetcher, sha256_hex};
+use super::{FetchError, Fetcher, redact, sha256_hex};
 
 const DATA_EXT: &str = "bin";
 const META_EXT: &str = "json";
@@ -250,39 +250,44 @@ impl<F: Fetcher> CachedFetcher<F> {
     }
 }
 
+// Keyed and recorded by the URL with its secrets masked, so a key never
+// reaches the disk and a new one keeps the cache
 impl<F: Fetcher> Fetcher for CachedFetcher<F> {
     fn get(&self, url: &str) -> Result<Vec<u8>, FetchError> {
+        let shown = redact(url);
         let request = Request {
             method: "GET",
-            url,
+            url: &shown,
             body: &[],
         };
         self.fetch(request, || self.inner.get(url))
     }
 
     fn post(&self, url: &str, body: &[u8]) -> Result<Vec<u8>, FetchError> {
+        let shown = redact(url);
         let request = Request {
             method: "POST",
-            url,
+            url: &shown,
             body,
         };
         self.fetch(request, || self.inner.post(url, body))
     }
 
     fn forget(&self, url: &str, body: Option<&[u8]>) -> Result<(), FetchError> {
+        let shown = redact(url);
         let request = match body {
             None => Request {
                 method: "GET",
-                url,
+                url: &shown,
                 body: &[],
             },
             Some(body) => Request {
                 method: "POST",
-                url,
+                url: &shown,
                 body,
             },
         };
-        debug!("forgetting {} {url}", request.method);
+        debug!("forgetting {} {shown}", request.method);
         self.cache.remove(&request)?;
         self.inner.forget(url, body)
     }

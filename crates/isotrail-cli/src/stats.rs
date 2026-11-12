@@ -9,6 +9,7 @@ use isotrail_track::{Bounds, TrackStats, Units};
 use serde::Serialize;
 use tracing::warn;
 
+use crate::servers::{CacheDirArg, WeatherUrlArg};
 use crate::{UnitsArg, weather};
 
 #[derive(Debug, Args)]
@@ -32,10 +33,16 @@ pub struct StatsArgs {
     /// Only use weather that is already in the cache
     #[arg(long, requires = "weather")]
     offline: bool,
+
+    #[command(flatten)]
+    weather_url: WeatherUrlArg,
+
+    #[command(flatten)]
+    cache_dir: CacheDirArg,
 }
 
 pub fn run(args: &StatsArgs) -> anyhow::Result<()> {
-    let summary = Summary::read(&args.file, args.weather.then_some(args.offline))?;
+    let summary = Summary::read(&args.file, args.weather.then_some(args.offline), args)?;
     let mut out = io::stdout().lock();
     if args.json {
         serde_json::to_writer_pretty(&mut out, &Report::new(&summary))?;
@@ -63,7 +70,7 @@ struct Summary {
 
 impl Summary {
     /// `weather` is `Some(offline)` to include the weather
-    fn read(path: &Path, weather: Option<bool>) -> anyhow::Result<Summary> {
+    fn read(path: &Path, weather: Option<bool>, args: &StatsArgs) -> anyhow::Result<Summary> {
         let bytes = crate::read_file(path)?;
         if crate::is_bundle_file(path, &bytes) {
             let bundle = SceneBundle::from_bytes(&bytes)
@@ -83,7 +90,8 @@ impl Summary {
         let track = crate::parse_track(&bytes, path)?;
         let weather = match weather {
             Some(offline) => {
-                weather::look_up(&track, crate::bundle::fetcher(offline)?).map(|(w, _)| w)
+                let fetcher = crate::bundle::fetcher(offline, args.cache_dir.get())?;
+                weather::look_up(&track, fetcher, &args.weather_url.server()).map(|(w, _)| w)
             }
             None => None,
         };

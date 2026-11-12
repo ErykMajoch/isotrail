@@ -12,6 +12,32 @@ use crate::{ExportError, upscale};
 
 /// Longer than ffmpeg ever needs to take one frame or to finish the file
 const PATIENCE: Duration = Duration::from_secs(60);
+pub const MAX_MP4_FPS: u32 = 60;
+pub const DEFAULT_CRF: u8 = 18;
+/// Beyond this x264 has no quality setting
+pub const MAX_CRF: u8 = 51;
+/// x264's presets, fastest and largest first
+pub const X264_PRESETS: [&str; 9] = [
+    "ultrafast",
+    "superfast",
+    "veryfast",
+    "faster",
+    "fast",
+    "medium",
+    "slow",
+    "slower",
+    "veryslow",
+];
+
+/// How an MP4 is encoded: frames enlarged `scale` times, `fps` a second, at
+/// x264 quality `crf` (lower is better and larger) and an optional preset
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Mp4Options {
+    pub scale: u32,
+    pub fps: u32,
+    pub crf: u8,
+    pub preset: Option<&'static str>,
+}
 
 /// The ffmpeg program that encodes MP4 video
 #[derive(Debug, Clone)]
@@ -22,11 +48,19 @@ pub struct Ffmpeg {
 impl Ffmpeg {
     /// The `ffmpeg` on PATH
     pub fn find() -> Result<Ffmpeg, ExportError> {
-        Ffmpeg::at("ffmpeg")
+        Ffmpeg::probe("ffmpeg".into())
     }
 
+    /// A chosen ffmpeg program, which must run
     pub fn at(program: impl Into<PathBuf>) -> Result<Ffmpeg, ExportError> {
         let program = program.into();
+        Ffmpeg::probe(program.clone()).map_err(|error| match error {
+            ExportError::FfmpegMissing => ExportError::FfmpegAt { path: program },
+            other => other,
+        })
+    }
+
+    fn probe(program: PathBuf) -> Result<Ffmpeg, ExportError> {
         let status = Command::new(&program)
             .arg("-version")
             .stdin(Stdio::null())
@@ -63,17 +97,28 @@ pub struct Mp4Writer {
 }
 
 impl Mp4Writer {
-    /// Frames are `width × height` internal pixels, shown `fps` times a second
+    /// Frames are `width × height` internal pixels
     pub fn create(
         ffmpeg: &Ffmpeg,
         path: &Path,
         width: u32,
         height: u32,
-        scale: u32,
-        fps: u32,
+        options: Mp4Options,
     ) -> Result<Self, ExportError> {
+        let Mp4Options {
+            scale,
+            fps,
+            crf,
+            preset,
+        } = options;
         if scale == 0 {
             return Err(ExportError::ZeroScale);
+        }
+        if !(1..=MAX_MP4_FPS).contains(&fps) {
+            return Err(ExportError::Mp4Fps(fps));
+        }
+        if crf > MAX_CRF {
+            return Err(ExportError::Mp4Crf(crf));
         }
         let (out_width, out_height) = (width * scale, height * scale);
         if out_width == 0 || out_height == 0 || out_width % 2 == 1 || out_height % 2 == 1 {
@@ -98,7 +143,10 @@ impl Mp4Writer {
             .arg("-framerate")
             .arg(fps.to_string())
             .args(["-i", "-", "-an"])
-            .args(["-c:v", "libx264", "-tune", "animation", "-crf", "18"])
+            .args(["-c:v", "libx264", "-tune", "animation"])
+            .arg("-crf")
+            .arg(crf.to_string())
+            .args(preset.into_iter().flat_map(|preset| ["-preset", preset]))
             // The animation tune doubles the reference frames, which pushes a
             // story past level 4.2; with four it is level 4.0 at 30 fps
             .args(["-refs", "4"])
@@ -279,6 +327,15 @@ mod tests {
 
     const RED: [u8; 4] = [200, 30, 40, 255];
 
+    fn options(scale: u32, fps: u32) -> Mp4Options {
+        Mp4Options {
+            scale,
+            fps,
+            crf: DEFAULT_CRF,
+            preset: None,
+        }
+    }
+
     #[test]
     fn frames_encode_as_story_ready_h264() {
         if !has_ffmpeg() {
@@ -287,7 +344,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("clip.mp4");
         let ffmpeg = Ffmpeg::find().unwrap();
-        let mut mp4 = Mp4Writer::create(&ffmpeg, &path, 16, 8, 2, 5).unwrap();
+        let mut mp4 = Mp4Writer::create(&ffmpeg, &path, 16, 8, options(2, 5)).unwrap();
         for i in 0..10u8 {
             let mut rgba = RED.repeat(16 * 8);
             rgba[0] = i * 20;
@@ -318,9 +375,9 @@ mod tests {
         }
         let temp = tempfile::tempdir().unwrap();
         let ffmpeg = Ffmpeg::find().unwrap();
-        for (fps, most) in [(30, 40), (50, 42)] {
+        for (fps, most) in [(30, 40), (50, 42), (60, 42)] {
             let path = temp.path().join(format!("story-{fps}.mp4"));
-            let mut mp4 = Mp4Writer::create(&ffmpeg, &path, 360, 640, 3, fps).unwrap();
+            let mut mp4 = Mp4Writer::create(&ffmpeg, &path, 360, 640, options(3, fps)).unwrap();
             for i in 0..6u8 {
                 let rgba = [i * 40, 90, 160, 255].repeat(360 * 640);
                 mp4.push(&Frame::new(360, 640, rgba)).unwrap();
@@ -328,6 +385,7 @@ mod tests {
             mp4.finish().unwrap();
             let info = probe_video(&path);
             assert_eq!((info.width, info.height), (1080, 1920));
+            assert_eq!(info.frame_rate, format!("{fps}/1"));
             assert!(info.level <= most, "level {} at {fps} fps", info.level);
             assert_eq!(info.color_space, "bt709");
             assert_eq!(info.color_transfer, "bt709");
@@ -338,10 +396,46 @@ mod tests {
 
     #[test]
     fn a_missing_ffmpeg_is_a_clear_error() {
-        let missing = Ffmpeg::at("isotrail-no-such-ffmpeg");
-        assert!(matches!(missing, Err(ExportError::FfmpegMissing)));
         let message = ExportError::FfmpegMissing.to_string();
         assert!(message.contains("install"), "{message}");
+        let missing = Ffmpeg::at("isotrail-no-such-ffmpeg").unwrap_err();
+        assert!(
+            matches!(missing, ExportError::FfmpegAt { .. }),
+            "{missing:?}"
+        );
+        let message = missing.to_string();
+        assert!(message.contains("isotrail-no-such-ffmpeg"), "{message}");
+    }
+
+    #[test]
+    fn quality_and_preset_reach_the_encoder() {
+        if !has_ffmpeg() {
+            return;
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let ffmpeg = Ffmpeg::find().unwrap();
+        let encode = |name: &str, crf: u8, preset: Option<&'static str>| {
+            let path = temp.path().join(name);
+            let options = Mp4Options {
+                crf,
+                preset,
+                ..options(2, 10)
+            };
+            let mut mp4 = Mp4Writer::create(&ffmpeg, &path, 64, 32, options).unwrap();
+            for i in 0..10u32 {
+                let rgba: Vec<u8> = (0..64 * 32u32)
+                    .flat_map(|p| [(p * 7 + i * 13) as u8, (p * 3) as u8, (p ^ i) as u8, 255])
+                    .collect();
+                mp4.push(&Frame::new(64, 32, rgba)).unwrap();
+            }
+            mp4.finish().unwrap();
+            std::fs::metadata(&path).unwrap().len()
+        };
+        let fine = encode("fine.mp4", 10, None);
+        let coarse = encode("coarse.mp4", 40, None);
+        assert!(fine > coarse, "{fine} vs {coarse}");
+        encode("fast.mp4", DEFAULT_CRF, Some("ultrafast"));
+        assert_eq!(probe_video(&temp.path().join("fast.mp4")).frames, 10);
     }
 
     #[test]
@@ -352,11 +446,19 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("clip.mp4");
         let ffmpeg = Ffmpeg::find().unwrap();
-        let odd = Mp4Writer::create(&ffmpeg, &path, 15, 8, 1, 30);
+        let odd = Mp4Writer::create(&ffmpeg, &path, 15, 8, options(1, 30));
         assert!(matches!(odd.err().unwrap(), ExportError::Mp4Size { .. }));
-        let zero = Mp4Writer::create(&ffmpeg, &path, 16, 8, 0, 30);
+        let zero = Mp4Writer::create(&ffmpeg, &path, 16, 8, options(0, 30));
         assert!(matches!(zero.err().unwrap(), ExportError::ZeroScale));
-        let mut mp4 = Mp4Writer::create(&ffmpeg, &path, 16, 8, 1, 30).unwrap();
+        let fast = Mp4Writer::create(&ffmpeg, &path, 16, 8, options(1, 61));
+        assert!(matches!(fast.err().unwrap(), ExportError::Mp4Fps(61)));
+        let crf = Mp4Options {
+            crf: 52,
+            ..options(1, 30)
+        };
+        let bad = Mp4Writer::create(&ffmpeg, &path, 16, 8, crf);
+        assert!(matches!(bad.err().unwrap(), ExportError::Mp4Crf(52)));
+        let mut mp4 = Mp4Writer::create(&ffmpeg, &path, 16, 8, options(1, 30)).unwrap();
         let wrong = mp4.push(&Frame::new(1, 1, vec![0; 4]));
         assert!(matches!(wrong, Err(ExportError::FrameSize { .. })));
     }
@@ -369,7 +471,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("missing").join("clip.mp4");
         let ffmpeg = Ffmpeg::find().unwrap();
-        let mut mp4 = Mp4Writer::create(&ffmpeg, &path, 16, 8, 1, 30).unwrap();
+        let mut mp4 = Mp4Writer::create(&ffmpeg, &path, 16, 8, options(1, 30)).unwrap();
         let frame = Frame::new(16, 8, RED.repeat(16 * 8));
         let pushed = (0..100).find_map(|_| mp4.push(&frame).err());
         let error = pushed.or_else(|| mp4.finish().err()).unwrap();

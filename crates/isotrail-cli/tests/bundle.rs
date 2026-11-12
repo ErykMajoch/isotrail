@@ -5,9 +5,9 @@ use std::process::{Command, Output, Stdio};
 
 use isotrail_bundle::SceneBundle;
 use isotrail_geo::{
-    Cache, CachedFetcher, FeatureSource, Fetcher, Footprint, Grid, OPEN_METEO_ARCHIVE_URL,
-    OVERPASS_URL, OpenMeteoSource, OverpassSource, RecordedFetcher, TerrariumSource, TileId,
-    WeatherRequest,
+    Cache, CachedFetcher, FeatureSource, FetchError, Fetcher, Footprint, Grid,
+    OPEN_METEO_ARCHIVE_URL, OPEN_METEO_CUSTOMER_ARCHIVE_URL, OVERPASS_URL, OpenMeteoSource,
+    OverpassSource, RecordedFetcher, TERRARIUM_URL, TerrariumSource, TileId, WeatherRequest,
 };
 use isotrail_track::{GpxReader, TrackReader};
 
@@ -29,6 +29,9 @@ fn isotrail_with(cache_dir: &Path, args: &[&str], overpass_env: Option<&str>) ->
         .env("ISOTRAIL_CACHE_DIR", cache_dir)
         .env("ISOTRAIL_CONFIG", "")
         .env_remove(OVERPASS_ENV)
+        .env_remove("ISOTRAIL_TERRAIN_URL")
+        .env_remove("ISOTRAIL_WEATHER_URL")
+        .env_remove("ISOTRAIL_OPEN_METEO_KEY")
         .stdin(Stdio::null());
     if let Some(url) = overpass_env {
         command.env(OVERPASS_ENV, url);
@@ -633,4 +636,154 @@ fn exaggeration_can_be_set_by_hand() {
     );
     assert!(!output.status.success());
     assert!(text(&output.stderr).contains("must be between 0.1 and 100"));
+}
+
+/// Answers for one server with the recordings of another
+struct Mirror {
+    recorded: RecordedFetcher,
+    from: &'static str,
+    to: &'static str,
+}
+
+impl Fetcher for Mirror {
+    fn get(&self, url: &str) -> Result<Vec<u8>, FetchError> {
+        let url = url.replace(self.from, self.to);
+        let url = url.split("&apikey=").next().unwrap_or_default();
+        let url = url.split("?key=").next().unwrap_or_default();
+        self.recorded.get(url)
+    }
+
+    fn post(&self, url: &str, body: &[u8]) -> Result<Vec<u8>, FetchError> {
+        self.recorded.post(url, body)
+    }
+}
+
+#[test]
+fn terrain_and_weather_can_come_from_other_servers_and_cache_folders() {
+    const TILES: &str = "http://tiles.example.invalid/terrarium/{z}/{x}/{y}.png?key=s3cret";
+    const KEY: &str = "test-key-123";
+    let temp = tempfile::tempdir().unwrap();
+    let cache_dir = temp.path().join("chosen cache");
+    let cache = || Cache::new(&cache_dir);
+    let tiles = CachedFetcher::new(
+        Mirror {
+            recorded: RecordedFetcher::new(fixtures().join("dem")),
+            from: "http://tiles.example.invalid/terrarium",
+            to: "https://s3.amazonaws.com/elevation-tiles-prod/terrarium",
+        },
+        cache(),
+    );
+    for x in [1000, 1001] {
+        let url = TerrariumSource::<Mirror>::url_from(TILES, TileId { z: 11, x, y: 666 });
+        tiles.get(&url).unwrap();
+    }
+    let osm = CachedFetcher::new(RecordedFetcher::new(fixtures().join("osm")), cache());
+    osm.post(
+        OVERPASS_URL,
+        &OverpassSource::<RecordedFetcher>::request_body(&snowdon_grid()),
+    )
+    .unwrap();
+    let mut file = File::open(fixtures().join("gpx/snowdon.gpx")).unwrap();
+    let track = GpxReader.read(&mut file).unwrap().clean().unwrap();
+    let request = WeatherRequest::from_track(&track, 0).unwrap();
+    let weather = CachedFetcher::new(
+        Mirror {
+            recorded: RecordedFetcher::new(fixtures().join("weather")),
+            from: OPEN_METEO_CUSTOMER_ARCHIVE_URL,
+            to: OPEN_METEO_ARCHIVE_URL,
+        },
+        cache(),
+    );
+    for url in [
+        OpenMeteoSource::<RecordedFetcher>::url(OPEN_METEO_CUSTOMER_ARCHIVE_URL, &request),
+        OpenMeteoSource::<RecordedFetcher>::days_url(OPEN_METEO_CUSTOMER_ARCHIVE_URL, &request),
+    ] {
+        weather.get(&format!("{url}&apikey={KEY}")).unwrap();
+    }
+
+    // The environment's cache folder is empty: --cache-dir wins over it
+    let itb = temp.path().join("mirrored.itb");
+    let output = Command::new(env!("CARGO_BIN_EXE_isotrail"))
+        .args([
+            "bundle",
+            &gpx(),
+            "-o",
+            itb.to_str().unwrap(),
+            "--detail",
+            "32",
+            "--offline",
+        ])
+        .args([
+            "--terrain-url",
+            TILES,
+            "--cache-dir",
+            cache_dir.to_str().unwrap(),
+        ])
+        .env("ISOTRAIL_CACHE_DIR", temp.path().join("empty"))
+        .env("ISOTRAIL_CONFIG", "")
+        .env("ISOTRAIL_OPEN_METEO_KEY", KEY)
+        .env_remove(OVERPASS_ENV)
+        .env_remove("ISOTRAIL_TERRAIN_URL")
+        .env_remove("ISOTRAIL_WEATHER_URL")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let stdout = text(&output.stdout);
+    assert!(stdout.contains("\nWeather: drizzle"), "{stdout}");
+    let bundle = SceneBundle::from_bytes(&std::fs::read(&itb).unwrap()).unwrap();
+    assert_eq!(
+        bundle.meta.provenance.elevation,
+        "http://tiles.example.invalid/terrarium/{z}/{x}/{y}.png?key=redacted at zoom 11"
+    );
+    assert!(bundle.weather.is_some());
+    // No key reaches the cache's records
+    for entry in std::fs::read_dir(&cache_dir).unwrap() {
+        let bytes = std::fs::read(entry.unwrap().path()).unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(!text.contains(KEY) && !text.contains("s3cret"));
+    }
+
+    // Without the flag, the environment's empty folder is used
+    let output = Command::new(env!("CARGO_BIN_EXE_isotrail"))
+        .args([
+            "bundle",
+            &gpx(),
+            "-o",
+            itb.to_str().unwrap(),
+            "--detail",
+            "32",
+            "--offline",
+        ])
+        .env("ISOTRAIL_CACHE_DIR", temp.path().join("empty"))
+        .env("ISOTRAIL_CONFIG", "")
+        .env("ISOTRAIL_TERRAIN_URL", TILES)
+        .env_remove(OVERPASS_ENV)
+        .env_remove("ISOTRAIL_OPEN_METEO_KEY")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = text(&output.stderr);
+    assert!(stderr.contains("tiles.example.invalid"), "{stderr}");
+    assert!(!stderr.contains("s3cret"), "{stderr}");
+    assert!(TERRARIUM_URL.contains("{z}"));
+}
+
+#[test]
+fn server_addresses_are_checked() {
+    let temp = tempfile::tempdir().unwrap();
+    for (flag, value, message) in [
+        (
+            "--terrain-url",
+            "https://tiles.example/{z}/{x}.png",
+            "{y} is missing",
+        ),
+        ("--weather-url", "weather.example", "https:// or http://"),
+    ] {
+        let output = isotrail(temp.path(), &["bundle", &gpx(), "-o", "a.itb", flag, value]);
+        assert_eq!(output.status.code(), Some(2), "{flag}");
+        let stderr = text(&output.stderr);
+        assert!(stderr.contains(message), "{stderr}");
+    }
 }

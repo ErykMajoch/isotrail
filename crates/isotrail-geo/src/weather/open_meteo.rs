@@ -1,3 +1,5 @@
+use std::fmt;
+
 use chrono::DateTime;
 use isotrail_bundle::{Weather, WeatherDataset, WeatherSample};
 use reqwest::Url;
@@ -10,6 +12,11 @@ use crate::{FetchError, Fetcher};
 
 pub const OPEN_METEO_ARCHIVE_URL: &str = "https://archive-api.open-meteo.com/v1/archive";
 pub const OPEN_METEO_FORECAST_URL: &str = "https://api.open-meteo.com/v1/forecast";
+/// Open-Meteo's servers for customers with an API key
+pub const OPEN_METEO_CUSTOMER_ARCHIVE_URL: &str =
+    "https://customer-archive-api.open-meteo.com/v1/archive";
+pub const OPEN_METEO_CUSTOMER_FORECAST_URL: &str =
+    "https://customer-api.open-meteo.com/v1/forecast";
 /// Hikes that ended more recently than this go to the forecast API, since
 /// the archive takes a few days to catch up
 pub const ARCHIVE_LAG_S: i64 = 5 * 86_400;
@@ -36,11 +43,57 @@ pub struct DaysBefore {
     pub snowfall_cm: Vec<f32>,
 }
 
+/// An Open-Meteo API key, kept out of debug output
+#[derive(Clone, PartialEq, Eq)]
+pub struct ApiKey(pub String);
+
+impl fmt::Debug for ApiKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ApiKey(..)")
+    }
+}
+
+/// Where the weather comes from: Open-Meteo's free servers, its customer
+/// servers when there is a key, or another server with the same API
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WeatherServer {
+    /// A server answering at `/v1/archive` and `/v1/forecast`
+    pub base: Option<String>,
+    pub key: Option<ApiKey>,
+}
+
+impl WeatherServer {
+    pub fn archive_url(&self) -> String {
+        self.endpoint(
+            "archive",
+            OPEN_METEO_ARCHIVE_URL,
+            OPEN_METEO_CUSTOMER_ARCHIVE_URL,
+        )
+    }
+
+    pub fn forecast_url(&self) -> String {
+        self.endpoint(
+            "forecast",
+            OPEN_METEO_FORECAST_URL,
+            OPEN_METEO_CUSTOMER_FORECAST_URL,
+        )
+    }
+
+    fn endpoint(&self, path: &str, free: &str, customer: &str) -> String {
+        match (&self.base, &self.key) {
+            (Some(base), _) => format!("{}/v1/{path}", base.trim_end_matches('/')),
+            (None, Some(_)) => customer.to_owned(),
+            (None, None) => free.to_owned(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct OpenMeteoSource<F> {
     fetcher: F,
     archive_url: String,
     forecast_url: String,
+    key: Option<ApiKey>,
 }
 
 impl<F: Fetcher> OpenMeteoSource<F> {
@@ -49,6 +102,27 @@ impl<F: Fetcher> OpenMeteoSource<F> {
             fetcher,
             archive_url: OPEN_METEO_ARCHIVE_URL.to_owned(),
             forecast_url: OPEN_METEO_FORECAST_URL.to_owned(),
+            key: None,
+        }
+    }
+
+    pub fn server(self, server: &WeatherServer) -> OpenMeteoSource<F> {
+        OpenMeteoSource {
+            archive_url: server.archive_url(),
+            forecast_url: server.forecast_url(),
+            key: server.key.clone(),
+            ..self
+        }
+    }
+
+    /// `url` with the API key added, if there is one
+    pub fn keyed(&self, url: String) -> String {
+        match (&self.key, Url::parse(&url)) {
+            (Some(ApiKey(key)), Ok(mut parsed)) => {
+                parsed.query_pairs_mut().append_pair("apikey", key);
+                parsed.into()
+            }
+            _ => url,
         }
     }
 
@@ -135,7 +209,7 @@ impl<F: Fetcher> WeatherSource for OpenMeteoSource<F> {
                 hours = request.hours.len(),
                 "fetching the weather from Open-Meteo"
             );
-            self.lookup(&Self::url(endpoint, request), |bytes| {
+            self.lookup(&self.keyed(Self::url(endpoint, request)), |bytes| {
                 parse(bytes).and_then(|locations| resolve(&locations, request, dataset))
             })
         })
@@ -148,7 +222,7 @@ impl<F: Fetcher> WeatherSource for OpenMeteoSource<F> {
                 days = DAYS_BEFORE,
                 "fetching the weather before the hike from Open-Meteo"
             );
-            self.lookup(&Self::days_url(endpoint, request), |bytes| {
+            self.lookup(&self.keyed(Self::days_url(endpoint, request)), |bytes| {
                 parse(bytes).and_then(|locations| resolve_days(&locations))
             })
         })
@@ -346,4 +420,38 @@ fn resolve_days(locations: &[DailyLocation]) -> Result<Vec<DaysBefore>, WeatherE
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn servers_follow_the_key_and_the_base() {
+        let free = WeatherServer::default();
+        assert_eq!(free.archive_url(), OPEN_METEO_ARCHIVE_URL);
+        assert_eq!(free.forecast_url(), OPEN_METEO_FORECAST_URL);
+        let key = Some(ApiKey("k3y".into()));
+        let paid = WeatherServer {
+            base: None,
+            key: key.clone(),
+        };
+        assert_eq!(paid.archive_url(), OPEN_METEO_CUSTOMER_ARCHIVE_URL);
+        assert_eq!(paid.forecast_url(), OPEN_METEO_CUSTOMER_FORECAST_URL);
+        let own = WeatherServer {
+            base: Some("http://weather.local:8080/".into()),
+            key,
+        };
+        assert_eq!(own.archive_url(), "http://weather.local:8080/v1/archive");
+        assert_eq!(own.forecast_url(), "http://weather.local:8080/v1/forecast");
+        assert!(!format!("{own:?}").contains("k3y"));
+
+        let source = OpenMeteoSource::new(crate::RecordedFetcher::new(".")).server(&own);
+        assert_eq!(
+            source.keyed("http://weather.local:8080/v1/archive?latitude=1".into()),
+            "http://weather.local:8080/v1/archive?latitude=1&apikey=k3y"
+        );
+        let plain = OpenMeteoSource::new(crate::RecordedFetcher::new("."));
+        assert_eq!(plain.keyed("https://a.b/c?x=1".into()), "https://a.b/c?x=1");
+    }
 }

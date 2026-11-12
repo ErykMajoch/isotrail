@@ -16,6 +16,11 @@ All notable changes to `isotrail` are documented here.
 - **Route styling.** `--route-colour`, `--route-width`, `--route-hidden dashed|dim|solid|off` for the parts behind ridges, and `--markers` for the start and finish flags and the head marker. The elevation profile and the web embed's progress line follow the route's colour.
 - `--layout stacked|column` places the text the same way for every shape, and `--credit-extra` adds a line of your own under the data credit.
 - All of these are config keys too, and `embed` writes an attribute for each one that isn't the default, so the live diorama matches its poster.
+- **Shape the animation.** `--intro` and `--hold` set the seconds before the route starts and on the finished hike, a negative `--orbit` turns the camera the other way, and `--loop-back` undraws the route and turns the camera back after the hold, so a looping GIF or video runs on without a jump.
+- MP4s can be up to 180 seconds long and 60 frames a second; GIFs stay at 60 seconds and 50 frames a second.
+- **Smaller GIFs and tuned MP4s.** `--gif-scale 1` writes a GIF at the drawn size, about a quarter of the bytes, for web pages; `--loop once` or `--loop N` stops a GIF after one or `N` plays. `--crf` and `--preset` set the MP4's quality and encoding speed, and `--ffmpeg` (or `ISOTRAIL_FFMPEG`) picks the ffmpeg program.
+- **Output for scripts.** `--json` on `render`, `embed`, `bundle` and `style-lab` prints one JSON object with the files written, their sizes and the credit for the caption. `-q` (`--quiet`) prints only errors.
+- **Other servers.** `--terrain-url` takes elevation tiles from a mirror, `--weather-url` the weather from another server with Open-Meteo's API, and an Open-Meteo API key in `ISOTRAIL_OPEN_METEO_KEY` uses their servers for customers; the key never reaches the cache, the bundle or a message. `--cache-dir` sets the cache folder for one run, like `ISOTRAIL_CACHE_DIR`.
 
 ### Changed
 

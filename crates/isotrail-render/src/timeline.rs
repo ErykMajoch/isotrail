@@ -8,6 +8,11 @@ use crate::{Aim, Conditions, SunState};
 /// the rest holds on the finished hike
 pub const INTRO_SHARE: f32 = 0.05;
 pub const DRAW_SHARE: f32 = 0.8;
+pub const HOLD_SHARE: f32 = 0.15;
+/// Share of a looping clip in which the route undraws after the hold
+pub const REWIND_SHARE: f32 = 0.15;
+/// The drawing can't be squeezed shorter than this
+pub const MIN_DRAW_S: f32 = 0.5;
 pub const DEFAULT_DURATION_S: f32 = 10.0;
 pub const DEFAULT_FPS: u32 = 30;
 pub const DEFAULT_ORBIT_DEG: f32 = 30.0;
@@ -30,6 +35,13 @@ pub struct Timeline {
     /// Distinct images per second, fewer than `fps` for choppy, game-like
     /// motion
     pub step_fps: Option<u32>,
+    /// Seconds showing the scene alone; [`INTRO_SHARE`] of the clip if not set
+    pub intro_s: Option<f32>,
+    /// Seconds on the finished hike; [`HOLD_SHARE`] of the clip if not set
+    pub hold_s: Option<f32>,
+    /// After the hold, the route undraws and the camera turns back, so the
+    /// last frame leads into the first
+    pub loop_back: bool,
 }
 
 impl Default for Timeline {
@@ -38,11 +50,44 @@ impl Default for Timeline {
             duration_s: DEFAULT_DURATION_S,
             fps: DEFAULT_FPS,
             step_fps: None,
+            intro_s: None,
+            hold_s: None,
+            loop_back: false,
         }
     }
 }
 
+/// Shares of the clip in order: intro, drawing, hold and rewind
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Parts {
+    intro: f32,
+    draw: f32,
+    hold: f32,
+}
+
 impl Timeline {
+    fn parts(&self) -> Parts {
+        let share = |seconds: Option<f32>, default: f32| match seconds {
+            Some(s) if self.duration_s > 0.0 => s / self.duration_s,
+            _ => default,
+        };
+        let intro = share(self.intro_s, INTRO_SHARE);
+        let hold = share(self.hold_s, HOLD_SHARE);
+        let rewind = if self.loop_back { REWIND_SHARE } else { 0.0 };
+        // The built-in shares as they are, so default clips never move
+        let draw = if self.intro_s.is_none() && self.hold_s.is_none() && !self.loop_back {
+            DRAW_SHARE
+        } else {
+            1.0 - intro - hold - rewind
+        };
+        Parts { intro, draw, hold }
+    }
+
+    /// Seconds the route takes to draw itself
+    pub fn draw_s(&self) -> f32 {
+        self.parts().draw * self.duration_s
+    }
+
     pub fn frame_count(&self) -> u32 {
         ((self.duration_s * self.fps as f32).round() as u32).max(1)
     }
@@ -70,18 +115,59 @@ impl Timeline {
     /// Share of the route's drawing done by `time_s`: 0 through the intro,
     /// 1 through the hold
     pub fn draw_share(&self, time_s: f32) -> f32 {
-        ((self.share(time_s) - INTRO_SHARE) / DRAW_SHARE).clamp(0.0, 1.0)
+        let parts = self.parts();
+        if parts.draw <= 0.0 {
+            return 1.0;
+        }
+        ((self.share(time_s) - parts.intro) / parts.draw).clamp(0.0, 1.0)
+    }
+
+    /// Clip share where the drawing ends and the camera has settled
+    fn settled(&self) -> f32 {
+        let parts = self.parts();
+        parts.intro + parts.draw
     }
 
     /// Seconds into the clip where the hold on the finished hike begins
-    pub fn hold_s(&self) -> f32 {
-        self.duration_s * (INTRO_SHARE + DRAW_SHARE)
+    pub fn hold_start_s(&self) -> f32 {
+        self.duration_s * self.settled()
     }
 
-    /// Whether frame `index` falls in the hold. The last frame always does,
-    /// so a short or choppy clip still ends on the finished hike
+    /// Seconds into the clip where the route starts to undraw: the end,
+    /// without a loop back
+    pub fn rewind_start_s(&self) -> f32 {
+        if self.loop_back {
+            let parts = self.parts();
+            self.duration_s * (parts.intro + parts.draw + parts.hold)
+        } else {
+            self.duration_s
+        }
+    }
+
+    /// How far the rewind has got at `time_s`, from 0 to 1, or `None`
+    /// before it
+    pub fn rewound(&self, time_s: f32) -> Option<f32> {
+        let start = self.rewind_start_s();
+        if !self.loop_back || time_s < start {
+            return None;
+        }
+        let length = self.duration_s - start;
+        Some(if length > 0.0 {
+            ((time_s - start) / length).clamp(0.0, 1.0)
+        } else {
+            1.0
+        })
+    }
+
+    /// Whether frame `index` falls in the hold. Without a loop back the last
+    /// frame always does, so a short or choppy clip still ends on the
+    /// finished hike
     pub fn holds(&self, index: u32) -> bool {
-        index + 1 >= self.frame_count() || index as f32 / self.fps.max(1) as f32 >= self.hold_s()
+        let time = index as f32 / self.fps.max(1) as f32;
+        if self.loop_back {
+            return time >= self.hold_start_s() && time < self.rewind_start_s();
+        }
+        index + 1 >= self.frame_count() || time >= self.hold_start_s()
     }
 }
 
@@ -89,6 +175,7 @@ impl Timeline {
 /// finishes drawing, and holds it from there
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Orbit {
+    /// Negative turns the other way
     pub sweep_deg: f32,
 }
 
@@ -101,9 +188,12 @@ impl Default for Orbit {
 }
 
 impl Orbit {
-    /// Degrees the camera is turned from the still's view at clip share `share`
-    pub fn yaw_offset_deg(&self, share: f32) -> f32 {
-        let turned = ease(share / (INTRO_SHARE + DRAW_SHARE));
+    /// Degrees the camera is turned from the still's view at `time_s`
+    pub fn yaw_offset_deg(&self, timeline: &Timeline, time_s: f32) -> f32 {
+        if let Some(rewound) = timeline.rewound(time_s) {
+            return -self.sweep_deg * ease(rewound);
+        }
+        let turned = ease(timeline.share(time_s) / timeline.settled());
         if turned >= 1.0 {
             0.0
         } else {
@@ -160,16 +250,21 @@ impl Motion {
         if self.timeline.holds(index) {
             // A held image from before the hold would show the route unfinished
             return Moment {
-                time_s: time_s.max(self.timeline.hold_s()),
+                time_s: time_s.max(self.timeline.hold_start_s()),
                 yaw_offset_deg: 0.0,
                 progress: 1.0,
                 hike_time_s: walk.step(self.pace, 1.0).time_s,
             };
         }
-        let step = walk.step(self.pace, self.timeline.draw_share(time_s));
+        // The rewind undraws eased, so it slows into the first frame
+        let drawn = match self.timeline.rewound(time_s) {
+            Some(rewound) => 1.0 - ease(rewound),
+            None => self.timeline.draw_share(time_s),
+        };
+        let step = walk.step(self.pace, drawn);
         Moment {
             time_s,
-            yaw_offset_deg: self.orbit.yaw_offset_deg(self.timeline.share(time_s)),
+            yaw_offset_deg: self.orbit.yaw_offset_deg(&self.timeline, time_s),
             progress: step.progress,
             hike_time_s: step.time_s,
         }
@@ -651,20 +746,118 @@ mod tests {
     fn orbits_ease_back_to_the_still_view_by_the_hold() {
         let orbit = Orbit::default();
         assert_eq!(orbit.sweep_deg, 30.0);
-        assert_near(orbit.yaw_offset_deg(0.0), -30.0);
+        // Over a 1 s clip, seconds and shares are the same
+        let clip = Timeline {
+            duration_s: 1.0,
+            ..Timeline::default()
+        };
+        let at = |orbit: Orbit, share: f32| orbit.yaw_offset_deg(&clip, share);
+        assert_near(at(orbit, 0.0), -30.0);
         let drawn = INTRO_SHARE + DRAW_SHARE;
-        assert_near(orbit.yaw_offset_deg(drawn / 2.0), -15.0);
-        assert_near(orbit.yaw_offset_deg(drawn), 0.0);
-        assert_eq!(orbit.yaw_offset_deg(0.95), 0.0);
-        assert_eq!(orbit.yaw_offset_deg(1.0), 0.0);
+        assert_near(at(orbit, drawn / 2.0), -15.0);
+        assert_near(at(orbit, drawn), 0.0);
+        assert_eq!(at(orbit, 0.95), 0.0);
+        assert_eq!(at(orbit, 1.0), 0.0);
         // Eased: slow at the ends, fastest in the middle
-        let step = |share: f32| orbit.yaw_offset_deg(share + 0.01) - orbit.yaw_offset_deg(share);
+        let step = |share: f32| at(orbit, share + 0.01) - at(orbit, share);
         assert!(step(0.0) < step(0.2) && step(0.2) < step(drawn / 2.0 - 0.005));
         assert!(step(drawn - 0.01) < step(drawn / 2.0 - 0.005));
 
-        let turn = Orbit { sweep_deg: 360.0 };
-        assert_near(turn.yaw_offset_deg(0.0), -360.0);
-        assert_eq!(Orbit { sweep_deg: 0.0 }.yaw_offset_deg(0.3), 0.0);
+        assert_near(at(Orbit { sweep_deg: 360.0 }, 0.0), -360.0);
+        assert_eq!(at(Orbit { sweep_deg: 0.0 }, 0.3), 0.0);
+        // A negative sweep turns the other way to the same view
+        let back = Orbit { sweep_deg: -30.0 };
+        assert_near(at(back, 0.0), 30.0);
+        assert_near(at(back, drawn / 2.0), 15.0);
+        assert_eq!(at(back, drawn), 0.0);
+    }
+
+    #[test]
+    fn intro_and_hold_can_be_set_in_seconds() {
+        let timeline = Timeline {
+            intro_s: Some(0.0),
+            hold_s: Some(3.0),
+            ..Timeline::default()
+        };
+        assert_near(timeline.draw_s(), 7.0);
+        assert_near(timeline.draw_share(0.0), 0.0);
+        assert_near(timeline.draw_share(3.5), 0.5);
+        assert_near(timeline.hold_start_s(), 7.0);
+        assert!(!timeline.holds(208) && timeline.holds(211));
+        // One part set, the other keeps its share
+        let held = Timeline {
+            hold_s: Some(1.0),
+            ..Timeline::default()
+        };
+        assert_near(held.draw_share(0.5), 0.0);
+        assert_near(held.draw_s(), 8.5);
+        let squeezed = Timeline {
+            duration_s: 2.0,
+            intro_s: Some(1.0),
+            hold_s: Some(0.8),
+            ..Timeline::default()
+        };
+        assert!(squeezed.draw_s() < MIN_DRAW_S);
+    }
+
+    #[test]
+    fn the_default_parts_are_the_built_in_shares() {
+        let timeline = Timeline::default();
+        assert_eq!(timeline.hold_start_s(), 10.0 * (INTRO_SHARE + DRAW_SHARE));
+        assert_eq!(timeline.rewind_start_s(), 10.0);
+        assert_eq!(timeline.rewound(9.99), None);
+        let spelled_out = Timeline {
+            intro_s: Some(0.5),
+            hold_s: Some(1.5),
+            ..timeline
+        };
+        for i in 0..=100 {
+            let time = i as f32 / 10.0;
+            assert!((spelled_out.draw_share(time) - timeline.draw_share(time)).abs() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn a_loop_back_rewinds_to_the_first_frame() {
+        let walk = Walk::new(&paused());
+        let motion = Motion {
+            timeline: Timeline {
+                loop_back: true,
+                ..Timeline::default()
+            },
+            pace: Pace::Time,
+            ..Motion::default()
+        };
+        let timeline = motion.timeline;
+        // 0.5 s intro, 6.5 s drawing, 1.5 s hold, 1.5 s rewind
+        assert_near(timeline.draw_s(), 6.5);
+        assert_near(timeline.hold_start_s(), 7.0);
+        assert_near(timeline.rewind_start_s(), 8.5);
+        let count = timeline.frame_count();
+        let held: Vec<u32> = (0..count).filter(|&i| timeline.holds(i)).collect();
+        assert!((209..=211).contains(&held[0]) && (253..=255).contains(held.last().unwrap()));
+
+        let moments: Vec<Moment> = (0..count).map(|i| motion.moment(&walk, i)).collect();
+        let first = moments[0];
+        assert_eq!(moments[230].progress, 1.0);
+        assert_eq!(moments[230].yaw_offset_deg, 0.0);
+        // Undrawing all the way: progress, the clock and the camera run back
+        for pair in moments[255..].windows(2) {
+            assert!(pair[1].progress <= pair[0].progress);
+            assert!(pair[1].hike_time_s <= pair[0].hike_time_s);
+            assert!(pair[1].yaw_offset_deg <= pair[0].yaw_offset_deg);
+        }
+        let last = moments[count as usize - 1];
+        assert!(last.progress < 0.005, "{}", last.progress);
+        assert!((last.yaw_offset_deg - first.yaw_offset_deg).abs() < 0.05);
+        let stats = walk.stats_at(&last);
+        assert!(stats.distance_m < 5.0);
+        // A turn the other way comes back the other way
+        let back = Motion {
+            orbit: Orbit { sweep_deg: -30.0 },
+            ..motion
+        };
+        assert!(back.moment(&walk, count - 1).yaw_offset_deg > 29.9);
     }
 
     #[test]
@@ -952,6 +1145,7 @@ mod tests {
                                     duration_s: duration_s as f32,
                                     fps,
                                     step_fps,
+                                    ..Timeline::default()
                                 },
                                 pace,
                                 ..Motion::default()
@@ -983,6 +1177,7 @@ mod tests {
                 duration_s: 5.0,
                 fps: 30,
                 step_fps: Some(1),
+                ..Timeline::default()
             },
             ..Motion::default()
         };

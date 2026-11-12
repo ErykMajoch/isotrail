@@ -10,7 +10,8 @@ use isotrail_geo::{
     Cache, CachedFetcher, DEFAULT_DETAIL, DemSource, FeatureSource, Footprint, FootprintOptions,
     Grid, Heightmap, HttpFetcher, Landcover, LandcoverMap, MIN_PADDING_M, OSM_ATTRIBUTION,
     OVERPASS_URL, Orientation, OsmFeatures, OverpassSource, PADDING_FRACTION, Provenance,
-    RetryPolicy, SceneBundle, TERRARIUM_URL, TerrariumSource, line_mask, origin, scene_bundle,
+    RetryPolicy, SceneBundle, TERRARIUM_URL, TerrariumSource, line_mask, origin, redact,
+    scene_bundle,
 };
 use isotrail_track::Track;
 use png::ColorType;
@@ -18,7 +19,9 @@ use tracing::{info, warn};
 
 use crate::config::Typed;
 use crate::output;
+use crate::report::{Report, ReportArgs, Written, say};
 use crate::season::{self, SeasonArg};
+use crate::servers::{CacheDirArg, WeatherUrlArg, parse_template};
 use crate::weather;
 
 const PREVIEW_SCALE: u32 = 4;
@@ -68,6 +71,9 @@ pub struct BundleArgs {
 
     #[command(flatten)]
     data: DataArgs,
+
+    #[command(flatten)]
+    report: ReportArgs,
 }
 
 pub fn parse_exaggeration(value: &str) -> Result<f64, String> {
@@ -94,6 +100,18 @@ pub struct DataArgs {
     /// Overpass API endpoint for OpenStreetMap data
     #[arg(long, value_name = "URL", env = "ISOTRAIL_OVERPASS_URL", default_value = OVERPASS_URL)]
     overpass_url: String,
+
+    /// Elevation tiles in the terrarium format from another server, such as
+    /// a mirror of the same data: an address with {z}, {x} and {y}
+    #[arg(long, value_name = "URL", env = "ISOTRAIL_TERRAIN_URL",
+          default_value = TERRARIUM_URL, value_parser = parse_template)]
+    terrain_url: String,
+
+    #[command(flatten)]
+    weather_url: WeatherUrlArg,
+
+    #[command(flatten)]
+    cache_dir: CacheDirArg,
 
     /// Build the diorama from the elevation alone, without OpenStreetMap's
     /// lakes, woods and paths, when its server is busy or out of reach
@@ -180,6 +198,9 @@ impl DataArgs {
             ("detail", "--detail"),
             ("offline", "--offline"),
             ("overpass_url", "--overpass-url"),
+            ("terrain_url", "--terrain-url"),
+            ("weather_url", "--weather-url"),
+            ("cache_dir", "--cache-dir"),
             ("no_map_data", "--no-map-data"),
             ("padding", "--padding"),
             ("footprint", "--footprint"),
@@ -205,9 +226,13 @@ pub struct Prepared {
     elevation_range: (f32, f32),
 }
 
-/// Fetches through the shared cache
-pub fn fetcher(offline: bool) -> anyhow::Result<CachedFetcher<HttpFetcher>> {
-    Ok(CachedFetcher::new(HttpFetcher::new()?, Cache::new(crate::cache::dir()?)).offline(offline))
+/// Fetches through the shared cache, or the one in `cache_dir`
+pub fn fetcher(
+    offline: bool,
+    cache_dir: Option<&Path>,
+) -> anyhow::Result<CachedFetcher<HttpFetcher>> {
+    let cache = Cache::new(crate::cache::dir(cache_dir)?);
+    Ok(CachedFetcher::new(HttpFetcher::new()?, cache).offline(offline))
 }
 
 /// Map features from Overpass, which retries by itself, or none with
@@ -220,7 +245,8 @@ fn map_data(grid: &Grid, data: &DataArgs) -> anyhow::Result<Option<OsmFeatures>>
         return Ok(None);
     }
     let http = HttpFetcher::new()?.with_retry(RetryPolicy::once());
-    let fetcher = CachedFetcher::new(http, Cache::new(crate::cache::dir()?)).offline(data.offline);
+    let cache = Cache::new(crate::cache::dir(data.cache_dir.get())?);
+    let fetcher = CachedFetcher::new(http, cache).offline(data.offline);
     let features = OverpassSource::new(&fetcher)
         .endpoint(&data.overpass_url)
         .features(grid)
@@ -244,9 +270,11 @@ pub fn prepare(track: &Track, file: &Path, data: &DataArgs) -> anyhow::Result<Pr
     let detail = NonZeroU32::new(data.detail).context("--detail must be positive")?;
     let grid = Grid::new(&footprint, detail);
 
-    let fetcher = fetcher(data.offline)?;
+    let fetcher = fetcher(data.offline, data.cache_dir.get())?;
     let tiles = TerrariumSource::<HttpFetcher>::tiles(&grid).len();
-    let mut heightmap = TerrariumSource::new(&fetcher).heightmap(&grid)?;
+    let mut heightmap = TerrariumSource::new(&fetcher)
+        .template(&data.terrain_url)
+        .heightmap(&grid)?;
     let features = map_data(&grid, data)?;
     let elevation_range = heightmap.range();
     let landcover = LandcoverMap::classify(
@@ -263,15 +291,16 @@ pub fn prepare(track: &Track, file: &Path, data: &DataArgs) -> anyhow::Result<Pr
         info!("{cells:>6}  cells with a {name}");
     }
 
+    let server = data.weather_url.server();
     let weather = if data.no_weather {
         None
     } else {
-        weather::look_up(track, &fetcher)
+        weather::look_up(track, &fetcher, &server)
     };
 
     let provenance = Provenance {
         generator: format!("isotrail {}", env!("CARGO_PKG_VERSION")),
-        elevation: format!("{TERRARIUM_URL} at zoom {}", grid.dem_zoom()),
+        elevation: format!("{} at zoom {}", redact(&data.terrain_url), grid.dem_zoom()),
         map_data: match features {
             Some(_) => format!("OpenStreetMap via {}", origin(&data.overpass_url)),
             None => "none".to_owned(),
@@ -293,7 +322,7 @@ pub fn prepare(track: &Track, file: &Path, data: &DataArgs) -> anyhow::Result<Pr
             .retain(|credit| credit != OSM_ATTRIBUTION);
     }
     bundle.weather = weather.map(|(weather, _)| weather);
-    season::estimate(&mut bundle, track, &fetcher);
+    season::estimate(&mut bundle, track, &fetcher, &server);
     season::apply(&mut bundle, data.season);
     Ok(Prepared {
         bundle,
@@ -307,6 +336,7 @@ pub fn prepare(track: &Track, file: &Path, data: &DataArgs) -> anyhow::Result<Pr
 }
 
 pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
+    let mut report = Report::new(&args.report);
     let debug: Vec<PathBuf> = args
         .debug_dir
         .iter()
@@ -355,7 +385,7 @@ pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
         written.extend(images.into_iter().map(|path| (path, None)));
     }
 
-    println!(
+    say!(
         "Heightmap {} × {} cells of {:.1} m from {tiles} terrain tile{} at zoom {}",
         grid.cols,
         grid.rows,
@@ -363,17 +393,17 @@ pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
         if tiles == 1 { "" } else { "s" },
         grid.dem_zoom()
     );
-    println!(
+    say!(
         "Elevation {min:.0} – {max:.0} m, drawn {:.1}× taller",
         bundle.grid.exaggeration
     );
     match features {
-        Some(features) => println!(
+        Some(features) => say!(
             "Map data: {} areas and {} lines from OpenStreetMap",
             features.areas.len(),
             features.lines.len()
         ),
-        None => println!("Map data: none (--no-map-data)"),
+        None => say!("Map data: none (--no-map-data)"),
     }
     let shares: Vec<String> = landcover
         .shares()
@@ -381,34 +411,35 @@ pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
         .filter(|&(_, share)| share >= MIN_REPORTED_SHARE)
         .map(|(class, share)| format!("{} {:.0}%", class.name(), share * 100.0))
         .collect();
-    println!("Landcover: {}", shares.join(", "));
+    say!("Landcover: {}", shares.join(", "));
     let lakes = landcover.water.iter().filter(|body| !body.sea).count();
     let lakes = format!("{lakes} {}", if lakes == 1 { "lake" } else { "lakes" });
     match landcover.water.iter().any(|body| body.sea) {
-        false => println!("Water: {lakes} levelled"),
-        true if lakes.starts_with("0 ") => println!("Water: the sea, at sea level"),
-        true => println!("Water: the sea and {lakes} levelled"),
+        false => say!("Water: {lakes} levelled"),
+        true if lakes.starts_with("0 ") => say!("Water: the sea, at sea level"),
+        true => say!("Water: the sea and {lakes} levelled"),
     }
     let stats = &bundle.meta.stats;
     let weather = bundle.weather.as_ref().and_then(|weather| {
         let summary = weather::Summary::new(weather, stats.start?, stats.end?)?;
         Some(summary.line(weather.dataset))
     });
-    println!("Weather: {}", weather.as_deref().unwrap_or("none"));
-    println!("Season: {}", season::describe(&bundle.season));
+    say!("Weather: {}", weather.as_deref().unwrap_or("none"));
+    say!("Season: {}", season::describe(&bundle.season));
     let pieces = bundle.route.breaks.len() + 1;
-    println!(
+    say!(
         "Route: {} points in {pieces} piece{}",
         bundle.route.points.len(),
         if pieces == 1 { "" } else { "s" }
     );
     for (path, size) in written {
         match size {
-            Some(bytes) => println!("Wrote {} ({} KB)", path.display(), bytes.div_ceil(1024)),
-            None => println!("Wrote {}", path.display()),
+            Some(bytes) => say!("Wrote {} ({} KB)", path.display(), bytes.div_ceil(1024)),
+            None => say!("Wrote {}", path.display()),
         }
+        report.add(Written::file(&path));
     }
-    Ok(())
+    report.finish(None)
 }
 
 fn write_debug_images(

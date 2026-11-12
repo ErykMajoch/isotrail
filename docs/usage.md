@@ -1,6 +1,6 @@
 # Usage
 
-isotrail has six commands. Each one prints its options with `--help`, for example `isotrail render --help`. The global flag `-v` (repeatable, up to `-vvv`) shows more log output.
+isotrail has six commands. Each one prints its options with `--help`, for example `isotrail render --help`. The global flag `-v` (repeatable, up to `-vvv`) shows more log output, and `-q` (`--quiet`) shows only errors.
 
 - [`render`](#render): render a hike as a PNG, an animated GIF or an MP4 video
 - [`bundle`](#bundle): save a hike's scene as a `.itb` file
@@ -9,7 +9,7 @@ isotrail has six commands. Each one prints its options with `--help`, for exampl
 - [`style-lab`](#style-lab): compare every look on one contact sheet
 - [`cache`](#cache): manage downloaded data
 
-The rest of this page also covers [how outputs are written](#writing-files) and [exit codes](#exit-codes).
+The rest of this page also covers [output for scripts](#output-for-scripts), [how outputs are written](#writing-files) and [exit codes](#exit-codes).
 
 The commands that draw or prepare a hike share their options. They are described under `render`, and this table shows which command takes which:
 
@@ -24,9 +24,10 @@ The commands that draw or prepare a hike share their options. They are described
 | `--exaggeration` ([look](#terrain-and-look)) | yes | yes | yes | yes |
 | [Scene, light and route](#scene-light-and-route) | yes | yes | – | – |
 | [Text and overlays](#text-and-overlays) | yes | for the poster | `--title` only | – |
-| [Animation](#animation) | yes | – | – | – |
+| [Animation](#animation), [encoding](#encoding) | yes | – | – | – |
 | [Data](#data) | yes | yes | yes | yes |
 | `--config FILE` ([configuration](configuration.md)) | yes | yes | yes | yes |
+| `--json` ([output for scripts](#output-for-scripts)) | yes | yes | yes | yes |
 
 isotrail reads GPX 1.0 and 1.1 files, with tracks (`<trk>`) or routes (`<rte>`), saved as UTF-8 or as UTF-16 with a byte-order mark. Every pause in a recording starts a new track segment. Where two segments are more than 50 m apart, the route is drawn with a gap instead of a straight jump. Several tracks in one file are joined into one hike, with a note. Files without timestamps still render, but without time-based stats. Files without elevations take their heights from the terrain.
 
@@ -191,23 +192,40 @@ When there was snow on the ground, the slopes above the snowline are white, with
 
 ### Animation
 
-A `.gif` or `.mp4` output renders an animation in three parts. It opens on the scene with only the start flag (the first 5%). Then the route draws itself with a marker at its head, while the elevation profile fills in and the stats count up (80%). It ends on the finished hike (15%), however short the clip or low its `--step-fps`. The camera starts turned away by `--orbit` and eases round to the same view as the PNG by the time the route reaches the finish.
+A `.gif` or `.mp4` output renders an animation in three parts. It opens on the scene with only the start flag (the first 5%, or `--intro` seconds). Then the route draws itself with a marker at its head, while the elevation profile fills in and the stats count up (the time left over). It ends on the finished hike (15%, or `--hold` seconds), however short the clip or low its `--step-fps`. The camera starts turned away by `--orbit` and eases round to the same view as the PNG by the time the route reaches the finish.
+
+With `--loop-back`, a fourth part follows the hold (15% of the clip, taken from the drawing): the route undraws back to the start, the stats count down and the camera turns back to where it began, so a looping GIF or video runs on without a jump.
 
 The light follows the hike's clock: each frame is lit by the sun (and moon) at the time the route's head was walked, so the animation opens under the light at the start and ends under the light at the finish. A stop of 6 hours or more, such as a night on a multi-day trek, becomes a short pause: the head waits while the sun sets, the stars and moon cross the sky and the sun rises again. Each night takes 6% of the drawing time, and all of them together at most 30%. With `--time`, one light holds through the whole animation.
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `--duration SECONDS` | `10s` | Length of the animation, from `1s` to `60s`, such as `8s` or `2.5` |
-| `--fps N` | `30` | Frames per second, up to `50` |
+| `--duration SECONDS` | `10s` | Length of the animation, such as `8s` or `2.5`: from `1s` to `60s` for a GIF, up to `180s` for an MP4 |
+| `--intro SECONDS` | 5% of the clip | Time on the scene before the route starts to draw; `0` starts at once |
+| `--hold SECONDS` | 15% of the clip | Time on the finished hike. The intro, hold and rewind must leave at least half a second to draw the route |
+| `--loop-back` | off | Undraw the route and turn the camera back after the hold, for a seamless loop |
+| `--fps N` | `30` | Frames per second: up to `50` for a GIF, `60` for an MP4 |
 | `--step-fps N` | off | Different images per second, at most `--fps`; fewer gives choppy, game-like motion |
-| `--orbit DEG` | `30` | How far the camera turns, from `0` (a still camera) to `360` (a full turn) |
+| `--orbit DEG` | `30` | How far the camera turns, from `0` (a still camera) to `360` (a full turn); a negative angle turns the other way |
 | `--pace distance\|time` | `distance` | Draw the route at an even speed, or follow the recorded times, so slow climbs take longer than quick descents. Stops are cut to a minute, and nights become pauses as described above. Without timestamps, the route draws at an even speed |
 
-GIFs loop forever and use the render's palette, so `--palette none` can't be used with them. They are the same size as the PNG and store only what changes from one frame to the next. A turning camera changes nearly every pixel, so a 10-second story is several megabytes, while `--orbit 0` makes it a fraction of that.
+GIFs use the render's palette, so `--palette none` can't be used with them. By default they loop forever and are the same size as the PNG, and they store only what changes from one frame to the next. A turning camera changes nearly every pixel, so a 10-second story is several megabytes, while `--orbit 0` makes it a fraction of that, and so does `--gif-scale 1`.
 
-MP4s are H.264 videos without sound, made to post as stories, which can be up to 60 seconds long. They are encoded at level 4.0 (4.2 above 30 frames a second) and tagged as BT.709 colour, so they also play as they are on older phones and in a web page's `<video>`. They are encoded by [ffmpeg](https://ffmpeg.org/download.html), which must be on your `PATH`. Any palette works, including `none`. A video can't be transparent, so `--background transparent` can't be used with them; choose `sky` or a colour instead.
+MP4s are H.264 videos without sound, for stories, posts and short videos. They are encoded at level 4.0 (4.2 above 30 frames a second) and tagged as BT.709 colour, so they also play as they are on older phones and in a web page's `<video>`. They are encoded by [ffmpeg](https://ffmpeg.org/download.html), which must be on your `PATH` unless you name it with `--ffmpeg`. Any palette works, including `none`. A video can't be transparent, so `--background transparent` can't be used with them; choose `sky` or a colour instead.
 
 The animation options only apply to `.gif` and `.mp4` output. PNG renders ignore them, so they can sit in a [config file](configuration.md) that you use for both.
+
+### Encoding
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--gif-scale N` | `--scale` | Output pixels per drawn pixel in a GIF, from `1` up to `--scale`. `--gif-scale 1` writes the drawn size (360 × 640 for a story), about a quarter of the bytes, for a web page that enlarges it with CSS `image-rendering: pixelated` |
+| `--loop forever\|once\|N` | `forever` | How many times a GIF plays. `once` writes no loop at all; `N` plays it `N` times in all |
+| `--crf N` | `18` | MP4 quality, from `0` to `51`: lower is better and larger. `0` is lossless, which many players can't play |
+| `--preset NAME` | x264's own (`medium`) | How hard the MP4 encoder works: `ultrafast`, `superfast`, `veryfast`, `faster`, `fast`, `medium`, `slow`, `slower` or `veryslow`. Slower presets make smaller files at the same quality |
+| `--ffmpeg PATH` | the `ffmpeg` on `PATH` | The ffmpeg program to make MP4s with (also `ISOTRAIL_FFMPEG`) |
+
+The GIF options do nothing for an MP4 and the MP4 options nothing for a GIF; isotrail warns when you type one that the output doesn't use.
 
 ### Data
 
@@ -216,6 +234,9 @@ The animation options only apply to `.gif` and `.mp4` output. PNG renders ignore
 | `--detail N` | `256` | Grid cells along the slab's long side, from `8` to `1024` |
 | `--offline` | off | Only use data that is already in the cache |
 | `--overpass-url URL` | public Overpass API | Another [Overpass](https://overpass-api.de/) endpoint for map data (also `ISOTRAIL_OVERPASS_URL`) |
+| `--terrain-url URL` | AWS Terrain Tiles | Elevation tiles in the terrarium format from another server, as an address with `{z}`, `{x}` and `{y}` (also `ISOTRAIL_TERRAIN_URL`) |
+| `--weather-url URL` | Open-Meteo | Another server with [Open-Meteo](https://open-meteo.com/)'s API, such as one you host yourself; isotrail adds `/v1/archive` and `/v1/forecast` (also `ISOTRAIL_WEATHER_URL`) |
+| `--cache-dir DIR` | see [cache](#cache) | The folder for the cache of downloads (also `ISOTRAIL_CACHE_DIR`) |
 | `--no-map-data` | off | Build the diorama from the elevation alone, without OpenStreetMap's lakes, woods and paths |
 | `--padding P[,M]` | `15,500` | Ground added round the route on each side: `P` percent of the route's length and width, and at least `M` metres |
 | `--footprint route\|north` | `route` | Which way the slab's sides run: along the route's main direction, or north-south and east-west |
@@ -224,14 +245,18 @@ The animation options only apply to `.gif` and `.mp4` output. PNG renders ignore
 
 `--config FILE` reads settings from a TOML file; see [Configuration](configuration.md).
 
-A scene bundle already holds its terrain and map data, so `--detail`, `--offline`, `--overpass-url`, `--no-map-data`, `--padding` and `--footprint` do nothing with one; isotrail warns when you type them for a bundle.
+A scene bundle already holds its terrain and map data, so `--detail`, `--offline`, `--overpass-url`, `--terrain-url`, `--weather-url`, `--cache-dir`, `--no-map-data`, `--padding` and `--footprint` do nothing with one; isotrail warns when you type them for a bundle.
+
+With an Open-Meteo API key in `ISOTRAIL_OPEN_METEO_KEY`, the weather comes from Open-Meteo's servers for customers (or from `--weather-url` with the key added). The key is only read from the environment, never from a flag or a config file, and it is left out of the cache, the bundle and every message.
+
+`--terrain-url` is meant for mirrors of the same elevation data, so the drawn credit still names Terrain Tiles. If your server has other data, credit it yourself, for example with `--credit-extra`. A key in the address (`key=`, `apikey=`, `token=`…) is masked in the bundle and in messages.
 
 The public Overpass server is sometimes busy. isotrail then tries again six times over about two minutes, printing a line before each wait. If it still can't get the map data, it stops and suggests trying later, another server with `--overpass-url`, or `--no-map-data`, which makes the diorama from the slope and height of the ground alone: no lakes, woods, fields or paths, and no OpenStreetMap credit. A server that can't be reached at all, such as a mistyped `--overpass-url`, is given up on after a few seconds. Any download that takes longer than 10 seconds prints a line saying it is still waiting.
 
 ## bundle
 
 ```text
-isotrail bundle <hike.gpx> -o <hike.itb> [--debug-dir DIR] [--title TEXT] [--exaggeration X] [--config FILE] [--detail N] [--offline] [--overpass-url URL] [--no-map-data] [--padding P[,M]] [--footprint route|north] [--no-weather] [--season SEASON]
+isotrail bundle <hike.gpx> -o <hike.itb> [--debug-dir DIR] [--title TEXT] [--exaggeration X] [--config FILE] [--json] [data options]
 ```
 
 Downloads the elevation and OpenStreetMap data around the route and works out what covers every grid cell: from the map data where there is some, and from the slope and height of the ground elsewhere. Lakes and reservoirs get a level surface, and the sea lies flat at sea level. The result is saved with the route, its elevation profile, the hike's statistics, the sun's and moon's paths across the sky and the hour-by-hour weather during the hike as a **scene bundle**: one compact file (usually under 100 KB) that holds everything a render needs, with no further downloads.
@@ -333,7 +358,7 @@ The release downloads have the runtime in a `web` folder next to the `isotrail` 
 ## stats
 
 ```text
-isotrail stats <hike.gpx | hike.itb> [--json] [--units metric|imperial] [--weather [--offline]]
+isotrail stats <hike.gpx | hike.itb> [--json] [--units metric|imperial] [--weather [--offline]] [--weather-url URL] [--cache-dir DIR]
 ```
 
 Prints a hike's statistics: distance, elevation gain and loss, the elevation range, elapsed and moving time, start and end times in the local time zone and in UTC, the bounding box, and the number of points and segments.
@@ -375,7 +400,7 @@ With `--json`, the bundle's hourly samples are under `weather.samples`, with key
 ## style-lab
 
 ```text
-isotrail style-lab <hike.gpx | hike.itb> -o DIR [--aspect SHAPE] [--scale LIST] [--palette LIST] [--exaggeration X] [--config FILE] [--detail N] [--offline] [--overpass-url URL] [--no-map-data] [--padding P[,M]] [--footprint route|north] [--no-weather] [--season SEASON]
+isotrail style-lab <hike.gpx | hike.itb> -o DIR [--aspect SHAPE] [--scale LIST] [--palette LIST] [--exaggeration X] [--config FILE] [--json] [data options]
 ```
 
 Renders the hike once for every combination of mesher (`voxel`, `smooth`), pixel scale and palette, as `DIR/<mesher>-<scale>-<palette>.png`. It also writes `DIR/contact-sheet.png`, which lays them all out side by side with a label above each, so you can compare looks before choosing your `render` options.
@@ -393,8 +418,8 @@ It also takes the [data options](#data). From config files it takes its own `[st
 ## cache
 
 ```text
-isotrail cache path
-isotrail cache clear [--yes] [--older-than DAYS]
+isotrail cache path [--cache-dir DIR]
+isotrail cache clear [--yes] [--older-than DAYS] [--cache-dir DIR]
 ```
 
 Downloaded elevation tiles, map data and weather are cached on disk, so later renders of the same area are fast and can work offline. Nothing expires on its own: map data stays as it was downloaded until you clear it. `cache path` prints where the cache is, and `cache clear` deletes it after asking (`--yes` skips the question). `--older-than DAYS` only deletes downloads made more than that many days ago, for example `--older-than 90` to pick up newer maps for areas you rendered long ago. Only files that isotrail wrote are deleted; anything else in the folder is left alone and counted in the message.
@@ -407,7 +432,24 @@ A cached download that turns out to be damaged is dropped and fetched once more.
 | Linux | `~/.cache/isotrail` |
 | macOS | `~/Library/Caches/isotrail` |
 
-Set `ISOTRAIL_CACHE_DIR` to use another directory.
+Pass `--cache-dir DIR` to any command that downloads, or set `ISOTRAIL_CACHE_DIR`, to use another directory. The flag wins over the variable.
+
+## Output for scripts
+
+`render`, `embed`, `bundle` and `style-lab` print a line for each file they write. With `--json` they print one JSON object at the end instead, and nothing else on standard output:
+
+```json
+{
+  "files": [
+    { "path": "hike.gif", "bytes": 4183920, "width": 1080, "height": 1920, "frames": 300 }
+  ],
+  "caption_credit": null
+}
+```
+
+Each file has its `path` as written and its size in `bytes`; images add `width` and `height`, and animations their number of `frames`. `caption_credit` is the data credit to paste into a caption when the image doesn't show it (with `--no-attribution`, `--overlay none`, or when it doesn't fit), and `null` otherwise. `stats --json` keeps its own format.
+
+`-q` (`--quiet`) prints only errors: no warnings and no lines about files written, not even the caption credit, which `--json` still reports. A command's own output still prints: the `stats` table, `cache path` and the JSON object.
 
 ## Writing files
 

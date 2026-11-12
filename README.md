@@ -129,7 +129,7 @@ isotrail render hike.gpx --no-map-data
 | A short video | `--aspect video -o hike.mp4` | Keeps the diorama and text clear of the caption and buttons laid over short videos |
 | A post | `--aspect feed` or `--aspect portrait`, as a PNG or `.mp4` | Tall 4:5 and 3:4 posts take up the most room in a feed |
 | Your website | [`isotrail embed`](docs/usage.md#embed), or `--aspect wide` as a PNG | The bundle is about 100 KB and the runtime (about 1.2 MB gzipped) is shared by every hike; a PNG is a few dozen KB |
-| Chats, forums, READMEs | `.gif` | Plays anywhere, but a 10-second story is several MB, often over 10 MB. A shorter `--duration` or a lower `--fps` makes it smaller |
+| Chats, forums, READMEs | `.gif` | Plays anywhere, but a 10-second story is several MB, often over 10 MB. `--gif-scale 1` makes it about a quarter of that, for pages that enlarge it; a shorter `--duration` or a lower `--fps` helps too |
 
 ## Commands
 

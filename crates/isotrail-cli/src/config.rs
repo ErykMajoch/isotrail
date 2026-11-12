@@ -22,10 +22,13 @@ const RENDER: &str = "render";
 const COMMANDS: [&str; 4] = [RENDER, "embed", "bundle", "style-lab"];
 /// What style-lab takes from [render]: the data settings, not the looks it
 /// lays side by side
-const STYLE_LAB_FROM_RENDER: [&str; 9] = [
+const STYLE_LAB_FROM_RENDER: [&str; 12] = [
     "detail",
     "offline",
     "overpass-url",
+    "terrain-url",
+    "weather-url",
+    "cache-dir",
     "no-map-data",
     "padding",
     "footprint",
@@ -34,11 +37,13 @@ const STYLE_LAB_FROM_RENDER: [&str; 9] = [
     "exaggeration",
 ];
 /// Flags that only make sense for one run
-const NOT_SETTINGS: [&str; 6] = [
+const NOT_SETTINGS: [&str; 8] = [
     "output",
     "config",
     "debug-dir",
     "verbose",
+    "quiet",
+    "json",
     "help",
     "version",
 ];
@@ -444,6 +449,70 @@ mod tests {
             "--sun=200,-5",
         ] {
             assert!(line.iter().any(|arg| arg == flag), "{flag} in {line:?}");
+        }
+    }
+
+    #[test]
+    fn animation_encoding_and_server_settings_are_keys_and_reports_are_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let user = write(
+            dir.path(),
+            "user.toml",
+            "[render]
+intro = 0
+hold = \"2s\"
+loop-back = true
+orbit = -30
+             loop = 3
+gif-scale = 1
+crf = 23
+preset = \"slow\"
+             terrain-url = \"https://tiles.example/{z}/{x}/{y}.png\"
+             weather-url = \"https://weather.example\"
+cache-dir = \"cache\"
+",
+        );
+        let result = with_config(args("isotrail render hike.gpx"), found(user.clone())).unwrap();
+        let line = strings(&result);
+        for flag in [
+            "--intro=0",
+            "--hold=2s",
+            "--loop-back",
+            "--orbit=-30",
+            "--loop=3",
+            "--gif-scale=1",
+            "--crf=23",
+            "--preset=slow",
+            "--terrain-url=https://tiles.example/{z}/{x}/{y}.png",
+            "--weather-url=https://weather.example",
+            "--cache-dir=cache",
+        ] {
+            assert!(line.iter().any(|arg| arg == flag), "{flag} in {line:?}");
+        }
+        assert!(matches!(
+            parse_args(result).command,
+            crate::Command::Render(_)
+        ));
+        // style-lab takes the servers, not the clip settings
+        let result = with_config(args("isotrail style-lab hike.gpx -o lab"), found(user)).unwrap();
+        let line = strings(&result);
+        assert!(
+            line.iter().any(|arg| arg == "--cache-dir=cache"),
+            "{line:?}"
+        );
+        assert!(!line.iter().any(|arg| arg.starts_with("--crf")), "{line:?}");
+        for key in ["json = true", "quiet = true"] {
+            let path = write(
+                dir.path(),
+                "report.toml",
+                &format!(
+                    "[render]
+{key}
+"
+                ),
+            );
+            let error = with_config(args("isotrail render hike.gpx"), found(path)).unwrap_err();
+            assert!(error.to_string().contains("unknown setting"), "{error}");
         }
     }
 

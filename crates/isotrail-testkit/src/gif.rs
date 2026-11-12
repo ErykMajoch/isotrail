@@ -45,3 +45,14 @@ pub fn decode_gif(bytes: &[u8]) -> Vec<GifFrame> {
     }
     frames
 }
+
+/// The loop count a GIF asks for: `None` without a loop extension (it plays
+/// once), `Some(0)` for ever, otherwise the repeats after the first play
+pub fn gif_loop_count(bytes: &[u8]) -> Option<u16> {
+    const MARK: &[u8] = b"NETSCAPE2.0";
+    let at = bytes.windows(MARK.len()).position(|w| w == MARK)? + MARK.len();
+    match bytes.get(at..at + 4)? {
+        [3, 1, low, high] => Some(u16::from_le_bytes([*low, *high])),
+        _ => None,
+    }
+}

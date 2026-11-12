@@ -16,7 +16,7 @@ use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
-pub use gif::{GifFrame, decode_gif};
+pub use gif::{GifFrame, decode_gif, gif_loop_count};
 pub use scene::{bundle, diorama_bundle, grid, hike_bundle, synthetic_weather};
 pub use video::{VideoInfo, first_video_frame, has_ffmpeg, probe_video};
 

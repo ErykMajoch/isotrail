@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::Write;
+use std::num::NonZeroU16;
 
 use gif::{DisposalMethod, Encoder, Repeat};
 use isotrail_render::{Background, Frame, Look};
@@ -9,6 +10,22 @@ use crate::ExportError;
 
 /// Browsers stretch shorter GIF frames to a tenth of a second
 pub const MAX_GIF_FPS: u32 = 50;
+
+/// How many times a GIF plays
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Plays {
+    #[default]
+    Forever,
+    Times(NonZeroU16),
+}
+
+/// How a GIF is written: enlarged `scale` times, `fps` frames a second
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GifOptions {
+    pub scale: u32,
+    pub fps: u32,
+    pub plays: Plays,
+}
 
 /// Streams frames into a looping GIF, enlarged `scale` times, each frame
 /// keeping only what changed since the one before
@@ -35,8 +52,7 @@ pub struct GifWriter<W: Write> {
 struct Setup {
     width: u32,
     height: u32,
-    scale: u32,
-    fps: u32,
+    options: GifOptions,
     table: Vec<[u8; 3]>,
     see_through: bool,
     out: (u16, u16),
@@ -46,9 +62,8 @@ impl Setup {
     fn from_look(
         width: u32,
         height: u32,
-        scale: u32,
         look: &Look,
-        fps: u32,
+        options: GifOptions,
     ) -> Result<Setup, ExportError> {
         let palette = look.palette.as_ref().ok_or(ExportError::GifPalette)?;
         let mut colours = palette.colours().to_vec();
@@ -56,17 +71,17 @@ impl Setup {
             colours.push(colour);
         }
         let see_through = look.background == Background::Transparent;
-        Setup::new(width, height, scale, &colours, see_through, fps)
+        Setup::new(width, height, &colours, see_through, options)
     }
 
     fn new(
         width: u32,
         height: u32,
-        scale: u32,
         colours: &[[u8; 3]],
         see_through: bool,
-        fps: u32,
+        options: GifOptions,
     ) -> Result<Setup, ExportError> {
+        let GifOptions { scale, fps, .. } = options;
         if scale == 0 {
             return Err(ExportError::ZeroScale);
         }
@@ -92,8 +107,7 @@ impl Setup {
         Ok(Setup {
             width,
             height,
-            scale,
-            fps,
+            options,
             table,
             see_through,
             out: (out_width, out_height),
@@ -103,7 +117,12 @@ impl Setup {
 
 /// Checks that `look` can colour a GIF, before any frame is drawn
 pub fn check_gif_look(look: &Look) -> Result<(), ExportError> {
-    Setup::from_look(1, 1, 1, look, 1).map(drop)
+    let options = GifOptions {
+        scale: 1,
+        fps: 1,
+        plays: Plays::Forever,
+    };
+    Setup::from_look(1, 1, look, options).map(drop)
 }
 
 impl<W: Write> GifWriter<W> {
@@ -113,11 +132,10 @@ impl<W: Write> GifWriter<W> {
         writer: W,
         width: u32,
         height: u32,
-        scale: u32,
         look: &Look,
-        fps: u32,
+        options: GifOptions,
     ) -> Result<Self, ExportError> {
-        GifWriter::start(writer, Setup::from_look(width, height, scale, look, fps)?)
+        GifWriter::start(writer, Setup::from_look(width, height, look, options)?)
     }
 
     /// One more table entry stays free for see-through pixels
@@ -125,12 +143,11 @@ impl<W: Write> GifWriter<W> {
         writer: W,
         width: u32,
         height: u32,
-        scale: u32,
         colours: &[[u8; 3]],
         see_through: bool,
-        fps: u32,
+        options: GifOptions,
     ) -> Result<Self, ExportError> {
-        let setup = Setup::new(width, height, scale, colours, see_through, fps)?;
+        let setup = Setup::new(width, height, colours, see_through, options)?;
         GifWriter::start(writer, setup)
     }
 
@@ -146,13 +163,21 @@ impl<W: Write> GifWriter<W> {
         global.extend([0, 0, 0]);
         let (out_width, out_height) = setup.out;
         let mut encoder = Encoder::new(writer, out_width, out_height, &global)?;
-        encoder.set_repeat(Repeat::Infinite)?;
+        // Without the loop extension a GIF plays once; its count is the
+        // repeats after the first play
+        match setup.options.plays {
+            Plays::Forever => encoder.set_repeat(Repeat::Infinite)?,
+            Plays::Times(times) if times.get() > 1 => {
+                encoder.set_repeat(Repeat::Finite(times.get() - 1))?;
+            }
+            Plays::Times(_) => {}
+        }
         Ok(GifWriter {
             encoder,
             width: setup.width,
             height: setup.height,
-            scale: setup.scale,
-            fps: setup.fps,
+            scale: setup.options.scale,
+            fps: setup.options.fps,
             indices,
             table,
             transparent,
@@ -293,7 +318,7 @@ impl<W: Write> GifWriter<W> {
 #[cfg(test)]
 mod tests {
     use isotrail_render::Palette;
-    use isotrail_testkit::decode_gif;
+    use isotrail_testkit::{decode_gif, gif_loop_count};
 
     use super::*;
 
@@ -305,9 +330,37 @@ mod tests {
         Frame::new(2, 2, pixels.concat())
     }
 
+    fn options(scale: u32, fps: u32) -> GifOptions {
+        GifOptions {
+            scale,
+            fps,
+            plays: Plays::Forever,
+        }
+    }
+
     fn writer(see_through: bool, fps: u32) -> GifWriter<Vec<u8>> {
         let colours = [[200, 30, 40], [20, 40, 220]];
-        GifWriter::with_colours(Vec::new(), 2, 2, 3, &colours, see_through, fps).unwrap()
+        GifWriter::with_colours(Vec::new(), 2, 2, &colours, see_through, options(3, fps)).unwrap()
+    }
+
+    #[test]
+    fn gifs_loop_forever_or_play_a_number_of_times() {
+        let colours = [[200, 30, 40]];
+        let written = |plays| {
+            let options = GifOptions {
+                plays,
+                ..options(1, 10)
+            };
+            let mut gif =
+                GifWriter::with_colours(Vec::new(), 2, 2, &colours, false, options).unwrap();
+            gif.push(&frame(&[RED; 4])).unwrap();
+            gif.finish().unwrap()
+        };
+        let times = |n| Plays::Times(NonZeroU16::new(n).unwrap());
+        assert_eq!(gif_loop_count(&written(Plays::Forever)), Some(0));
+        assert_eq!(gif_loop_count(&written(times(1))), None);
+        assert_eq!(gif_loop_count(&written(times(3))), Some(2));
+        assert_eq!(decode_gif(&written(times(1))).len(), 1);
     }
 
     #[test]
@@ -397,7 +450,7 @@ mod tests {
     fn bad_settings_are_errors() {
         let colours: Vec<[u8; 3]> = (0..=255).map(|i| [i as u8, 0, 1]).collect();
         let error = |colours: &[[u8; 3]], scale, fps| {
-            GifWriter::with_colours(Vec::new(), 10, 10, scale, colours, false, fps)
+            GifWriter::with_colours(Vec::new(), 10, 10, colours, false, options(scale, fps))
                 .err()
                 .unwrap()
         };
@@ -414,13 +467,14 @@ mod tests {
             error(&colours[..2], 0, 30),
             ExportError::ZeroScale
         ));
-        let huge = GifWriter::with_colours(Vec::new(), 7000, 10, 10, &colours[..2], false, 30);
+        let huge =
+            GifWriter::with_colours(Vec::new(), 7000, 10, &colours[..2], false, options(10, 30));
         assert!(matches!(huge.err().unwrap(), ExportError::GifSize { .. }));
         let look = Look {
             palette: None,
             ..Look::default()
         };
-        let none = GifWriter::new(Vec::new(), 10, 10, 1, &look, 30);
+        let none = GifWriter::new(Vec::new(), 10, 10, &look, options(1, 30));
         assert!(matches!(none.err().unwrap(), ExportError::GifPalette));
         assert!(matches!(
             check_gif_look(&look),

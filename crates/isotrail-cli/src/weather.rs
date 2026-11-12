@@ -5,7 +5,9 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use isotrail_bundle::{
     Units, WEATHER_ATTRIBUTION, Weather, WeatherDataset, WeatherSample, weather_condition,
 };
-use isotrail_geo::{Fetcher, MAX_TIMED_SPAN_DAYS, OpenMeteoSource, WeatherRequest, WeatherSource};
+use isotrail_geo::{
+    Fetcher, MAX_TIMED_SPAN_DAYS, OpenMeteoSource, WeatherRequest, WeatherServer, WeatherSource,
+};
 use isotrail_track::{Track, Tz};
 use serde::Serialize;
 use tracing::warn;
@@ -15,7 +17,11 @@ const HOUR_S: i64 = 3600;
 
 /// The weather during the hike and where it came from, or a warning and
 /// nothing when it can't be found
-pub fn look_up(track: &Track, fetcher: impl Fetcher) -> Option<(Weather, String)> {
+pub fn look_up(
+    track: &Track,
+    fetcher: impl Fetcher,
+    server: &WeatherServer,
+) -> Option<(Weather, String)> {
     let Some(request) = WeatherRequest::from_track(track, now()) else {
         warn!("the track has no times, so the weather is left out");
         return None;
@@ -27,7 +33,10 @@ pub fn look_up(track: &Track, fetcher: impl Fetcher) -> Option<(Weather, String)
         );
         return None;
     }
-    match OpenMeteoSource::new(fetcher).weather(&request) {
+    match OpenMeteoSource::new(fetcher)
+        .server(server)
+        .weather(&request)
+    {
         Ok(weather) => {
             let places = request.locations.len();
             let provenance = format!(

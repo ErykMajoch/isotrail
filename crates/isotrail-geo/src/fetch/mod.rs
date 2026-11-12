@@ -3,6 +3,8 @@ mod error;
 mod http;
 mod recorded;
 
+use std::borrow::Cow;
+
 use reqwest::Url;
 use sha2::{Digest, Sha256};
 
@@ -57,6 +59,34 @@ impl<F: Fetcher + ?Sized> Fetcher for Box<F> {
     }
 }
 
+/// Query parameters that hold a secret
+const SECRET_PARAMS: [&str; 5] = ["apikey", "api_key", "key", "access_token", "token"];
+
+/// The URL with the values of secret query parameters masked, as it may be
+/// shown, logged or used as a cache key
+pub fn redact(url: &str) -> Cow<'_, str> {
+    let Some(query_at) = url.find('?') else {
+        return Cow::Borrowed(url);
+    };
+    let (base, query) = url.split_at(query_at + 1);
+    let mut changed = false;
+    let pairs: Vec<Cow<'_, str>> = query
+        .split('&')
+        .map(|pair| match pair.split_once('=') {
+            Some((name, value)) if SECRET_PARAMS.contains(&name) && !value.is_empty() => {
+                changed = true;
+                Cow::Owned(format!("{name}=redacted"))
+            }
+            _ => Cow::Borrowed(pair),
+        })
+        .collect();
+    if changed {
+        Cow::Owned(format!("{base}{}", pairs.join("&")))
+    } else {
+        Cow::Borrowed(url)
+    }
+}
+
 /// The scheme, host and port of a URL, without credentials, path or query
 pub fn origin(url: &str) -> String {
     match Url::parse(url) {
@@ -90,5 +120,27 @@ mod tests {
         assert_eq!(origin("http://127.0.0.1:9/api"), "http://127.0.0.1:9");
         assert_eq!(origin("https://example.org:443/a"), "https://example.org");
         assert_eq!(origin("not a url"), "an unreadable address");
+    }
+
+    #[test]
+    fn secret_parameters_are_masked() {
+        let plain = "https://example.org/v1/archive?latitude=1&longitude=2";
+        assert!(matches!(redact(plain), Cow::Borrowed(_)));
+        assert_eq!(
+            redact("https://example.org/v1/archive?latitude=1&apikey=s3cret&x=y"),
+            "https://example.org/v1/archive?latitude=1&apikey=redacted&x=y"
+        );
+        assert_eq!(
+            redact("https://e.org/a?apikey=k"),
+            "https://e.org/a?apikey=redacted"
+        );
+        assert_eq!(
+            redact("https://e.org/a?myapikey=k"),
+            "https://e.org/a?myapikey=k"
+        );
+        assert_eq!(
+            redact("https://tiles.example/{z}/{x}/{y}.png?key=abc"),
+            "https://tiles.example/{z}/{x}/{y}.png?key=redacted"
+        );
     }
 }

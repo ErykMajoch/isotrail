@@ -15,15 +15,32 @@ pub const TERRARIUM_URL: &str =
 #[derive(Debug, Clone)]
 pub struct TerrariumSource<F> {
     fetcher: F,
+    template: String,
 }
 
 impl<F: Fetcher> TerrariumSource<F> {
     pub fn new(fetcher: F) -> TerrariumSource<F> {
-        TerrariumSource { fetcher }
+        TerrariumSource {
+            fetcher,
+            template: TERRARIUM_URL.to_owned(),
+        }
     }
 
+    /// Tiles from another server, as an address with `{z}`, `{x}` and `{y}`
+    pub fn template(self, template: impl Into<String>) -> TerrariumSource<F> {
+        TerrariumSource {
+            template: template.into(),
+            ..self
+        }
+    }
+
+    /// The tile's address on the AWS server
     pub fn url(tile: TileId) -> String {
-        TERRARIUM_URL
+        Self::url_from(TERRARIUM_URL, tile)
+    }
+
+    pub fn url_from(template: &str, tile: TileId) -> String {
+        template
             .replace("{z}", &tile.z.to_string())
             .replace("{x}", &tile.x.to_string())
             .replace("{y}", &tile.y.to_string())
@@ -43,7 +60,7 @@ impl<F: Fetcher> TerrariumSource<F> {
     /// A tile that can't be read, most likely a damaged copy in the cache, is
     /// dropped and fetched once more
     fn fetch(&self, tile: TileId) -> Result<Vec<f32>, DemError> {
-        let url = Self::url(tile);
+        let url = Self::url_from(&self.template, tile);
         let get = || {
             let bytes = self
                 .fetcher

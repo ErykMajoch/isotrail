@@ -468,3 +468,47 @@ fn the_title_is_saved_in_the_bundle() {
         text(&output.stderr)
     );
 }
+
+#[test]
+fn json_lists_the_bundle_poster_and_snippet() {
+    let temp = with_hike("ridge.itb");
+    let output = isotrail(
+        temp.path(),
+        &[
+            "embed",
+            "ridge.itb",
+            "-o",
+            "site",
+            "--scale",
+            "10",
+            "--json",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let paths: Vec<&str> = report["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|file| file["path"].as_str().unwrap())
+        .collect();
+    let site = Path::new("site");
+    let expected = ["ridge.itb", "ridge.png", "snippet.html"].map(|name| site.join(name));
+    assert_eq!(
+        paths,
+        expected
+            .iter()
+            .map(|p| p.to_str().unwrap())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(report["files"][1]["width"].as_u64(), Some(1920));
+    let snippet = fs::metadata(temp.path().join("site/snippet.html")).unwrap();
+    assert_eq!(report["files"][2]["bytes"].as_u64(), Some(snippet.len()));
+
+    let quiet = isotrail(
+        temp.path(),
+        &["-q", "embed", "ridge.itb", "-o", "again", "--scale", "10"],
+    );
+    assert!(quiet.status.success(), "{}", text(&quiet.stderr));
+    assert!(quiet.stdout.is_empty(), "{}", text(&quiet.stdout));
+}

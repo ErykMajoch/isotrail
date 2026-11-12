@@ -17,6 +17,7 @@ use crate::look::LookArgs;
 use crate::output;
 use crate::overlay::OverlayArgs;
 use crate::render::Source;
+use crate::report::{Report, ReportArgs, Written, say};
 use crate::scene::SceneArgs;
 use crate::usage;
 
@@ -92,9 +93,13 @@ pub struct EmbedArgs {
 
     #[command(flatten)]
     data: DataArgs,
+
+    #[command(flatten)]
+    report: ReportArgs,
 }
 
 pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
+    let mut report = Report::new(&args.report);
     let shape = args.frame.shapes(&[Aspect::from(args.aspect)])[0];
     let framing = args.frame.framings(&[shape], args.scale)?[0];
     let dir = &args.output;
@@ -213,15 +218,16 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
     let sun = crate::sun::hike_sun(&bundle, args.look.time, &args.scene.conditions())?;
 
     if in_place {
-        println!("Kept {} as it is", bundle_path.display());
+        report.kept(Written::file(&bundle_path));
     } else {
         let bytes = bundle.to_bytes()?;
         output::write(&bundle_path, |file| Ok(file.write_all(&bytes)?))?;
-        println!(
+        say!(
             "Wrote {} ({} KB)",
             bundle_path.display(),
             bytes.len().div_ceil(1024)
         );
+        report.add(Written::file(&bundle_path));
     }
 
     let poster = crate::render::still(
@@ -235,7 +241,10 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
     )?;
     let poster = upscale(&poster, args.scale)?;
     output::write(&poster_path, |file| Ok(encode_png(&poster, file)?))?;
-    println!("Wrote {}", poster_path.display());
+    report.wrote(Written::image(
+        &poster_path,
+        (poster.width(), poster.height()),
+    ));
 
     for (from, to) in &copies {
         output::write(to, |file| {
@@ -244,7 +253,7 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
             io::copy(&mut source, file)?;
             Ok(())
         })?;
-        println!("Wrote {}", to.display());
+        report.wrote(Written::file(to));
     }
 
     let mut attributes = args.look.attributes(palette_url.as_deref());
@@ -260,14 +269,13 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
         attributes: &attributes,
     });
     output::write(&snippet_path, |file| Ok(file.write_all(html.as_bytes())?))?;
-    println!("Wrote {}\n\n{html}", snippet_path.display());
-    if let Some(credit) = args
-        .overlay
-        .caption_credit(&bundle, fitted.credit_dropped())
-    {
-        println!("Credit for the caption: {credit}");
-    }
-    Ok(())
+    say!("Wrote {}\n\n{html}", snippet_path.display());
+    report.add(Written::file(&snippet_path));
+    report.finish(
+        args.overlay
+            .caption_credit(&bundle, fitted.credit_dropped())
+            .as_deref(),
+    )
 }
 
 /// The element's starting view, for each part that isn't the default; a

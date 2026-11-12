@@ -6,13 +6,16 @@ mod bundle;
 mod cache;
 mod config;
 mod embed;
+mod encoding;
 mod frame;
 mod look;
 mod output;
 mod overlay;
 mod render;
+mod report;
 mod scene;
 mod season;
+mod servers;
 mod stats;
 mod style_lab;
 mod sun;
@@ -37,6 +40,11 @@ struct Cli {
     /// Show more log output (-v info, -vv debug, -vvv trace)
     #[arg(short, long, action = ArgAction::Count, global = true)]
     verbose: u8,
+
+    /// Print nothing but errors; a command's own output, such as the stats
+    /// table or --json, still prints
+    #[arg(short, long, global = true, conflicts_with = "verbose")]
+    quiet: bool,
 
     #[command(subcommand)]
     command: Command,
@@ -67,7 +75,8 @@ fn main() -> ExitCode {
         Ok(parsed) => parsed,
         Err((error, typed)) => return report(&error, typed.command()),
     };
-    init_logging(cli.verbose);
+    init_logging(cli.verbose, cli.quiet);
+    report::set_quiet(cli.quiet);
     output::catch_interrupts();
     let result = match cli.command {
         Command::Stats(args) => stats::run(&args),
@@ -172,8 +181,9 @@ fn title(track: &Track, path: &Path) -> String {
         .unwrap_or_default()
 }
 
-fn init_logging(verbose: u8) {
+fn init_logging(verbose: u8, quiet: bool) {
     let level = match verbose {
+        _ if quiet => LevelFilter::ERROR,
         0 => LevelFilter::WARN,
         1 => LevelFilter::INFO,
         2 => LevelFilter::DEBUG,

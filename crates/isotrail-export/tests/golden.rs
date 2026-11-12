@@ -1,7 +1,9 @@
 use isotrail_bundle::{
     MoonSample, SceneBundle, Season, SunSample, Units, Weather, WeatherDataset, WeatherSample,
 };
-use isotrail_export::{ExportError, GifWriter, render_clip, render_still, upscale};
+use isotrail_export::{
+    ExportError, GifOptions, GifWriter, Plays, render_clip, render_still, upscale,
+};
 use isotrail_render::{
     Aim, Aspect, Background, Conditions, DEFAULT_PALETTE, DEFAULT_STATS, DateFormat, Diorama,
     Edges, Frame, GodRays, Gpu, HiddenRoute, Look, Markers, Mesher, Motion, OffscreenTarget, Orbit,
@@ -484,6 +486,7 @@ fn clips_follow_the_sun_unless_one_is_held() {
             duration_s: 1.0,
             fps: 4,
             step_fps: None,
+            ..Timeline::default()
         },
         ..Motion::default()
     };
@@ -655,6 +658,7 @@ fn animation_frames_match_goldens() {
             duration_s: 1.0,
             fps: 7,
             step_fps: None,
+            ..Timeline::default()
         },
         pace: Pace::Time,
         ..Motion::default()
@@ -662,7 +666,13 @@ fn animation_frames_match_goldens() {
     let walk = Walk::new(&bundle);
     assert!(walk.is_timed());
     let diorama = overlays.diorama_framing();
-    let mut gif = GifWriter::new(Vec::new(), diorama.width, diorama.height, 1, &look, 7).unwrap();
+    let options = GifOptions {
+        scale: 1,
+        fps: 7,
+        plays: Plays::Forever,
+    };
+    let mut gif =
+        GifWriter::new(Vec::new(), diorama.width, diorama.height, &look, options).unwrap();
     render_clip(
         &gpu,
         &bundle,
@@ -732,6 +742,7 @@ fn every_clip_ends_on_the_still() {
                 duration_s,
                 fps,
                 step_fps,
+                ..Timeline::default()
             },
             orbit: Orbit { sweep_deg: 0.0 },
             sun: Some(sun),

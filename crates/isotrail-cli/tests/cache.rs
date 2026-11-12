@@ -120,3 +120,36 @@ fn clear_older_than_keeps_recent_downloads() {
     assert!(!old.exists());
     assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 2);
 }
+
+#[test]
+fn a_cache_folder_given_on_the_command_line_wins() {
+    let temp = tempfile::tempdir().unwrap();
+    let chosen = temp.path().join("chosen");
+    let from_env = temp.path().join("from-env");
+    for args in [
+        ["cache", "path", "--cache-dir", chosen.to_str().unwrap()],
+        ["cache", "--cache-dir", chosen.to_str().unwrap(), "path"],
+    ] {
+        let output = isotrail(&from_env, &args);
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        assert_eq!(
+            text(&output.stdout).trim_end(),
+            chosen.display().to_string()
+        );
+    }
+    let cache = filled_cache();
+    let output = isotrail(
+        &from_env,
+        &[
+            "cache",
+            "clear",
+            "--yes",
+            "--cache-dir",
+            cache.path().to_str().unwrap(),
+            "-q",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert!(output.stdout.is_empty(), "{}", text(&output.stdout));
+    assert_eq!(fs::read_dir(cache.path()).unwrap().count(), 0);
+}

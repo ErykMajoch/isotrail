@@ -64,7 +64,7 @@ pub use terrain::{GpuMesh, SHADOW_MAP_SIZE, Scene, TerrainRenderer};
 pub use test_scene::draw_test_scene;
 pub use text::{PixelFont, TextEffect};
 pub use timeline::{
-    DEFAULT_DURATION_S, DEFAULT_FPS, DEFAULT_ORBIT_DEG, DRAW_SHARE, INTRO_SHARE, Moment, Motion,
-    Orbit, Pace, Step, Timeline, Walk,
+    DEFAULT_DURATION_S, DEFAULT_FPS, DEFAULT_ORBIT_DEG, DRAW_SHARE, HOLD_SHARE, INTRO_SHARE,
+    MIN_DRAW_S, Moment, Motion, Orbit, Pace, REWIND_SHARE, Step, Timeline, Walk,
 };
 pub use weather::{Atmosphere, ForcedWeather, WeatherEffects};

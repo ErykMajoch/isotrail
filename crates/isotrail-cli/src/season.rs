@@ -1,8 +1,8 @@
 use clap::ValueEnum;
 use isotrail_bundle::{SceneBundle, Season};
 use isotrail_geo::{
-    Fetcher, OpenMeteoSource, SeasonKind, WeatherRequest, WeatherSource, forced_season, ice_line,
-    snow_line, snow_readings,
+    Fetcher, OpenMeteoSource, SeasonKind, WeatherRequest, WeatherServer, WeatherSource,
+    forced_season, ice_line, snow_line, snow_readings,
 };
 use isotrail_render::foliage;
 use isotrail_track::Track;
@@ -22,7 +22,12 @@ pub enum SeasonArg {
 /// Snow from the weather during the hike, and lakes frozen by the frost of
 /// the days before; when the days before can't be found, it warns and
 /// leaves the lakes open
-pub fn estimate(bundle: &mut SceneBundle, track: &Track, fetcher: impl Fetcher) {
+pub fn estimate(
+    bundle: &mut SceneBundle,
+    track: &Track,
+    fetcher: impl Fetcher,
+    server: &WeatherServer,
+) {
     let Some(weather) = &bundle.weather else {
         return;
     };
@@ -30,6 +35,7 @@ pub fn estimate(bundle: &mut SceneBundle, track: &Track, fetcher: impl Fetcher) 
         return;
     };
     let before = OpenMeteoSource::new(fetcher)
+        .server(server)
         .days_before(&request)
         .unwrap_or_else(|err| {
             warn!(

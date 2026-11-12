@@ -10,7 +10,9 @@ use isotrail_geo::{
     Cache, CachedFetcher, Fetcher, Footprint, Grid, OPEN_METEO_ARCHIVE_URL, OVERPASS_URL,
     OpenMeteoSource, OverpassSource, RecordedFetcher, TerrariumSource, TileId, WeatherRequest,
 };
-use isotrail_testkit::{decode_gif, diorama_bundle, has_ffmpeg, hike_bundle, probe_video};
+use isotrail_testkit::{
+    decode_gif, diorama_bundle, gif_loop_count, has_ffmpeg, hike_bundle, probe_video,
+};
 use isotrail_track::{GpxReader, TrackReader};
 
 fn fixtures() -> PathBuf {
@@ -24,6 +26,10 @@ fn isotrail(cache_dir: &Path, current_dir: &Path, args: &[&str]) -> Output {
         .env("ISOTRAIL_CACHE_DIR", cache_dir)
         .env("ISOTRAIL_CONFIG", user_config(current_dir))
         .env_remove("ISOTRAIL_OVERPASS_URL")
+        .env_remove("ISOTRAIL_TERRAIN_URL")
+        .env_remove("ISOTRAIL_WEATHER_URL")
+        .env_remove("ISOTRAIL_OPEN_METEO_KEY")
+        .env_remove("ISOTRAIL_FFMPEG")
         .stdin(Stdio::null())
         .output()
         .unwrap()
@@ -364,11 +370,14 @@ fn animation_settings_are_checked_before_any_work() {
         "{stderr}"
     );
     let stderr = refused(&["--duration", "0.5s"]);
-    assert!(stderr.contains("between 1s and 60s"), "{stderr}");
+    assert!(
+        stderr.contains("between 1s and 180s (60s for a GIF)"),
+        "{stderr}"
+    );
     let stderr = refused(&["--fps", "60"]);
     assert!(stderr.contains("60"), "{stderr}");
     let stderr = refused(&["--orbit", "400"]);
-    assert!(stderr.contains("between 0 and 360"), "{stderr}");
+    assert!(stderr.contains("between -360 and 360"), "{stderr}");
     let stderr = refused(&["--palette", "none"]);
     assert!(stderr.contains("GIF output needs a palette"), "{stderr}");
     assert!(!temp.path().join("hike.gif").exists());
@@ -1301,4 +1310,256 @@ fn a_coarse_scale_gives_parts_up_and_moves_the_credit_to_the_caption() {
     assert!(output.status.success(), "{}", text(&output.stderr));
     assert!(output.stderr.is_empty(), "{}", text(&output.stderr));
     assert!(!text(&output.stdout).contains("Credit for the caption"));
+}
+
+#[test]
+fn clips_take_an_intro_a_hold_a_loop_count_and_a_smaller_gif() {
+    let temp = with_hike();
+    let render = |args: &[&str]| {
+        let mut line = vec!["render", "hike.itb", "--aspect", "square", "--scale", "10"];
+        line.extend(args);
+        let output = isotrail(&temp.path().join("cache"), temp.path(), &line);
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        text(&output.stdout)
+    };
+    let stdout = render(&[
+        "-o",
+        "small.gif",
+        "--duration",
+        "1",
+        "--fps",
+        "5",
+        "--intro",
+        "0",
+        "--hold",
+        "0.4",
+        "--gif-scale",
+        "1",
+        "--loop",
+        "once",
+    ]);
+    assert!(
+        stdout.starts_with("Rendered 5 frames of 108 × 108 from 108 × 108 pixels\n"),
+        "{stdout}"
+    );
+    let bytes = fs::read(temp.path().join("small.gif")).unwrap();
+    assert_eq!(gif_loop_count(&bytes), None);
+    let frames = decode_gif(&bytes);
+    assert_eq!((frames[0].width, frames[0].height), (108, 108));
+    // No intro: the route has started by the second frame; the last two
+    // frames hold, so they are written as one of twice the length
+    assert_eq!(frames.len(), 4);
+    assert_ne!(frames[0].rgba, frames[1].rgba);
+    assert_eq!(frames[3].delay_cs, 40);
+
+    render(&[
+        "-o",
+        "three.gif",
+        "--duration",
+        "1",
+        "--fps",
+        "5",
+        "--loop",
+        "3",
+    ]);
+    let bytes = fs::read(temp.path().join("three.gif")).unwrap();
+    assert_eq!(gif_loop_count(&bytes), Some(2));
+
+    // Back to the start: the last frame is nearer the first than the hold
+    render(&[
+        "-o",
+        "loop.gif",
+        "--duration",
+        "1",
+        "--fps",
+        "20",
+        "--loop-back",
+        "--orbit",
+        "-30",
+    ]);
+    // One entry per frame time, the held frames being merged in the file
+    let frames: Vec<_> = decode_gif(&fs::read(temp.path().join("loop.gif")).unwrap())
+        .into_iter()
+        .flat_map(|frame| std::iter::repeat_n(frame.clone(), usize::from(frame.delay_cs / 5)))
+        .collect();
+    assert_eq!(frames.len(), 20);
+    let differ = |a: &[u8], b: &[u8]| a.chunks(4).zip(b.chunks(4)).filter(|(p, q)| p != q).count();
+    let (first, held, last) = (&frames[0].rgba, &frames[15].rgba, &frames[19].rgba);
+    assert!(
+        differ(last, first) < differ(last, held),
+        "{} vs {}",
+        differ(last, first),
+        differ(last, held)
+    );
+}
+
+#[test]
+fn gif_limits_and_squeezed_clips_are_refused_before_any_work() {
+    let temp = with_hike();
+    let refused = |args: &[&str]| {
+        let mut line = vec!["render", "hike.itb"];
+        line.extend(args);
+        let output = isotrail(&temp.path().join("cache"), temp.path(), &line);
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        text(&output.stderr)
+    };
+    let stderr = refused(&["-o", "a.gif", "--duration", "61"]);
+    assert!(stderr.contains("a GIF can be at most 60 s"), "{stderr}");
+    let stderr = refused(&["-o", "a.gif", "--fps", "55"]);
+    assert!(
+        stderr.contains("--fps 55 is too fast for a GIF"),
+        "{stderr}"
+    );
+    let stderr = refused(&[
+        "-o",
+        "a.gif",
+        "--duration",
+        "2",
+        "--intro",
+        "1",
+        "--hold",
+        "0.8",
+    ]);
+    assert!(stderr.contains("shorten --intro or --hold"), "{stderr}");
+    let stderr = refused(&["-o", "a.gif", "--scale", "3", "--gif-scale", "5"]);
+    assert!(
+        stderr.contains("--gif-scale 5 is more than --scale 3"),
+        "{stderr}"
+    );
+    let stderr = refused(&["-o", "a.gif", "--loop", "twice"]);
+    assert!(stderr.contains("forever, once or a number"), "{stderr}");
+    let stderr = refused(&["-o", "a.mp4", "--crf", "60"]);
+    assert!(stderr.contains("--crf"), "{stderr}");
+    assert!(fs::read_dir(temp.path()).unwrap().count() == 1);
+
+    // A chosen ffmpeg that isn't there is named
+    let output = isotrail(
+        &temp.path().join("cache"),
+        temp.path(),
+        &[
+            "render",
+            "hike.itb",
+            "-o",
+            "a.mp4",
+            "--ffmpeg",
+            "no-such-ffmpeg-here",
+        ],
+    );
+    assert!(!output.status.success());
+    let stderr = text(&output.stderr);
+    assert!(stderr.contains("no-such-ffmpeg-here"), "{stderr}");
+}
+
+#[test]
+fn flags_for_another_format_are_warned_about() {
+    let temp = with_hike();
+    let output = isotrail(
+        &temp.path().join("cache"),
+        temp.path(),
+        &[
+            "render", "hike.itb", "-o", "a.png", "--aspect", "square", "--scale", "10", "--crf",
+            "20", "--loop", "once",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let stderr = text(&output.stderr);
+    assert!(stderr.contains("--crf does nothing here"), "{stderr}");
+    assert!(stderr.contains("--loop does nothing here"), "{stderr}");
+}
+
+#[test]
+fn long_and_fast_mp4s_take_quality_and_a_preset() {
+    if !has_ffmpeg() {
+        return;
+    }
+    let temp = with_hike();
+    let output = isotrail(
+        &temp.path().join("cache"),
+        temp.path(),
+        &[
+            "render",
+            "hike.itb",
+            "-o",
+            "hike.mp4",
+            "--aspect",
+            "square",
+            "--scale",
+            "10",
+            "--duration",
+            "1",
+            "--fps",
+            "60",
+            "--crf",
+            "28",
+            "--preset",
+            "ultrafast",
+            "--loop",
+            "once",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert!(text(&output.stderr).contains("--loop does nothing here"));
+    let info = probe_video(&temp.path().join("hike.mp4"));
+    assert_eq!(info.frame_rate, "60/1");
+    assert_eq!(info.frames, 60);
+}
+
+#[test]
+fn json_lists_what_was_written_and_quiet_prints_nothing() {
+    let temp = with_hike();
+    let run = |args: &[&str]| {
+        let output = isotrail(&temp.path().join("cache"), temp.path(), args);
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        output
+    };
+    let base = ["render", "hike.itb", "--scale", "10"];
+    // At the default scale the credit fits on the image
+    let output = run(&["render", "hike.itb", "--aspect", "story,square", "--json"]);
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let files = report["files"].as_array().unwrap();
+    assert_eq!(files.len(), 2);
+    assert_eq!(files[0]["path"], "hike-story.png");
+    assert_eq!(
+        (files[0]["width"].as_u64(), files[0]["height"].as_u64()),
+        (Some(1080), Some(1920))
+    );
+    let bytes = fs::metadata(temp.path().join("hike-square.png"))
+        .unwrap()
+        .len();
+    assert_eq!(files[1]["bytes"].as_u64(), Some(bytes));
+    assert!(report["caption_credit"].is_null());
+
+    let output = run(&[
+        &base[..],
+        &[
+            "-o",
+            "c.gif",
+            "--duration",
+            "1",
+            "--fps",
+            "2",
+            "--no-attribution",
+            "--json",
+        ],
+    ]
+    .concat());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["files"][0]["frames"].as_u64(), Some(2));
+    assert_eq!(
+        report["caption_credit"],
+        "© Synthetic contributors · Made-up Tiles"
+    );
+
+    let output = run(&[&base[..], &["-o", "q.png", "--no-attribution", "-q"]].concat());
+    assert!(output.stdout.is_empty(), "{}", text(&output.stdout));
+    assert!(temp.path().join("q.png").is_file());
+    // Quiet still prints a command's own output
+    let output = run(&["stats", "hike.itb", "--quiet"]);
+    assert!(!output.stdout.is_empty());
+    let both = isotrail(
+        &temp.path().join("cache"),
+        temp.path(),
+        &["-q", "-v", "stats", "hike.itb"],
+    );
+    assert_eq!(both.status.code(), Some(2));
 }
