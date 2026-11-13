@@ -8,6 +8,9 @@ All notable changes to `isotrail` are documented here.
 
 - `--size` takes several sizes, such as `--size 640x480,320x240`. Each gets its own image, named like `hike-640x480.png`.
 - The web embed's `rewind` attribute, and `embed --rewind`, set how long pressing play takes to undraw the route. It is 1s by default, and `rewind="0"` empties the route at once.
+- The web embed's `load="press"` attribute, and `embed --load press`, hold the download back until a visitor presses play. Until then the page loads only the script and the poster.
+- The web embed's `load()` starts the download from a script. The `isotrail-state` event tells a page when `data-state` changes.
+- While the web embed loads, its progress line shows how much has arrived. It shows only when the server sends the true sizes.
 
 ### Changed
 

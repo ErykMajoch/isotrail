@@ -656,6 +656,8 @@ fn playback_and_interface_choices_reach_the_snippet() {
             "--pace",
             "time",
             "--autoplay",
+            "--load",
+            "press",
             "--controls",
             "play,scrubber",
             "--max-zoom",
@@ -670,17 +672,24 @@ fn playback_and_interface_choices_reach_the_snippet() {
     let html = fs::read_to_string(temp.path().join("play/snippet.html")).unwrap();
     assert!(
         html.contains(
-            r#"aspect="wide" duration="12" loop-back orbit="-45" pace="time" loop autoplay controls="play,scrubber" max-zoom="5" lang="pl" strings="{&quot;play&quot;:&quot;Start&quot;,&quot;reset&quot;:&quot;Back to \&quot;start\&quot;&quot;}" style="#
+            r#"aspect="wide" duration="12" loop-back orbit="-45" pace="time" loop autoplay load="press" controls="play,scrubber" max-zoom="5" lang="pl" strings="{&quot;play&quot;:&quot;Start&quot;,&quot;reset&quot;:&quot;Back to \&quot;start\&quot;&quot;}" style="#
         ),
         "{html}"
     );
     // A config file's [embed] table holds them too
     let config = temp.path().join("config.toml");
-    fs::write(&config, "[embed]\nloop = 3\ncontrols = \"none\"\n").unwrap();
+    fs::write(
+        &config,
+        "[embed]\nloop = 3\nload = \"press\"\ncontrols = \"none\"\n",
+    )
+    .unwrap();
     let output = isotrail_with_config(temp.path(), &["embed", "ridge.itb", "-o", "set"], &config);
     assert!(output.status.success(), "{}", text(&output.stderr));
     let html = fs::read_to_string(temp.path().join("set/snippet.html")).unwrap();
-    assert!(html.contains(r#" loop="3" controls="none" "#), "{html}");
+    assert!(
+        html.contains(r#" loop="3" load="press" controls="none" "#),
+        "{html}"
+    );
 }
 
 #[test]

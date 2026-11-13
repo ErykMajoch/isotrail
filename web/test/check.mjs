@@ -15,7 +15,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { crc32, deflateSync, inflateSync } from 'node:zlib';
+import { crc32, deflateSync, gzipSync, inflateSync } from 'node:zlib';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const WEB = join(ROOT, 'web');
@@ -88,9 +88,12 @@ const TYPES = {
 const STRICT_CSP =
   "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self'; connect-src 'self'";
 const pages = {};
+// ?slow sends half a file, waits, then the rest; ?gzip compresses it
+const SLOW_MS = 1500;
 const server = createServer(async (req, res) => {
   requests.push(req.url);
-  const path = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+  const url = new URL(req.url, 'http://localhost');
+  const path = decodeURIComponent(url.pathname);
   if (pages[path]) {
     const headers = { 'content-type': 'text/html' };
     if (path === '/csp.html') headers['content-security-policy'] = STRICT_CSP;
@@ -111,11 +114,20 @@ const server = createServer(async (req, res) => {
       : null;
   try {
     if (!file) throw new Error('not found');
-    const body = await readFile(file);
+    const gzip = url.searchParams.has('gzip');
+    const body = gzip ? gzipSync(await readFile(file)) : await readFile(file);
     res.writeHead(200, {
       'content-type': TYPES[extname(file)] ?? 'application/octet-stream',
       'cache-control': 'no-store',
+      'content-length': body.length,
+      ...(gzip ? { 'content-encoding': 'gzip' } : {}),
     });
+    if (url.searchParams.has('slow')) {
+      res.write(body.subarray(0, body.length >> 1));
+      await sleepFor(SLOW_MS);
+      res.end(body.subarray(body.length >> 1));
+      return;
+    }
     res.end(body);
   } catch {
     res.writeHead(404);
@@ -291,6 +303,23 @@ Object.assign(pages, {
     embed(`id="f" src="/data/hike.itb" poster="/data/still.png" aspect="wide" background="transparent" controls="none" credit="none" style="display:block;width:${FIT.width}px"`),
     { head: `<style>body{background:rgb(${FIT.page.join(' ')})}</style>` },
   ),
+  '/press.html': page(
+    embed('id="p" src="/data/hike.itb?slow" poster="/data/poster.png" aspect="wide" load="press"') +
+      '<div style="height:3000px"></div>',
+  ),
+  '/pressing.html': page(
+    grid([
+      embed('id="l" src="/data/hike.itb" aspect="wide" load="press"'),
+      embed('id="y" src="/data/hike.itb" aspect="wide" load="PRESS"'),
+      embed('id="g" src="/data/hike.itb?gzip&slow" aspect="wide" load="press"'),
+      embed('id="nc" src="/data/hike.itb" aspect="wide" load="press" controls="none"'),
+      embed('id="bad" src="/data/hike.itb" aspect="wide" load="later"'),
+    ]),
+    { head: '<style>.grid{grid-template-columns:repeat(3,288px)}</style>' },
+  ),
+  '/savedata.html': page(embed('id="p" src="/data/hike.itb" aspect="wide" load="press"'), {
+    head: `<script>Object.defineProperty(navigator, 'connection', { value: { saveData: true } });</script>`,
+  }),
   '/many.html': page(
     Array.from({ length: 20 }, (_, i) =>
       `<isotrail-hike id="m${i}" src="/data/hike.itb" aspect="wide" backend="webgl"></isotrail-hike><p>gap</p>`,
@@ -308,7 +337,7 @@ const INSTRUMENT = `
   window.__errors = [];
   const error = console.error;
   console.error = function (...a) { __errors.push(a.map(String).join(' ')); return error.apply(this, a); };
-  for (const name of ['isotrail-ready', 'isotrail-error', 'isotrail-play', 'isotrail-pause', 'isotrail-ended', 'isotrail-progress']) {
+  for (const name of ['isotrail-ready', 'isotrail-error', 'isotrail-play', 'isotrail-pause', 'isotrail-ended', 'isotrail-progress', 'isotrail-state']) {
     addEventListener(name, (e) => __events.push({ name, id: e.target.id, ...e.detail }));
   }
   window.__csp = [];
@@ -384,6 +413,11 @@ try {
     await cdp.evaluate(`['a','w','n'].every((id) => __events.some((e) => e.name === 'isotrail-ready' && e.id === id && e.backend))`),
   );
   console.log(`     drawing with ${await cdp.evaluate(`__events.find((e) => e.name === 'isotrail-ready')?.backend`)}`);
+  const statesOf = (id) => cdp.evaluate(`__events.filter((e) => e.name === 'isotrail-state' && e.id === ${JSON.stringify(id)}).map((e) => e.state).join()`);
+  const readyStates = await Promise.all(['a', 'w', 'n'].map(statesOf));
+  check('each sends isotrail-state for poster, loading and ready, once each', readyStates.every((states) => states === 'poster,loading,ready'), readyStates.join(' | '));
+  const compileWarnings = await cdp.evaluate(`__warnings.filter((w) => w.includes('instantiateStreaming'))`);
+  check('the renderer compiles while it downloads', compileWarnings.length === 0, compileWarnings.join(' | '));
   if (!WEBGL) {
     check('without --webgl, the browser offers WebGPU', await cdp.evaluate(`__events.every((e) => e.backend !== 'gl')`));
   }
@@ -730,6 +764,121 @@ try {
   check('and stops at 6x', (await zoomInDisabled('mz')) === 'true');
   await cdp.evaluate(`${el('ps')}.setAttribute('controls', 'zoom')`);
   check('changing controls updates them', (await shown('ps')) === 'zoom-in,zoom-out,credit', await shown('ps'));
+
+  // load="press": nothing downloads until the play button is pressed, a
+  // head start on hover, focus kept on the button, and back by itself
+  const fetched = (prefix) => requests.filter((url) => url.startsWith(prefix)).length;
+  const centre = (expression) =>
+    cdp.evaluate(`(() => { const r = ${expression}.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+  const mouse = (type, { x, y }) =>
+    cdp.send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: type === 'mouseMoved' ? 0 : 1 });
+  const click = async (expression) => {
+    const at = await centre(expression);
+    await mouse('mouseMoved', at);
+    await mouse('mousePressed', at);
+    await mouse('mouseReleased', at);
+  };
+  const ariaOf = (id) => cdp.evaluate(`${part(id, 'play')}.getAttribute('aria-label')`);
+  const focusedPart = (id) => cdp.evaluate(`${el(id)}.shadowRoot.activeElement?.getAttribute('part') ?? null`);
+  const loadedLine = (id) =>
+    cdp.evaluate(`(() => { const l = ${el(id)}.shadowRoot.querySelector('.loaded'); return l.hidden ? null : parseFloat(l.style.getPropertyValue('--loaded')); })()`);
+  await mouse('mouseMoved', { x: 1, y: 1 });
+  requests.length = 0;
+  await go('/press.html');
+  await sleep(1000);
+  const asked = requests.filter((url) => url.startsWith('/web/') || url.startsWith('/data/')).sort();
+  check('load="press": a page load requests only the script and the poster', JSON.stringify(asked) === JSON.stringify(['/data/poster.png', '/web/isotrail-embed.js']), asked.join(', '));
+  check('it waits in the poster state', (await stateOf('p')) === 'poster');
+  check('with its play button showing, alone', (await visible(part('p', 'play'))) && !(await visible(part('p', 'zoom-in'))) && !(await visible(part('p', 'scrubber'))));
+  await mouse('mouseMoved', await centre(part('p', 'play')));
+  let headStart = false;
+  for (let i = 0; i < 50 && !headStart; i++) {
+    headStart = fetched('/web/pkg/isotrail_web_bg.wasm') > 0 && fetched('/data/hike.itb') > 0;
+    if (!headStart) await sleep(100);
+  }
+  check(
+    'hovering the button requests the renderer and the scene once',
+    headStart && fetched('/web/pkg/isotrail_web.js') === 1 && fetched('/web/pkg/isotrail_web_bg.wasm') === 1 && fetched('/data/hike.itb') === 1,
+    requests.join(', '),
+  );
+  check('and leaves it waiting', (await stateOf('p')) === 'poster');
+  await cdp.evaluate(`${part('p', 'play')}.focus()`);
+  check('the play button takes focus before the press', (await focusedPart('p')) === 'play', String(await focusedPart('p')));
+  await click(part('p', 'play'));
+  check('a press starts loading', (await stateOf('p')) === 'loading', await stateOf('p'));
+  check('the button says it is loading', (await ariaOf('p')) === 'Loading', await ariaOf('p'));
+  check('and keeps focus while loading', (await focusedPart('p')) === 'play', String(await focusedPart('p')));
+  let partWay = null;
+  for (let i = 0; i < 20 && partWay === null; i++) {
+    const share = await loadedLine('p');
+    if (share > 0 && share < 100) partWay = share;
+    else await sleep(50);
+  }
+  check('the progress line shows how much has arrived', partWay !== null, String(await loadedLine('p')));
+  check('the press plays once ready', (await cdp.waitFor(`${el('p')}.dataset.state === 'ready' && ${el('p')}.playing`)), await stateOf('p'));
+  check('the button keeps focus once ready', (await focusedPart('p')) === 'play', String(await focusedPart('p')));
+  check('and offers to pause', (await ariaOf('p')) === 'Pause', await ariaOf('p'));
+  check(
+    'nothing was requested twice',
+    fetched('/web/pkg/isotrail_web.js') === 1 && fetched('/web/pkg/isotrail_web_bg.wasm') === 1 && fetched('/data/hike.itb') === 1,
+    requests.join(', '),
+  );
+  check('isotrail-state comes for poster, loading and ready, once each', (await statesOf('p')) === 'poster,loading,ready', await statesOf('p'));
+  check('the loading line is gone once ready', (await loadedLine('p')) === null);
+  await cdp.evaluate(`${el('p')}.pause(); scrollTo(0, 3000)`);
+  const freed = await cdp.waitFor(`${el('p')}.dataset.state === 'poster'`, 10000);
+  await cdp.evaluate('scrollTo(0, 0)');
+  check('once pressed, it comes back by itself after being freed off screen', freed && (await cdp.waitFor(`${el('p')}.dataset.state === 'ready'`)), await stateOf('p'));
+  requests.length = 0;
+  await cdp.evaluate(`${el('p')}.setAttribute('src', '/data/timed.itb')`);
+  await sleep(1000);
+  check(
+    'a new src waits for a press again',
+    (await stateOf('p')) === 'poster' && fetched('/data/timed.itb') === 0 && (await visible(part('p', 'play'))),
+    `${await stateOf('p')} ${requests.join(', ')}`,
+  );
+  check('no uncaught errors on the press page', cdp.exceptions.length === 0, cdp.exceptions.join(' | '));
+
+  await mouse('mouseMoved', { x: 1, y: 1 });
+  await go('/pressing.html');
+  await sleep(500);
+  check('controls="none" shows no button to press', !(await visible(part('nc', 'play'))));
+  check('load="later" warns and loads anyway', (await cdp.waitFor(`${el('bad')}.dataset.state === 'ready'`)) && (await cdp.evaluate(`__warnings.filter((w) => w.includes('load "later"')).length`)) === 1);
+  check('load="PRESS" waits too', (await stateOf('y')) === 'poster');
+  const loaded = await cdp.evaluate(`(async () => { const e = ${el('l')}; const a = await e.load(); const b = await e.ready; return { same: a === b || a.backend === b.backend, backend: a.backend, playing: e.playing }; })()`);
+  check('load() resolves as ready does', loaded.same && typeof loaded.backend === 'string', JSON.stringify(loaded));
+  check('and shows the diorama without playing', !loaded.playing && (await stateOf('l')) === 'ready');
+  await cdp.evaluate(`${el('y')}.play()`);
+  check('play() loads and then plays', await cdp.waitFor(`${el('y')}.dataset.state === 'ready' && ${hasEvent('y', 'isotrail-play')}`));
+  // Without waiting for the promise load() returns
+  await cdp.evaluate(`${el('g')}.load() && true`);
+  let compressed = [];
+  while ((await stateOf('g')) !== 'ready' && compressed.length < 200) {
+    compressed.push(await loadedLine('g'));
+    await sleep(50);
+  }
+  check('a compressed scene shows no loading line', compressed.length > 10 && compressed.every((share) => share === null), `${compressed.length} samples: ${[...new Set(compressed)].join(', ')}`);
+  check('no uncaught errors on the pressing page', cdp.exceptions.length === 0, cdp.exceptions.join(' | '));
+
+  requests.length = 0;
+  await go('/savedata.html');
+  await mouse('mouseMoved', await centre(part('p', 'play')));
+  await sleep(1000);
+  check('with Save-Data, hovering requests nothing', fetched('/web/pkg/') === 0 && fetched('/data/hike.itb') === 0, requests.join(', '));
+  await mouse('mouseMoved', { x: 1, y: 1 });
+
+  await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  await go('/press.html');
+  await click(part('p', 'play'));
+  const calm = await cdp.waitFor(`${el('p')}.dataset.state === 'ready'`);
+  check(
+    'with reduced motion, a press ends ready and not playing',
+    calm && !(await cdp.evaluate(`${el('p')}.playing`)) && !(await cdp.evaluate(hasEvent('p', 'isotrail-play'))),
+    await stateOf('p'),
+  );
+  check('the button offers to play', (await ariaOf('p')) === 'Play' && (await focusedPart('p')) === 'play', `${await ariaOf('p')} ${await focusedPart('p')}`);
+  await cdp.send('Emulation.setEmulatedMedia', { features: [] });
+  await mouse('mouseMoved', { x: 1, y: 1 });
 
   // Words: built-in Polish, inherited from the page, an override, bad values
   await go('/words.html');

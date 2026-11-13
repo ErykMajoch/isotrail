@@ -111,13 +111,22 @@ When you update the runtime, change `version` to the new isotrail version.
 | `poster` | An image shown at once, and kept if the browser can't draw the diorama |
 | `aspect` | The shape: `story`, `video`, `portrait`, `feed`, `square`, `wide` (the default) or a ratio such as `3:2` |
 | `autoplay` | Plays as soon as the diorama is ready |
+| `load` | `press` waits for the play button before it downloads anything |
 | `backend` | `webgl` forces the WebGL2 fallback, to test it in a browser that has WebGPU |
 | `credit` | `none` hides the data credit line |
 | `credit-extra` | A line of your own under the data credit, such as your name or site |
 
 `story` and `video` are 9:16, `portrait` is 3:4, `feed` is 4:5 and `wide` is 16:9. The element fills its container's width at that shape.
 
-`autoplay` does nothing for visitors who prefer reduced motion. Only use `credit="none"` when the page credits the data itself, as [Data credit](#data-credit) explains. `isotrail embed` writes `autoplay` and `credit-extra` from its options of the same names.
+`autoplay` does nothing for visitors who prefer reduced motion. Only use `credit="none"` when the page credits the data itself, as [Data credit](#data-credit) explains. `isotrail embed` writes `autoplay`, `load` and `credit-extra` from its options of the same names.
+
+### Loading on a press
+
+With `load="press"`, the element shows its poster and a play button, and downloads nothing else. Pressing play downloads the renderer and the scene, then plays. Meanwhile the button shows three dots and keeps the keyboard focus.
+
+The downloads start a little early, when the pointer comes to the button or the button takes focus. Browsers set to save data skip this. With reduced motion, a press shows the diorama without playing it.
+
+Once pressed, the element behaves as it would without `load`. It frees its renderer off screen and starts again by itself. A new `src` waits for a press again. If `controls` leaves out `play`, start it from a script with `load()` or `play()`.
 
 ### Look
 
@@ -219,7 +228,7 @@ A value the element can't use is left at its default, with a warning in the cons
 
 | Word | English |
 |---|---|
-| `play`, `pause` | Play, Pause (the play button's label) |
+| `play`, `pause`, `loading` | Play, Pause, Loading (the play button's label) |
 | `zoomIn`, `zoomOut`, `reset` | Zoom in, Zoom out, Reset view |
 | `scrubber` | Route drawn (the progress line's label) |
 | `progress` | `{percent}%` (how the progress line reads out) |
@@ -257,6 +266,8 @@ The weather follows the same clock. Rain and snow keep falling while the diorama
 
 The play button sits in the bottom-left corner, and the zoom and reset buttons in the bottom-right. The thin line along the bottom edge shows how much of the route is drawn, in the route's colour. Click or drag along it to scrub, or focus it and use the arrow keys.
 
+While the element loads, the same line shows how much of the renderer and the scene has arrived. It only shows when the server sends their true sizes. A compressed file's size is not the size that arrives, so most servers show it only once the renderer is cached.
+
 ## Scripting
 
 | Member | What it does |
@@ -267,8 +278,9 @@ The play button sits in the bottom-left corner, and the zoom and reset buttons i
 | `progress` | The share of the route drawn, from 0 to 1 |
 | `reset()` | Goes back to the starting view, like the reset button |
 | `ready` | A promise that settles once the diorama replaces the poster, or fails to |
+| `load()` | Downloads the renderer and the scene now, and returns `ready` |
 
-`play()` called before the diorama is ready plays as soon as it is. Setting `progress` moves the progress line like scrubbing, and playing carries on from there. `reset()` leaves playback as it is.
+`play()` called before the diorama is ready plays as soon as it is. On an element waiting for a press, it starts the download too. `load()` works whatever `load` says, and tries again after a failure. Setting `progress` moves the progress line like scrubbing, and playing carries on from there. `reset()` leaves playback as it is.
 
 `ready` resolves with `{ backend }`. If the element gives up, it rejects with an `Error` whose `reason` is one of those in [When something fails](#when-something-fails). A new `src` gives a new promise.
 
@@ -291,6 +303,7 @@ try {
 
 | Event | When | `detail` |
 |---|---|---|
+| `isotrail-state` | `data-state` changes | `{ state }`: `poster`, `loading`, `ready` or `fallback` |
 | `isotrail-ready` | The diorama has drawn its first frame and replaced the poster | `{ backend }`: `"webgpu"` or `"gl"` |
 | `isotrail-error` | The element gave up and shows its poster or a message | `{ reason, message }` |
 | `isotrail-play` | Playing starts | `{ progress }` |
@@ -298,7 +311,7 @@ try {
 | `isotrail-ended` | The last play has reached the finish | `{ progress }` |
 | `isotrail-progress` | The share of the route drawn changes | `{ progress }`, from 0 to 1 |
 
-Playing starts from the play button, the keyboard, `autoplay` or `play()`. It stops when the visitor pauses or scrubs, and at the end of the last play, right before `isotrail-ended`. `isotrail-progress` comes on every frame while the route plays, and when it is scrubbed or set. The `reason` of `isotrail-error` is one of those in [When something fails](#when-something-fails).
+`isotrail-state` comes once for each change, never twice in a row for the same state. Playing starts from the play button, the keyboard, `autoplay` or `play()`. It stops when the visitor pauses or scrubs, and at the end of the last play, right before `isotrail-ended`. `isotrail-progress` comes on every frame while the route plays, and when it is scrubbed or set. The `reason` of `isotrail-error` is one of those in [When something fails](#when-something-fails).
 
 All the events bubble, and cross shadow roots:
 
@@ -341,7 +354,7 @@ isotrail-hike {
 }
 ```
 
-You can style the parts `canvas`, `play`, `scrubber` (the progress line), `zoom-in`, `zoom-out`, `reset` and `credit` with `::part()`. The element sets `data-state` to `poster`, `loading`, `ready` or `fallback`.
+You can style the parts `canvas`, `play`, `scrubber` (the progress line), `zoom-in`, `zoom-out`, `reset` and `credit` with `::part()`. The element sets `data-state` to `poster`, `loading`, `ready` or `fallback`, and sends `isotrail-state` each time.
 
 On touch screens, the buttons take touches across 44 pixels and the progress line across 24, though they look the same size.
 
@@ -387,7 +400,7 @@ You can restyle the line with `::part(credit)`. **If you hide it, with `credit="
 
 ### Many hikes on one page
 
-The poster shows at once. The renderer, about 1.2MB gzipped, only downloads when the element comes near the screen, and only once for the whole page.
+The poster shows at once. The renderer, about 1.2MB gzipped, only downloads when the element comes near the screen, and only once for the whole page. With `load="press"`, it waits for a press instead. Use that for a hike at the top of a page that most visitors scroll past.
 
 Browsers give a page about 16 WebGL contexts. So when an element has been well off screen for a few seconds, it frees its renderer and shows its poster. It starts again when it comes back, from the starting view.
 
@@ -401,7 +414,7 @@ Serve the `web/` folder with any static file server, and open `/demo/`:
 python -m http.server -d web 8000    # then open http://localhost:8000/demo/
 ```
 
-The page shows a synthetic hike three times: wide with a poster, square and looping on its own, and wide without controls. A link at the top switches all three to the WebGL2 fallback (`?backend=webgl` in the address).
+The page shows a synthetic hike four times: waiting for a press, with a poster, looping on its own, and without controls. A link at the top switches all four to the WebGL2 fallback (`?backend=webgl` in the address).
 
 To try it on a phone on the same network, serve it with `python -m http.server -d web 8000 --bind 0.0.0.0`. Then open `http://<your computer's address>:8000/demo/` on the phone. A plain `http://` address like this isn't secure, so the phone uses WebGL2.
 

@@ -453,6 +453,7 @@ These options set how the live diorama plays and what it shows. Each one that is
 | `--pace distance\|time` | `distance` | Draw the route at an even speed, or follow the recorded times |
 | `--loop forever\|once\|N` | `once` | How many times the diorama plays: forever, once, or 1 to 1000 times |
 | `--autoplay` | off | Play as soon as the diorama shows, unless the visitor prefers reduced motion |
+| `--load visible\|press` | `visible` | Load the diorama when it comes into view, or only when play is pressed |
 | `--controls LIST\|none` | all | The controls to show: `play`, `zoom`, `reset` and `scrubber`, or `none` |
 | `--max-zoom X` | `3` | The largest zoom a visitor can reach, from 1 to 6 |
 | `--lang CODE` | the page's | The language of the buttons, hints and messages: `en` or `pl` |
@@ -461,6 +462,8 @@ These options set how the live diorama plays and what it shows. Each one that is
 A play is split as an [animation](#animation) is. For every 10s, it spends 0.5s on the scene and 8s drawing the route. The 1.5s on the finished hike only shows between loops. `--orbit 0` keeps the camera still, and a negative angle turns the other way.
 
 The diorama starts with the whole route drawn, like the poster. Pressing play first undraws the route over `--rewind` seconds, while the camera turns to where the play starts. The light stays as it was until the route draws again. `--rewind 0` empties the route at once. With reduced motion, the route undraws but the camera doesn't turn.
+
+`--load press` suits a hike at the top of a page. The page loads only the script and the poster until a visitor presses play, as the [web guide](../web/README.md#loading-on-a-press) explains.
 
 The scrubber is the progress line along the bottom. With `--controls none`, visitors can still turn and zoom the diorama by hand and with the keys.
 

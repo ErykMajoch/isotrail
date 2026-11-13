@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use clap::Args;
+use clap::{Args, ValueEnum};
 use isotrail_export::Plays;
 use isotrail_render::{
     DEFAULT_ORBIT_DEG, MAX_ZOOM, MAX_ZOOM_RANGE, MIN_DRAW_S, Timeline, parse_within,
@@ -16,9 +16,10 @@ const DEFAULT_REWIND_S: f32 = 1.0;
 /// The controls the embed shows, all of them by default
 const CONTROLS: [&str; 4] = ["play", "zoom", "reset", "scrubber"];
 /// The words the embed shows or reads out, which `--strings` may replace
-const WORDS: [&str; 17] = [
+const WORDS: [&str; 18] = [
     "play",
     "pause",
+    "loading",
     "zoomIn",
     "zoomOut",
     "reset",
@@ -82,6 +83,11 @@ pub struct PlaybackArgs {
     #[arg(long)]
     autoplay: bool,
 
+    /// Load the diorama when it comes into view, or only when play is pressed
+    #[arg(long, value_enum, value_name = "visible|press", default_value_t = LoadArg::Visible,
+          hide_possible_values = true)]
+    load: LoadArg,
+
     /// Controls to show: play, zoom, reset and scrubber, or none [default: all]
     #[arg(long, value_name = "LIST|none", value_parser = parse_controls)]
     controls: Option<Controls>,
@@ -97,6 +103,12 @@ pub struct PlaybackArgs {
     /// A JSON file of words to use instead of the built-in ones
     #[arg(long, value_name = "FILE")]
     strings: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum LoadArg {
+    Visible,
+    Press,
 }
 
 /// The controls to show
@@ -240,6 +252,9 @@ impl PlaybackArgs {
         if self.autoplay {
             attributes.push(("autoplay", String::new()));
         }
+        if self.load == LoadArg::Press {
+            attributes.push(("load", "press".to_owned()));
+        }
         if let Some(Controls(shown)) = &self.controls
             && shown.len() < CONTROLS.len()
         {
@@ -311,6 +326,8 @@ mod tests {
             "3",
             "--rewind",
             "1s",
+            "--load",
+            "visible",
         ];
         assert!(attributes(&same).is_empty());
         let all = attributes(&[
@@ -330,6 +347,8 @@ mod tests {
             "--loop",
             "forever",
             "--autoplay",
+            "--load",
+            "press",
             "--controls",
             "scrubber,play",
             "--max-zoom",
@@ -349,6 +368,7 @@ mod tests {
                 ("pace", "time"),
                 ("loop", ""),
                 ("autoplay", ""),
+                ("load", "press"),
                 ("controls", "play,scrubber"),
                 ("max-zoom", "6"),
                 ("lang", "pl"),
@@ -371,6 +391,7 @@ mod tests {
         assert!(refused(&["--lang", "polski!"]));
         assert!(refused(&["--duration", "0"]));
         assert!(refused(&["--loop", "0"]));
+        assert!(refused(&["--load", "later"]));
         for lang in ["pl", "en-GB", "pt-BR", "zh-Hant-TW"] {
             assert_eq!(parse_lang(lang), Ok(lang.to_owned()));
         }

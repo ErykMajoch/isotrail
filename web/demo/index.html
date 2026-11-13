@@ -59,10 +59,14 @@
   <main>
     <h1>isotrail embed demo</h1>
     <p>
-      A synthetic hike in three <code>&lt;isotrail-hike&gt;</code> elements. Drag to turn it, pinch or hold
+      A synthetic hike in four <code>&lt;isotrail-hike&gt;</code> elements. Drag to turn it, pinch or hold
       Ctrl (⌘ on a Mac) and scroll to zoom, and press play to watch the route draw itself.
       <a id="backend" href="?backend=webgl">Try the WebGL2 fallback</a>
     </p>
+
+    <h2>Loading on a press</h2>
+    <p>Nothing more downloads until you press play.</p>
+    <isotrail-hike src="hike.itb" poster="hike.png" aspect="wide" load="press" style="display:block;aspect-ratio:16/9"><img src="hike.png" alt="Diorama of a synthetic hike" style="display:block;width:100%"></isotrail-hike>
 
     <h2>Wide, with a poster</h2>
     <isotrail-hike src="hike.itb" poster="hike.png" aspect="wide" style="display:block;aspect-ratio:16/9"><img src="hike.png" alt="Diorama of a synthetic hike" style="display:block;width:100%"></isotrail-hike>

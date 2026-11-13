@@ -82,6 +82,7 @@ const WORDS = {
   en: {
     play: 'Play',
     pause: 'Pause',
+    loading: 'Loading',
     zoomIn: 'Zoom in',
     zoomOut: 'Zoom out',
     reset: 'Reset view',
@@ -101,6 +102,7 @@ const WORDS = {
   pl: {
     play: 'Odtwórz',
     pause: 'Wstrzymaj',
+    loading: 'Wczytywanie',
     zoomIn: 'Przybliż',
     zoomOut: 'Oddal',
     reset: 'Przywróć widok',
@@ -126,11 +128,53 @@ const CREDIT_LINKS = {
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 const ZOOM_KEY = MAC ? '⌘' : 'Ctrl';
 
+// A download's bytes so far; total stays null when the server's size can't
+// be trusted, as a compressed file's size is not the size that arrives
+function download() {
+  return { loaded: 0, total: null, done: false };
+}
+
+function counted(response, progress) {
+  const length = Number(response.headers.get('content-length'));
+  const known =
+    response.ok &&
+    response.body &&
+    response.type === 'basic' &&
+    length > 0 &&
+    !response.headers.get('content-encoding');
+  if (!known) return response;
+  progress.total = length;
+  const reader = response.body.getReader();
+  const body = new ReadableStream({
+    async pull(controller) {
+      const { done, value } = await reader.read();
+      if (done) {
+        controller.close();
+        return;
+      }
+      progress.loaded += value.byteLength;
+      if (progress.loaded > progress.total) progress.total = null;
+      controller.enqueue(value);
+    },
+    cancel: (reason) => reader.cancel(reason),
+  });
+  const { status, statusText, headers } = response;
+  return new Response(body, { status, statusText, headers });
+}
+
 let runtime = null;
+let runtimeProgress = download();
 function loadRuntime() {
   if (!runtime) {
-    const loading = import(RUNTIME.href).then(async (module) => {
-      await module.default({ module_or_path: WASM });
+    const progress = download();
+    // The renderer's own loader warns about a .wasm of the wrong type, so
+    // it gets that one as it came
+    const wasm = fetch(WASM).then((response) =>
+      response.headers.get('content-type') === 'application/wasm' ? counted(response, progress) : response,
+    );
+    const loading = Promise.all([import(RUNTIME.href), wasm]).then(async ([module, response]) => {
+      await module.default({ module_or_path: response });
+      progress.done = true;
       return module;
     });
     // A failed download is tried again by the next embed that needs it
@@ -138,8 +182,13 @@ function loadRuntime() {
       if (runtime === loading) runtime = null;
     });
     runtime = loading;
+    runtimeProgress = progress;
   }
   return runtime;
+}
+
+function saveData() {
+  return navigator.connection?.saveData === true;
 }
 
 function hasGpu() {
@@ -302,6 +351,17 @@ function readWords(element) {
   return words;
 }
 
+// When the element downloads the renderer and the scene: once near the
+// screen, or once play is pressed
+function readLoad(element) {
+  const value = element.getAttribute('load');
+  if (value === null || value.trim() === '') return 'visible';
+  const word = value.trim().toLowerCase();
+  if (word === 'visible' || word === 'press') return word;
+  ignored('load', value, 'expected visible or press');
+  return 'visible';
+}
+
 // The controls to show, all by default
 function readControls(element) {
   const value = element.getAttribute('controls');
@@ -320,6 +380,9 @@ const icon = (body) =>
 const ICONS = {
   play: icon('<path d="M5 3h2v1h2v1h2v1h2v4h-2v1H9v1H7v1H5z" fill="currentColor"/>'),
   pause: icon('<path d="M4 3h3v10H4zM9 3h3v10H9z" fill="currentColor"/>'),
+  busy: icon(
+    '<path class="dot" d="M2 7h2v2H2z" fill="currentColor"/><path class="dot" d="M7 7h2v2H7z" fill="currentColor"/><path class="dot" d="M12 7h2v2h-2z" fill="currentColor"/>',
+  ),
   zoomIn: icon('<path d="M7 3h2v4h4v2H9v4H7V9H3V7h4z" fill="currentColor"/>'),
   zoomOut: icon('<path d="M3 7h10v2H3z" fill="currentColor"/>'),
   reset: icon(
@@ -397,6 +460,8 @@ const CSS = `
     input { --scrub: 24px; }
   }
   :host(:not([data-state="ready"])) .controls { visibility: hidden; }
+  /* Waiting for a press, and loading after one, the play button shows alone */
+  .frame.asking [part="play"] { visibility: visible; }
   .bar {
     --spare: calc((var(--hit) - 28px) / 2);
     position: absolute;
@@ -446,6 +511,15 @@ const CSS = `
     width: 16px;
     height: 16px;
   }
+  @media (prefers-reduced-motion: no-preference) {
+    .dot { animation: isotrail-busy 0.9s infinite; }
+    .dot:nth-child(2) { animation-delay: 0.3s; }
+    .dot:nth-child(3) { animation-delay: 0.6s; }
+  }
+  @keyframes isotrail-busy {
+    0%, 33% { opacity: 1; }
+    34%, 100% { opacity: 0.35; }
+  }
   .credit {
     flex: 1;
     min-width: 0;
@@ -483,6 +557,20 @@ const CSS = `
     cursor: pointer;
     outline: none;
   }
+  /* How much of the renderer and the scene has arrived, in the same place */
+  .loaded {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 4px;
+    background: linear-gradient(to right,
+      var(--isotrail-progress, var(--route, #d64834)) var(--loaded, 0%),
+      var(--isotrail-text) var(--loaded, 0%) calc(var(--loaded, 0%) + 2px),
+      var(--isotrail-track) calc(var(--loaded, 0%) + 2px));
+    pointer-events: none;
+  }
+  .loaded[hidden] { display: none; }
   input:hover, input:focus-visible { background-size: 100% 6px; }
   input:focus-visible { box-shadow: inset 0 -8px 0 -6px var(--isotrail-accent); }
   input::-webkit-slider-runnable-track { height: 100%; background: transparent; }
@@ -549,6 +637,7 @@ template.innerHTML = `
   <img alt="">
   <div class="message"></div>
   <div class="hint" aria-live="polite"></div>
+  <div class="loaded" aria-hidden="true" hidden></div>
   <div class="controls">
     <input type="range" part="scrubber" min="0" max="1000" value="1000">
     <div class="bar">
@@ -573,6 +662,7 @@ class IsotrailHike extends HTMLElement {
     'poster',
     'aspect',
     'backend',
+    'load',
     'credit',
     'credit-extra',
     'theme',
@@ -592,6 +682,7 @@ class IsotrailHike extends HTMLElement {
   #controls;
   #playButton;
   #scrubber;
+  #loaded;
   #zoomIn;
   #zoomOut;
   #resetButton;
@@ -618,6 +709,17 @@ class IsotrailHike extends HTMLElement {
   #restartedAt = null;
   #lookChanges = 0;
   #ready = null;
+  #loadMode = 'visible';
+  // A press, load() or play() lets a load="press" element load, until src
+  // changes
+  #pressed = false;
+  // Loading after a press, with the play button showing it
+  #busy = false;
+  // The scene, fetched ahead when the pointer comes to the play button
+  #prefetch = null;
+  #downloads = [];
+  #loadingFrame = 0;
+  #icon = null;
 
   #clip = null;
   #progress = 1;
@@ -646,6 +748,7 @@ class IsotrailHike extends HTMLElement {
     this.#controls = root.querySelector('.controls');
     this.#playButton = root.querySelector('[data-action="play"]');
     this.#scrubber = root.querySelector('input');
+    this.#loaded = root.querySelector('.loaded');
     this.#zoomIn = root.querySelector('[data-action="zoom-in"]');
     this.#zoomOut = root.querySelector('[data-action="zoom-out"]');
     this.#resetButton = root.querySelector('[data-action="reset"]');
@@ -656,6 +759,8 @@ class IsotrailHike extends HTMLElement {
     this.#time = this.#clip.settled;
 
     this.#controls.addEventListener('click', (event) => this.#onButton(event));
+    this.#playButton.addEventListener('pointerenter', () => this.#headStart());
+    this.#playButton.addEventListener('focus', () => this.#headStart());
     this.#scrubber.addEventListener('input', () => {
       this.pause();
       this.#seek(this.#scrubber.value / 1000);
@@ -666,6 +771,7 @@ class IsotrailHike extends HTMLElement {
     this.#syncPoster();
     this.#applyWords();
     this.#applyControls();
+    this.#syncAsking();
     if (!this.hasAttribute('data-state')) this.#setState('poster');
     this.#intersection = new IntersectionObserver((entries) => this.#onIntersect(entries), {
       rootMargin: '200px',
@@ -692,11 +798,20 @@ class IsotrailHike extends HTMLElement {
       this.#syncPoster();
     } else if (name === 'src') {
       if (old !== value && this.#ready.state !== 'pending') this.#newReady();
+      if (old !== value) {
+        this.#pressed = false;
+        this.#prefetch = null;
+      }
       if (this.#started) {
         this.#teardown();
         this.#setState('poster');
-        if (this.#near) this.#start();
+        if (this.#near && !this.#waiting()) this.#start();
       }
+      this.#syncAsking();
+    } else if (name === 'load') {
+      this.#loadMode = readLoad(this);
+      this.#syncAsking();
+      if (this.#near && !this.#started && !this.#waiting()) this.#start();
     } else if (name === 'backend') {
       if (value?.trim() && !['auto', 'webgl'].includes(value)) ignored(name, value, 'expected auto or webgl');
     } else if (name === 'credit') {
@@ -717,9 +832,7 @@ class IsotrailHike extends HTMLElement {
       if (name === 'route-colour' || name === 'route-color') {
         // The progress line follows the route unless the page sets its own
         const given = this.getAttribute('route-colour')?.trim() || this.getAttribute('route-color');
-        const colour = ROUTE_COLOUR.test(given ?? '') ? given : null;
-        if (colour) this.#scrubber.style.setProperty('--route', colour);
-        else this.#scrubber.style.removeProperty('--route');
+        this.#paintRoute(ROUTE_COLOUR.test(given ?? '') ? given : null);
       }
       if (this.#viewer) this.#changeLook();
     }
@@ -749,6 +862,7 @@ class IsotrailHike extends HTMLElement {
     if (this.#playing) return;
     if (!this.#viewer) {
       this.#wantsPlay = true;
+      if (this.#waiting()) this.load();
       return;
     }
     this.#wantsPlay = false;
@@ -782,6 +896,82 @@ class IsotrailHike extends HTMLElement {
   // Back to the starting view, as the reset button does
   reset() {
     this.#resetView();
+  }
+
+  // Downloads the renderer and the scene now, whatever load says, or tries
+  // again after a failure
+  load() {
+    if (this.getAttribute('data-state') === 'fallback') {
+      this.#teardown();
+      this.#setState('poster');
+    }
+    if (!this.#started && this.#waiting()) this.#busy = true;
+    this.#pressed = true;
+    if (!this.#started) this.#start();
+    return this.ready;
+  }
+
+  #waiting() {
+    return this.#loadMode === 'press' && !this.#pressed && !this.#started;
+  }
+
+  // A press of play on a load="press" element; with reduced motion it shows
+  // the diorama without playing
+  #press() {
+    if (!reducedMotion()) this.#wantsPlay = true;
+    this.load();
+  }
+
+  // The pointer on the play button, or focus on it, starts the downloads
+  // before the press
+  #headStart() {
+    const src = this.getAttribute('src');
+    if (!this.#waiting() || !src || saveData()) return;
+    loadRuntime();
+    this.#fetchScene(src);
+  }
+
+  #fetchScene(src) {
+    const url = new URL(src, document.baseURI).href;
+    if (this.#prefetch?.url !== url) {
+      const progress = download();
+      const scene = { url, progress, bytes: fetchBytes(src, progress) };
+      scene.bytes.catch(() => {
+        if (this.#prefetch === scene) this.#prefetch = null;
+      });
+      this.#prefetch = scene;
+    }
+    return this.#prefetch;
+  }
+
+  #syncAsking() {
+    this.#frameBox.classList.toggle('asking', this.#busy || this.#waiting());
+    this.#syncPlayButton();
+  }
+
+  #paintRoute(colour) {
+    for (const line of [this.#scrubber, this.#loaded]) {
+      if (colour) line.style.setProperty('--route', colour);
+      else line.style.removeProperty('--route');
+    }
+  }
+
+  // The loading line follows the downloads, when all their sizes are known
+  #watchLoading() {
+    cancelAnimationFrame(this.#loadingFrame);
+    const step = () => {
+      this.#loadingFrame = 0;
+      const loading = this.getAttribute('data-state') === 'loading';
+      const parts = this.#downloads;
+      const known = loading && parts.length > 0 && parts.every((part) => part.total !== null);
+      this.#loaded.hidden = !known || this.#scrubber.hidden;
+      if (known) {
+        const sum = (key) => parts.reduce((total, part) => total + part[key], 0);
+        this.#loaded.style.setProperty('--loaded', `${(sum('loaded') / sum('total')) * 100}%`);
+      }
+      if (loading) this.#loadingFrame = requestAnimationFrame(step);
+    };
+    step();
   }
 
   #newReady() {
@@ -834,7 +1024,7 @@ class IsotrailHike extends HTMLElement {
   #applyWords() {
     const words = readWords(this);
     this.#words = words;
-    this.#playButton.setAttribute('aria-label', this.#playing ? words.pause : words.play);
+    this.#syncPlayButton();
     this.#zoomIn.setAttribute('aria-label', words.zoomIn);
     this.#zoomOut.setAttribute('aria-label', words.zoomOut);
     this.#resetButton.setAttribute('aria-label', words.reset);
@@ -866,8 +1056,9 @@ class IsotrailHike extends HTMLElement {
     this.#near = entries[entries.length - 1].isIntersecting;
     clearTimeout(this.#releaseTimer);
     if (this.#near) {
-      if (!this.#started) this.#start();
-      else if (this.#playing || this.#weatherMoves()) this.#schedule();
+      if (!this.#started) {
+        if (!this.#waiting()) this.#start();
+      } else if (this.#playing || this.#weatherMoves()) this.#schedule();
     } else if (this.#viewer) {
       this.#releaseTimer = setTimeout(() => this.#release(), RELEASE_MS);
     }
@@ -883,18 +1074,30 @@ class IsotrailHike extends HTMLElement {
     this.#started = true;
     const generation = ++this.#generation;
     const src = this.getAttribute('src');
-    if (!src) return;
+    if (!src) {
+      this.#busy = false;
+      this.#syncAsking();
+      return;
+    }
+    this.#syncAsking();
     if (this.#ready.state === 'rejected') this.#newReady();
     if (!hasGpu()) {
       this.#fail('gpu', new Error('the browser has neither WebGPU nor WebGL2'));
       return;
     }
+    const renderer = loadRuntime();
+    const scene = this.#fetchScene(src);
+    // Each start downloads the scene again; only a head start's is reused
+    this.#prefetch = null;
+    // Only what still has to arrive counts on the loading line
+    this.#downloads = [runtimeProgress, scene.progress].filter((part) => !part.done);
     this.#setState('loading');
+    this.#watchLoading();
     let module;
     let bytes;
     let look;
     try {
-      [module, bytes, look] = await Promise.all([loadRuntime(), fetchBytes(src), this.#look()]);
+      [module, bytes, look] = await Promise.all([renderer, scene.bytes, this.#look()]);
     } catch (error) {
       if (generation === this.#generation) this.#fail('load', error);
       return;
@@ -965,7 +1168,7 @@ class IsotrailHike extends HTMLElement {
   // theme
   #followRoute() {
     const colour = this.#guard((viewer) => viewer.routeColour);
-    if (colour) this.#scrubber.style.setProperty('--route', colour);
+    if (colour) this.#paintRoute(colour);
   }
 
   // One fresh start, in case the browser reset its GPU; the poster if it
@@ -986,8 +1189,10 @@ class IsotrailHike extends HTMLElement {
   #fail(reason, error) {
     console.warn(`<isotrail-hike> could not show ${this.getAttribute('src')}:`, error);
     this.#teardown();
-    // Stays put until src changes or the element is put back in the page
+    // Stays put until src changes, load() is called or the element is put
+    // back in the page
     this.#started = true;
+    this.#syncAsking();
     this.#wantsPlay = false;
     this.#failure = reason in this.#words ? reason : 'runtime';
     this.#message.textContent = this.#words[this.#failure];
@@ -1048,7 +1253,12 @@ class IsotrailHike extends HTMLElement {
     this.#playsLeft = 1;
     this.#yaw = 0;
     this.#failure = null;
-    this.#syncPlayButton();
+    this.#busy = false;
+    this.#downloads = [];
+    cancelAnimationFrame(this.#loadingFrame);
+    this.#loadingFrame = 0;
+    this.#loaded.hidden = true;
+    this.#syncAsking();
     this.#syncScrubber();
     if (wasPlaying) this.#emit('isotrail-pause', { progress: this.#progress });
   }
@@ -1107,7 +1317,9 @@ class IsotrailHike extends HTMLElement {
   }
 
   #setState(state) {
+    if (this.getAttribute('data-state') === state) return;
     this.setAttribute('data-state', state);
+    this.#emit('isotrail-state', { state });
   }
 
   #onResize(entry) {
@@ -1146,7 +1358,10 @@ class IsotrailHike extends HTMLElement {
     if (!drawn) return;
     if (!this.#drawn && this.#sized) {
       this.#drawn = true;
+      // The play button stays shown through the change, keeping its focus
       this.#setState('ready');
+      this.#busy = false;
+      this.#syncAsking();
       const detail = { backend: this.#guard((viewer) => viewer.backend) };
       this.#emit('isotrail-ready', detail);
       this.#settleReady('resolved', detail);
@@ -1237,7 +1452,12 @@ class IsotrailHike extends HTMLElement {
 
   #onButton(event) {
     const button = event.target.closest('button');
-    if (!button || button.getAttribute('aria-disabled') === 'true' || !this.#viewer) return;
+    if (!button || button.getAttribute('aria-disabled') === 'true') return;
+    if (button.dataset.action === 'play' && this.#waiting()) {
+      this.#press();
+      return;
+    }
+    if (!this.#viewer) return;
     switch (button.dataset.action) {
       case 'play':
         if (this.#playing) this.pause();
@@ -1363,8 +1583,11 @@ class IsotrailHike extends HTMLElement {
   }
 
   #syncPlayButton() {
-    this.#playButton.innerHTML = this.#playing ? ICONS.pause : ICONS.play;
-    this.#playButton.setAttribute('aria-label', this.#playing ? this.#words.pause : this.#words.play);
+    const icon = this.#busy ? 'busy' : this.#playing ? 'pause' : 'play';
+    // A fresh icon would restart the busy dots
+    if (icon !== this.#icon) this.#playButton.innerHTML = ICONS[icon];
+    this.#icon = icon;
+    this.#playButton.setAttribute('aria-label', this.#words[icon === 'busy' ? 'loading' : icon]);
   }
 
   #syncScrubber() {
@@ -1422,10 +1645,12 @@ async function readPalette(value) {
   return fetchText(value, 'palette');
 }
 
-async function fetchBytes(src) {
-  const response = await fetch(new URL(src, document.baseURI));
+async function fetchBytes(src, progress) {
+  const response = counted(await fetch(new URL(src, document.baseURI)), progress);
   if (!response.ok) throw new Error(`${src}: ${response.status} ${response.statusText}`);
-  return new Uint8Array(await response.arrayBuffer());
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  progress.done = true;
+  return bytes;
 }
 
 if (!customElements.get('isotrail-hike')) {
