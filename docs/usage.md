@@ -332,7 +332,7 @@ The result is a scene bundle: one compact file, usually under 100KB, that holds 
 
 Bundles are useful when you want to try many looks for one hike, render offline, or keep a hike's scene as it was after the map data changes. `bundle` reads GPX files only: give a bundle straight to `render`, `embed` or `stats`.
 
-A bundle made by an older version of isotrail has to be made again from the GPX file. One made by a newer version needs isotrail updated, and isotrail says which. A damaged bundle, or one holding values no render could draw, is refused with a message.
+isotrail reads bundles in its own format and in the format before it. `embed` saves such a bundle in the current format. When a release changes the format, the changelog says so. A bundle from before that has to be made again from the GPX file. One made by a newer version needs isotrail updated, and isotrail says which. A damaged bundle, or one holding values no render could draw, is refused with a message.
 
 The command reports what it found:
 
@@ -524,7 +524,7 @@ The points come from the bundle's profile, which is the one the image draws. A G
 
 A bundle adds three keys that a GPX file doesn't have:
 
-- `format`: the bundle's format number
+- `format`: the format the bundle was saved in, which can be the one before the current
 - `generator`: the isotrail that made it, such as `isotrail 1.5.0`
 - `caption_credit`: the data credit for the hike, as `render` prints it for a caption
 

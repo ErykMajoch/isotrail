@@ -333,7 +333,7 @@ The element keeps its poster when it can't show the diorama. Without a poster, i
 | `gpu` | This browser can't show the 3D view. | No WebGPU or WebGL2, or the GPU failed twice |
 | `runtime` | This browser can't show the 3D view. | An error inside the renderer |
 
-For `version`, make the bundle again with the isotrail that matches the runtime. A warning with the details also goes to the console.
+For `version`, a warning in the console says whether the bundle is older or newer than the runtime. Make an older one again with `isotrail embed`. For a newer one, update the runtime.
 
 A failed element stays as it is until its `src` changes, or until it is taken out of the page and put back. A renderer that failed to download is then downloaded again.
 
@@ -373,7 +373,7 @@ On touch screens, the buttons take touches across 44 pixels and the progress lin
 
 Most servers and static hosts already send the right types. With another type for `.wasm`, the renderer still loads, but more slowly and with a warning in the console. `.itb` can be `application/octet-stream`.
 
-Long caching is safe because the snippet's `?v=` changes with every isotrail version. When you update isotrail, update the runtime and remake the snippets together. Remake the bundles too if the bundle format changed.
+Long caching is safe because the snippet's `?v=` changes with every isotrail version. When you update isotrail, update the runtime and remake the snippets together. The runtime also opens bundles in the format before its own, so they keep working. The changelog says when a release changes the format. Remake the bundles before the next change, or they stop opening.
 
 Browsers only offer WebGPU on secure pages and on `localhost`. Elsewhere the element uses WebGL2.
 

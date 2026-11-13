@@ -6,9 +6,13 @@ pub enum BundleError {
     NotABundle,
     #[error(
         "the bundle was made by an older isotrail (format version {found}; this one reads \
-         version {supported}): create it again from the GPX with `isotrail bundle`"
+         versions {oldest} and {supported}): create it again from the GPX with `isotrail bundle`"
     )]
-    OlderVersion { found: u16, supported: u16 },
+    OlderVersion {
+        found: u16,
+        oldest: u16,
+        supported: u16,
+    },
     #[error(
         "the bundle was made by a newer isotrail (format version {found}; this one reads \
          version {supported}): update isotrail to open it"

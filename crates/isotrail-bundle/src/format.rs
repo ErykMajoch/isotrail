@@ -4,11 +4,15 @@ use std::ops::RangeInclusive;
 use miniz_oxide::deflate::compress_to_vec;
 use miniz_oxide::inflate::decompress_to_vec_with_limit;
 
-use crate::{BundleError, Landcover, SceneBundle};
+use serde::de::DeserializeOwned;
+
+use crate::{BundleError, Landcover, SceneBundle, previous};
 
 pub const MAGIC: [u8; 4] = *b"ITB1";
 /// Bumped whenever the payload layout changes
 pub const FORMAT_VERSION: u16 = 6;
+/// The format before, still read and converted on load
+pub const OLDEST_FORMAT_VERSION: u16 = previous::FORMAT_VERSION;
 pub const MAX_GRID_SIDE: u32 = 1024;
 const HEADER_LEN: usize = MAGIC.len() + 2;
 const COMPRESSION_LEVEL: u8 = 9;
@@ -53,21 +57,24 @@ impl SceneBundle {
             return Err(BundleError::NotABundle);
         }
         let found = u16::from_le_bytes([bytes[4], bytes[5]]);
-        let supported = FORMAT_VERSION;
-        if found < supported {
-            return Err(BundleError::OlderVersion { found, supported });
+        let (oldest, supported) = (OLDEST_FORMAT_VERSION, FORMAT_VERSION);
+        if found < oldest {
+            return Err(BundleError::OlderVersion {
+                found,
+                oldest,
+                supported,
+            });
         }
         if found > supported {
             return Err(BundleError::NewerVersion { found, supported });
         }
-        let damaged = || BundleError::Corrupt(DAMAGED.into());
         let payload = decompress_to_vec_with_limit(&bytes[HEADER_LEN..], MAX_PAYLOAD_BYTES)
-            .map_err(|_| damaged())?;
-        let (bundle, rest) =
-            postcard::take_from_bytes::<SceneBundle>(&payload).map_err(|_| damaged())?;
-        if !rest.is_empty() {
-            return Err(damaged());
-        }
+            .map_err(|_| BundleError::Corrupt(DAMAGED.into()))?;
+        let bundle = if found == supported {
+            decode::<SceneBundle>(&payload)?
+        } else {
+            decode::<previous::SceneBundle>(&payload)?.into()
+        };
         bundle.check().map_err(BundleError::Corrupt)?;
         Ok(bundle)
     }
@@ -303,6 +310,13 @@ impl SceneBundle {
     }
 }
 
+fn decode<T: DeserializeOwned>(payload: &[u8]) -> Result<T, BundleError> {
+    match postcard::take_from_bytes::<T>(payload) {
+        Ok((value, [])) => Ok(value),
+        _ => Err(BundleError::Corrupt(DAMAGED.into())),
+    }
+}
+
 fn fnv1a(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, &b| {
         (hash ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
@@ -520,7 +534,7 @@ mod tests {
 
     #[test]
     fn bundles_from_older_versions_ask_to_be_made_again() {
-        for old in [0u16, 1, 2, 3, 4, 5] {
+        for old in [0u16, 1, 2, 3, 4] {
             let mut bytes = bundle().to_bytes().unwrap();
             bytes[4..6].copy_from_slice(&old.to_le_bytes());
             let err = SceneBundle::from_bytes(&bytes).unwrap_err();
@@ -528,10 +542,91 @@ mod tests {
             let message = err.to_string();
             assert!(message.contains("older isotrail"), "{message}");
             assert!(
-                message.contains(&format!("version {old}")) && message.contains("reads version 6"),
+                message.contains(&format!("version {old};"))
+                    && message.contains("reads versions 5 and 6"),
                 "{message}"
             );
             assert!(message.contains("`isotrail bundle`"), "{message}");
+        }
+    }
+
+    /// The layout of format 5: water bodies without the sea flag
+    fn encode_format_5(b: &SceneBundle) -> Vec<u8> {
+        #[derive(serde::Serialize)]
+        struct Water<'a> {
+            level_m: f32,
+            cells: &'a [u32],
+        }
+        let water: Vec<Water> = b
+            .water
+            .iter()
+            .map(|body| Water {
+                level_m: body.level_m,
+                cells: &body.cells,
+            })
+            .collect();
+        let fields = (
+            &b.meta,
+            &b.grid,
+            &b.terrain,
+            water,
+            b.prop_seed,
+            &b.route,
+            &b.profile,
+            &b.sun,
+            &b.moon,
+            &b.weather,
+            &b.season,
+        );
+        let payload = postcard::to_allocvec(&fields).unwrap();
+        [
+            &MAGIC[..],
+            &5u16.to_le_bytes(),
+            &compress_to_vec(&payload, 9),
+        ]
+        .concat()
+    }
+
+    #[test]
+    fn format_5_is_read_with_no_water_as_sea() {
+        let bundle = bundle();
+        let bytes = encode_format_5(&bundle);
+        assert_eq!(format_version(&bytes), Some(5));
+        let read = SceneBundle::from_bytes(&bytes).unwrap();
+        assert!(read.water.iter().all(|body| !body.sea));
+        let mut expected = bundle.clone();
+        expected.water[1].sea = false;
+        assert_eq!(read, expected);
+        assert_eq!(read.content_seed(), bundle.content_seed());
+        assert_eq!(read.to_bytes().unwrap()[4..6], FORMAT_VERSION.to_le_bytes());
+    }
+
+    #[test]
+    fn a_flat_slab_in_format_5_gets_today_s_height_step() {
+        let mut flat = bundle();
+        flat.terrain.heights.fill(0);
+        flat.terrain.height_scale_m = 1.0;
+        let read = SceneBundle::from_bytes(&encode_format_5(&flat)).unwrap();
+        let today = Terrain::quantise(&[400.0; 24]);
+        assert_eq!(read.terrain.heights, today.heights);
+        assert_eq!(read.terrain.height_scale_m, today.height_scale_m);
+        assert_eq!(read.terrain.height_m(5), 400.0);
+    }
+
+    #[test]
+    fn damaged_format_5_payloads_say_so_in_plain_words() {
+        let bytes = encode_format_5(&bundle());
+        let today = bundle().to_bytes().unwrap();
+        for damaged in [
+            bytes[..bytes.len() / 2].to_vec(),
+            [&bytes[..6], &[0xff; 40][..]].concat(),
+            // Today's layout under format 5's number has a byte too many
+            [&bytes[..6], &today[6..]].concat(),
+        ] {
+            let err = SceneBundle::from_bytes(&damaged).unwrap_err();
+            assert!(matches!(err, BundleError::Corrupt(_)), "{err:?}");
+            let message = err.to_string();
+            assert!(message.starts_with("the bundle is damaged"), "{message}");
         }
     }
 

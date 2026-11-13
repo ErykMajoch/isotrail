@@ -6,13 +6,16 @@
 mod error;
 mod format;
 mod landcover;
+mod previous;
 mod scene;
 mod season;
 mod units;
 mod weather;
 
 pub use error::BundleError;
-pub use format::{FORMAT_VERSION, MAGIC, MAX_GRID_SIDE, format_version, is_bundle};
+pub use format::{
+    FORMAT_VERSION, MAGIC, MAX_GRID_SIDE, OLDEST_FORMAT_VERSION, format_version, is_bundle,
+};
 pub use landcover::{Landcover, line_mask};
 pub use scene::{
     Bounds, GridInfo, HikeStats, Metadata, MoonSample, ProfileSample, Provenance, Route,

@@ -1,2 +1,4 @@
 # Shell scripts keep LF line endings on every checkout, or sh rejects them on Windows
 *.sh text eol=lf
+# Scene files are binary, so no checkout may change their line endings
+*.itb binary

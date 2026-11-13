@@ -5,7 +5,7 @@ use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-use isotrail_bundle::SceneBundle;
+use isotrail_bundle::{FORMAT_VERSION, OLDEST_FORMAT_VERSION, SceneBundle};
 use isotrail_geo::{
     Cache, CachedFetcher, Fetcher, Footprint, Grid, OPEN_METEO_ARCHIVE_URL, OVERPASS_URL,
     OpenMeteoSource, OverpassSource, RecordedFetcher, TerrariumSource, TileId, WeatherRequest,
@@ -279,6 +279,45 @@ fn renders_a_bundle_into_the_current_directory_by_default() {
     );
     assert!(output.status.success(), "{}", text(&output.stderr));
     assert_eq!(png_size(&temp.path().join("hill.png")), (1080, 1920));
+}
+
+#[test]
+fn a_bundle_in_the_format_before_renders_like_its_current_twin() {
+    let temp = tempfile::tempdir().unwrap();
+    let cache_dir = temp.path().join("cache");
+    let bundles = fixtures().join("bundles");
+    let render = |input: &Path, png: &str| {
+        let input = input.to_str().unwrap();
+        isotrail(
+            &cache_dir,
+            temp.path(),
+            &[
+                "render", input, "-o", png, "--aspect", "wide", "--scale", "6",
+            ],
+        )
+    };
+    let pictures: Vec<Vec<u8>> = [OLDEST_FORMAT_VERSION, FORMAT_VERSION]
+        .iter()
+        .map(|format| {
+            let png = format!("format-{format}.png");
+            let output = render(&bundles.join(format!("format-{format}.itb")), &png);
+            assert!(output.status.success(), "{}", text(&output.stderr));
+            fs::read(temp.path().join(png)).unwrap()
+        })
+        .collect();
+    assert!(pictures[0] == pictures[1], "the two pictures differ");
+
+    let old = fs::read(bundles.join(format!("format-{OLDEST_FORMAT_VERSION}.itb"))).unwrap();
+    let cut = temp.path().join("cut.itb");
+    fs::write(&cut, &old[..old.len() - 20]).unwrap();
+    let output = render(&cut, "cut.png");
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = text(&output.stderr);
+    assert!(
+        stderr.contains("can't read") && stderr.contains("the bundle is damaged"),
+        "{stderr}"
+    );
+    assert!(!temp.path().join("cut.png").exists());
 }
 
 #[test]

@@ -93,12 +93,9 @@ fn use_bundle(bundle: &SceneBundle) {
     }
 }
 
-#[test]
-fn damaged_payloads_are_refused_or_render_without_panicking() {
-    let original = full_bundle();
-    let bytes = original.to_bytes().unwrap();
+/// Flips one byte of the payload at a time, keeping the file's header
+fn fuzz(bytes: &[u8], mut state: u64) {
     let payload = decompress_to_vec(&bytes[6..]).unwrap();
-    let mut state = 0x1507_2026;
     let (mut refused, mut read) = (0, 0);
     for _ in 0..2_000 {
         let mut damaged = payload.clone();
@@ -123,6 +120,26 @@ fn damaged_payloads_are_refused_or_render_without_panicking() {
         refused > 100 && read > 100,
         "{refused} refused, {read} read"
     );
+}
+
+#[test]
+fn damaged_payloads_are_refused_or_render_without_panicking() {
+    fuzz(&full_bundle().to_bytes().unwrap(), 0x1507_2026);
+}
+
+#[test]
+fn damaged_payloads_in_the_older_format_are_refused_or_render_without_panicking() {
+    let path = format!(
+        "{}/../../fixtures/bundles/format-{}.itb",
+        env!("CARGO_MANIFEST_DIR"),
+        isotrail_bundle::OLDEST_FORMAT_VERSION
+    );
+    let bytes = std::fs::read(path).unwrap();
+    assert_eq!(
+        isotrail_bundle::format_version(&bytes),
+        Some(isotrail_bundle::OLDEST_FORMAT_VERSION)
+    );
+    fuzz(&bytes, 0x0505_2026);
 }
 
 /// A 1024 x 1024 slab of jagged peaks, as tall as the exaggeration goes

@@ -24,6 +24,33 @@ fn stdout(output: &Output) -> String {
 }
 
 #[test]
+fn json_gives_the_format_a_bundle_was_written_in() {
+    let bundles = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/bundles");
+    let formats = [
+        isotrail_bundle::OLDEST_FORMAT_VERSION,
+        isotrail_bundle::FORMAT_VERSION,
+    ];
+    let read: Vec<serde_json::Value> = formats
+        .iter()
+        .map(|format| {
+            let file = bundles.join(format!("format-{format}.itb"));
+            let json = stdout(&isotrail(&["stats", file.to_str().unwrap(), "--json"]));
+            serde_json::from_str(&json).unwrap()
+        })
+        .collect();
+    for (json, format) in read.iter().zip(formats) {
+        assert_eq!(json["format"], format);
+        assert_eq!(json["generator"], "isotrail test");
+    }
+    let without_format = |json: &serde_json::Value| {
+        let mut json = json.clone();
+        json.as_object_mut().unwrap().remove("format");
+        json
+    };
+    assert_eq!(without_format(&read[0]), without_format(&read[1]));
+}
+
+#[test]
 fn table_in_metric_units() {
     let file = fixture("multi-segment.gpx");
     let text = stdout(&isotrail(&["stats", file.to_str().unwrap()]));

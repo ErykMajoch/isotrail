@@ -65,6 +65,8 @@ const withVersion = (version) => {
 await writeFile(join(data, 'older.itb'), withVersion(1));
 await writeFile(join(data, 'newer.itb'), withVersion(999));
 await writeFile(join(data, 'damaged.itb'), hike.subarray(0, 40));
+// A scene file in the format before the current one, which still opens
+await writeFile(join(data, 'format-5.itb'), await readFile(join(ROOT, 'fixtures', 'bundles', 'format-5.itb')));
 await writeFile(join(data, 'poster.png'), png(160, 90, [58, 122, 90]));
 await writeFile(join(data, 'warm.hex'), '1a1c2c\n5d275d\nb13e53\nef7d57\nffcd75\na7f070\n');
 await writeFile(
@@ -171,6 +173,7 @@ Object.assign(pages, {
       embed('id="damaged" src="/data/damaged.itb" aspect="wide"'),
     ]),
   ),
+  '/formats.html': page(embed('id="f5" src="/data/format-5.itb" aspect="wide"')),
   '/nogpu.html': page(embed('id="a" src="/data/hike.itb" aspect="wide"'), {
     head: '<script src="/web/test/no-gpu.js"></script>',
   }),
@@ -506,6 +509,25 @@ try {
     check(`${id}: says "${text}"`, shown === text && (await visible(message(id))), shown);
   }
   check('with a poster, the poster stays instead of a message', (await visible(`${el('p404')}.shadowRoot.querySelector('img')`)) && !(await visible(message('p404'))));
+  const versionWarnings = await cdp.evaluate('__warnings');
+  const warningFor = (file) => versionWarnings.find((w) => w.includes(`/data/${file}`)) ?? '';
+  const olderWarning = warningFor('older.itb');
+  check(
+    'the console asks for an older bundle to be made again',
+    olderWarning.includes('older isotrail (format version 1;') && olderWarning.includes('reads versions 5 and 6') && olderWarning.includes('make it again with `isotrail embed`'),
+    olderWarning,
+  );
+  const newerWarning = warningFor('newer.itb');
+  check(
+    'the console asks for a newer runtime for a newer bundle',
+    newerWarning.includes('newer isotrail (format version 999;') && newerWarning.includes('update the web runtime'),
+    newerWarning,
+  );
+
+  await go('/formats.html');
+  const opened = await cdp.waitFor(`${el('f5')}?.dataset.state === 'ready'`);
+  check('a bundle in the format before the current one opens', opened, await stateOf('f5'));
+  check('and sends no isotrail-error', JSON.stringify(await errorsOf('f5')) === '[]', JSON.stringify(await errorsOf('f5')));
 
   await go('/nogpu.html');
   await cdp.waitFor(`${el('a')}?.dataset.state === 'fallback'`);

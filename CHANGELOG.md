@@ -18,6 +18,7 @@ All notable changes to `isotrail` are documented here.
 - The web embed's `--isotrail-hover`, `--isotrail-radius` and `--isotrail-credit-outline` properties set the buttons' hover colour, their corners and the credit's outline.
 - `stats --json` gives the weather summary, and the elevation profile with `--profile N`. For a scene file it also gives its format, the isotrail that made it and the data credit.
 - With `--json`, a command that fails prints an error object with a reason, such as `network` or `offline`. A script can tell what went wrong without reading the message.
+- isotrail and the web runtime open scene files in the format before their own, as well as the current one. Updating no longer breaks the bundles a website already serves.
 
 ### Changed
 

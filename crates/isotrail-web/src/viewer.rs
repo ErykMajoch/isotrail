@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
 use glam::Vec2;
-use isotrail_bundle::{BundleError, SceneBundle};
+use isotrail_bundle::{BundleError, FORMAT_VERSION, OLDEST_FORMAT_VERSION, SceneBundle};
 use isotrail_render::{
     Diorama, Framing, Gpu, LIVE_SAFE_AREA, OffscreenTarget, PixelGrid, Present, SunState,
     TerrainMesh, TerrainRenderer, View, Walk, When, canvas_within, credit_line, mesh_within,
@@ -73,13 +73,7 @@ impl Viewer {
                 .into());
             }
         };
-        let bundle = SceneBundle::from_bytes(&bundle).map_err(|err| {
-            let reason = match err {
-                BundleError::OlderVersion { .. } | BundleError::NewerVersion { .. } => "version",
-                _ => "damaged",
-            };
-            failure(reason, err)
-        })?;
+        let bundle = SceneBundle::from_bytes(&bundle).map_err(unreadable)?;
         let (width, height) = (canvas.width().max(1), canvas.height().max(1));
         let (gpu, surface) = Gpu::for_canvas(canvas, webgl_only)
             .await
@@ -428,6 +422,31 @@ impl Drop for Viewer {
 }
 
 /// An `Error` with a `reason` the element can tell apart
+/// The command line's advice doesn't fit a web page, so versions get their own
+fn unreadable(err: BundleError) -> JsValue {
+    let (oldest, supported) = (OLDEST_FORMAT_VERSION, FORMAT_VERSION);
+    let made_by = |age: &str, found: u16| {
+        format!(
+            "the bundle was made by {age} isotrail (format version {found}; this runtime reads \
+             versions {oldest} and {supported})"
+        )
+    };
+    match err {
+        BundleError::OlderVersion { found, .. } => failure(
+            "version",
+            format!(
+                "{}: make it again with `isotrail embed`",
+                made_by("an older", found)
+            ),
+        ),
+        BundleError::NewerVersion { found, .. } => failure(
+            "version",
+            format!("{}: update the web runtime", made_by("a newer", found)),
+        ),
+        err => failure("damaged", err),
+    }
+}
+
 fn failure(reason: &str, err: impl std::fmt::Display) -> JsValue {
     let error = js_sys::Error::new(&err.to_string());
     let _ = js_sys::Reflect::set(&error, &"reason".into(), &reason.into());

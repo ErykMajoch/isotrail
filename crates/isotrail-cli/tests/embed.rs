@@ -41,6 +41,36 @@ fn fake_runtime(dir: &Path) {
 }
 
 #[test]
+fn a_bundle_in_the_format_before_is_embedded_in_today_s() {
+    use isotrail_bundle::{FORMAT_VERSION, OLDEST_FORMAT_VERSION, format_version};
+
+    let temp = tempfile::tempdir().unwrap();
+    let old = fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/bundles")
+            .join(format!("format-{OLDEST_FORMAT_VERSION}.itb")),
+    )
+    .unwrap();
+    fs::write(temp.path().join("old.itb"), &old).unwrap();
+    let output = isotrail(temp.path(), &["embed", "old.itb", "-o", "site"]);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let written = fs::read(temp.path().join("site/old.itb")).unwrap();
+    assert_eq!(format_version(&written), Some(FORMAT_VERSION));
+    assert_eq!(
+        SceneBundle::from_bytes(&written).unwrap(),
+        SceneBundle::from_bytes(&old).unwrap()
+    );
+
+    // Embedded where it already is, the file is left as it was
+    fs::create_dir(temp.path().join("here")).unwrap();
+    fs::write(temp.path().join("here/old.itb"), &old).unwrap();
+    let output = isotrail(temp.path(), &["embed", "here/old.itb", "-o", "here"]);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert_eq!(fs::read(temp.path().join("here/old.itb")).unwrap(), old);
+    assert!(temp.path().join("here/old.png").is_file());
+}
+
+#[test]
 fn writes_a_bundle_poster_and_snippet() {
     let temp = with_hike("ridge.itb");
     let output = isotrail(temp.path(), &["embed", "ridge.itb", "-o", "site"]);

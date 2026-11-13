@@ -87,3 +87,14 @@ UPDATE_GOLDENS=1 cargo test
 ```
 
 The MP4 tests need `ffmpeg` and `ffprobe` on your `PATH`. Without them, they print a note and pass. CI installs ffmpeg on Linux.
+
+## Changing the scene file format
+
+Websites keep serving scene files after isotrail is updated. So isotrail and the web runtime read the format before the current one too, and convert it on load. The payload has no field names, so any change to the bundle's types is a new format. It needs these steps:
+
+1. Replace `crates/isotrail-bundle/src/previous.rs` with a copy of the current types, the whole bundle as it is now. Convert them to the new types in its `From` implementation.
+2. Raise `FORMAT_VERSION` in `format.rs`. `OLDEST_FORMAT_VERSION` follows `previous.rs`.
+3. Delete the oldest file in `fixtures/bundles/`. Write the new one with `cargo run -p isotrail-testkit --example format_fixture`.
+4. Say in `CHANGELOG.md` that the format changed.
+
+The tests in `crates/isotrail-bundle/tests/formats.rs` fail until all of this is done.
