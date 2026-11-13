@@ -38,10 +38,10 @@ impl From<AspectArg> for Aspect {
 /// The image's size and safe area, and where the camera looks from
 #[derive(Debug, Args)]
 pub struct FrameArgs {
-    /// Any size instead of an aspect, such as 1200x900, each side from 16 to 8192
-    #[arg(long, value_name = "WxH", value_parser = parse_size, conflicts_with = "aspect",
-          help_heading = crate::IMAGE)]
-    pub size: Option<(u32, u32)>,
+    /// Any sizes instead of aspects, such as 1200x900,600x450, each side from 16 to 8192
+    #[arg(long, value_name = "WxH", value_parser = parse_size, value_delimiter = ',',
+          conflicts_with = "aspect", help_heading = crate::IMAGE)]
+    pub size: Vec<(u32, u32)>,
 
     /// Margins kept clear, in percent: top,right,bottom,left or one number, each from 0 to 45
     #[arg(long, value_name = "T,R,B,L", value_parser = parse_safe_area, allow_hyphen_values = true,
@@ -91,6 +91,14 @@ impl Shape {
             Shape::Size(width, height) => format!("{width} x {height}"),
         }
     }
+
+    /// The aspect's name, or the size as `640x480`, to go in a file name
+    pub fn file_label(&self) -> String {
+        match self {
+            Shape::Aspect(aspect) => aspect.name().to_owned(),
+            Shape::Size(width, height) => format!("{width}x{height}"),
+        }
+    }
 }
 
 impl FrameArgs {
@@ -103,14 +111,18 @@ impl FrameArgs {
         }
     }
 
-    /// The given size, or each of `aspects`
+    /// The given sizes, or each of `aspects`
     pub fn shapes(&self, aspects: &[Aspect]) -> Vec<Shape> {
-        match self.size {
-            Some((width, height)) => vec![Shape::Size(width, height)],
-            None => aspects
+        if self.size.is_empty() {
+            aspects
                 .iter()
                 .map(|&aspect| Shape::Aspect(aspect))
-                .collect(),
+                .collect()
+        } else {
+            self.size
+                .iter()
+                .map(|&(width, height)| Shape::Size(width, height))
+                .collect()
         }
     }
 

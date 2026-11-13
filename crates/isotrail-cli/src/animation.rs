@@ -9,6 +9,8 @@ use crate::usage;
 
 const MAX_GIF_DURATION_S: f32 = 60.0;
 const MAX_MP4_DURATION_S: f32 = 180.0;
+/// The longest the embed's undrawing before a play may take
+const MAX_REWIND_S: f32 = 10.0;
 
 #[derive(Debug, Args)]
 #[command(next_help_heading = crate::ANIMATION)]
@@ -140,6 +142,13 @@ pub(crate) fn parse_part(value: &str) -> Result<f32, String> {
         .ok()
         .filter(|seconds| (0.0..=MAX_MP4_DURATION_S).contains(seconds))
         .ok_or_else(|| "expected seconds from 0 to 180, such as 2s".to_owned())
+}
+
+pub(crate) fn parse_rewind(value: &str) -> Result<f32, String> {
+    seconds(value)
+        .ok()
+        .filter(|seconds| (0.0..=MAX_REWIND_S).contains(seconds))
+        .ok_or_else(|| format!("expected seconds from 0 to {MAX_REWIND_S}, such as 1s"))
 }
 
 pub(crate) fn parse_orbit(value: &str) -> Result<f32, String> {

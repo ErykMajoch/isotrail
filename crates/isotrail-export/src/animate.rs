@@ -1,16 +1,16 @@
 use isotrail_bundle::SceneBundle;
 use isotrail_render::{
     Diorama, Frame, Framing, Gpu, Look, Mesher, Moment, Motion, OffscreenTarget, SunState,
-    TerrainRenderer, View, Viewpoints, Walk, When, mesh_within,
+    TerrainRenderer, View, Walk, When, mesh_within,
 };
 
 use crate::ExportError;
 
 /// Renders every frame of `motion` at the framing's internal resolution and
-/// hands each to `each` with what it shows. The camera keeps one scale that
-/// fits the diorama from every heading of the orbit, the sun follows the
-/// clock at the route's head unless `motion` holds one, and frames that show
-/// the same moment are rendered once
+/// hands each to `each` with what it shows. Each heading of the orbit shows
+/// the diorama as large as fits there, so the clip settles on the still. The
+/// sun follows the clock at the route's head unless `motion` holds one, and
+/// frames that show the same moment are rendered once
 pub fn render_clip<E: From<ExportError>>(
     gpu: &Gpu,
     bundle: &SceneBundle,
@@ -24,22 +24,13 @@ pub fn render_clip<E: From<ExportError>>(
     let moments: Vec<Moment> = (0..motion.timeline.frame_count())
         .map(|i| motion.moment(&walk, i))
         .collect();
-    let offsets: Vec<f32> = moments.iter().map(|m| m.yaw_offset_deg).collect();
     let renderer = TerrainRenderer::new(gpu);
     let start = SunState::seen(bundle, When::Start, &motion.conditions);
-    let mut diorama = Diorama::new(
-        gpu,
-        &renderer,
-        bundle,
-        mesh_within(mesher, bundle, gpu.max_buffer_size()).map_err(ExportError::from)?,
-        framing,
-        &Viewpoints {
-            aim: motion.aim,
-            yaw_offsets_deg: &offsets,
-        },
-        motion.sun.unwrap_or(start),
-    )
-    .map_err(ExportError::from)?;
+    let mesh = mesh_within(mesher, bundle, gpu.max_buffer_size()).map_err(ExportError::from)?;
+    let sun = motion.sun.unwrap_or(start);
+    let mut diorama = Diorama::new(gpu, &renderer, bundle, mesh, framing, &motion.aim, sun)
+        .map_err(ExportError::from)?;
+    let zoom = diorama.start_view(&motion.aim).zoom;
     let target = OffscreenTarget::new(gpu, framing.width, framing.height);
 
     let mut shown: Option<(f32, Frame)> = None;
@@ -57,7 +48,10 @@ pub fn render_clip<E: From<ExportError>>(
                     gpu,
                     &renderer,
                     &target,
-                    &View::turned(moment.yaw_offset_deg),
+                    &View {
+                        zoom,
+                        ..View::turned(moment.yaw_offset_deg)
+                    },
                     moment.progress,
                     look,
                 );

@@ -740,6 +740,63 @@ fn any_size_renders_with_its_own_safe_area() {
 }
 
 #[test]
+fn several_sizes_make_one_image_each() {
+    let temp = with_hike();
+    let cache = temp.path().join("cache");
+    let output = isotrail(
+        &cache,
+        temp.path(),
+        &[
+            "render",
+            "hike.itb",
+            "--size",
+            "640x480,400x300,200X150",
+            "--scale",
+            "2",
+            "--overlay",
+            "none",
+            "-o",
+            "card.png",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    for (name, size) in [
+        ("card-640x480.png", (640, 480)),
+        ("card-400x300.png", (400, 300)),
+        ("card-200x150.png", (200, 150)),
+    ] {
+        assert_eq!(png_size(&temp.path().join(name)), size, "{name}");
+    }
+    assert!(!temp.path().join("card.png").exists());
+
+    // Given twice, or each on its own flag
+    let output = isotrail(
+        &cache,
+        temp.path(),
+        &[
+            "render", "hike.itb", "--size", "640x480", "--size", "640×480",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        text(&output.stderr).contains("--size lists 640x480 twice"),
+        "{}",
+        text(&output.stderr)
+    );
+
+    // From a config file too, as a list
+    fs::write(
+        temp.path().join("user-config.toml"),
+        "[render]\nsize = [\"300x200\", \"200x300\"]\nscale = 1\noverlay = \"none\"\n",
+    )
+    .unwrap();
+    let output = isotrail(&cache, temp.path(), &["render", "hike.itb", "-o", "c.png"]);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert_eq!(png_size(&temp.path().join("c-300x200.png")), (300, 200));
+    assert_eq!(png_size(&temp.path().join("c-200x300.png")), (200, 300));
+}
+
+#[test]
 fn the_camera_can_turn_tilt_and_zoom() {
     let temp = tempfile::tempdir().unwrap();
     fs::write(

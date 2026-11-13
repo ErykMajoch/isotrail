@@ -51,7 +51,7 @@ The `cache-dir` in the `[render]` table of your user config file is also where `
 | `bundle` | `title`, `exaggeration` and the data settings |
 | `style-lab` | `exaggeration`, `theme` and the data settings only |
 
-For `embed`, that means the look, theme, scene, camera, text and data settings. It also takes `scale`, `size` and `safe-area` for the poster, and `aspect` when it names one shape. The playback settings `duration`, `intro`, `hold`, `loop-back`, `orbit`, `pace` and `loop` reach it too.
+For `embed`, that means the look, theme, scene, camera, text and data settings. It also takes `scale` and `safe-area` for the poster, and `aspect` or `size` when it names one shape. The playback settings `duration`, `intro`, `hold`, `loop-back`, `orbit`, `pace` and `loop` reach it too.
 
 The data settings include `padding`, `footprint` and the server and cache settings. `style-lab` takes no palette or scale from `[render]`, so the ones you render with don't narrow its comparison.
 

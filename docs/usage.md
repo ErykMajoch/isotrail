@@ -38,7 +38,7 @@ isotrail render <hike.gpx | hike.itb> [options]
 
 `render` makes a PNG, or an animation when the output name ends in `.gif` or `.mp4`. A GPX file is first prepared as [`bundle`](#bundle) does it, with the same data options. A scene bundle renders as it is, without the network.
 
-Without `-o`, the picture is a PNG named after the input, in the current folder. With several aspects, each file gets the aspect added to its name: `-o hike.png --aspect story,wide` writes `hike-story.png` and `hike-wide.png`.
+Without `-o`, the picture is a PNG named after the input, in the current folder. With several aspects, each file gets the aspect added to its name: `-o hike.png --aspect story,wide` writes `hike-story.png` and `hike-wide.png`. Several sizes work the same way, so `--size 640x480,320x240` writes `hike-640x480.png` and `hike-320x240.png`.
 
 ### Image
 
@@ -46,7 +46,7 @@ Without `-o`, the picture is a PNG named after the input, in the current folder.
 | --- | --- | --- |
 | `-o, --output FILE` | `<input>.png` | The file to write: `.png` for a still, `.gif` or `.mp4` for an [animation](#animation) |
 | `--aspect LIST` | `story` | Image shapes from the table below, separated by commas |
-| `--size WxH` | none | Any size instead of an aspect, such as `1200x900`, each side from 16 to 8192 |
+| `--size LIST` | none | Any sizes instead of aspects, separated by commas, such as `1200x900,600x450`, each side from 16 to 8192 |
 | `--safe-area T,R,B,L` | the shape's | Margins kept clear, in percent, each from 0 to 45 |
 | `--scale N` | `3` | Output pixels per drawn pixel, from 1 to 16, dividing both sides of the image |
 | `--background VALUE` | `sky` | `sky`, `transparent`, or a colour such as `#1e2a33` |
@@ -81,7 +81,9 @@ Images wider than they are tall put the title, stats and profile in one column o
 
 By default the camera looks along the direction of the hike. It is turned a little, so the trail runs up and to the right with its start in front. For loops and out-and-backs, it looks towards the halfway point.
 
-`--turn` is added to the default view or to `--heading`. Above a `--zoom` of 1, the diorama's edges are cut off. Animations end on the same view as the still, so their last frame matches it.
+`--turn` is added to the default view or to `--heading`. Above a `--zoom` of 1, the diorama's edges are cut off.
+
+While an animation's camera turns, the diorama is drawn as large as fits at each angle. A long slab fits larger seen end-on than side-on, so the diorama grows and shrinks a little as it turns. Animations end on the still's view at the still's size, and their last frame matches it. The [live embed](#embed) turns the same way.
 
 ### Terrain and look
 
@@ -399,7 +401,7 @@ Once the diorama is running, it shows the same data credit as the stills along i
 | --- | --- | --- |
 | `-o`, `--output DIR` | required | The folder to write to, created if needed |
 | `--aspect SHAPE` | `wide` | The shape of the element and its poster, from the [shapes](#image) |
-| `--size WxH` | none | The poster's size instead of an aspect, such as `1200x900` |
+| `--size WxH` | none | One size for the poster instead of an aspect, such as `1200x900` |
 | `--safe-area T,R,B,L` | the shape's | The poster's margins, as for [`render`](#image) |
 | `--scale N` | `3` | The poster's pixel scale, as for [`render`](#image) |
 | `--with-runtime` | off | Also copy the web runtime into `DIR` |
@@ -408,7 +410,17 @@ Once the diorama is running, it shows the same data credit as the stills along i
 | `--runtime-url URL` | `isotrail-embed.js` in `DIR` | The address of `isotrail-embed.js`, when one copy serves every hike |
 | `--exaggeration X` | automatic | As for [`render`](#terrain-and-look) |
 
-With `--size`, the element takes the poster's shape, as in `aspect="4:3"` for `1200x900`. The live diorama picks its own pixel scale to suit the page. A runtime folder holds `isotrail-embed.js` and `pkg/`. Without `--base-url`, the snippet uses bare file names, relative to the page.
+With `--size`, the element takes the poster's shape, as in `aspect="4:3"` for `1200x900`. The live diorama picks its own pixel scale to suit the page.
+
+The live diorama starts as large as the still. It shrinks only as far as each angle needs while it turns. A poster can then be its first frame, so the picture doesn't jump when the live view takes over. For that, the poster needs:
+
+- no overlays, with `--overlay none`
+- 5% margins, as `wide`, `square`, `feed`, `portrait` and `--size` have
+- the size the element draws at
+
+The element draws one pixel for each device pixel while its longer side is at most 640. A 640 x 360 element matches `--size 640x360 --scale 1`. A larger element draws coarser pixels: one of 1920 x 1080 draws at 640 x 360, like `--aspect wide` at the default `--scale 3`.
+
+A runtime folder holds `isotrail-embed.js` and `pkg/`. Without `--base-url`, the snippet uses bare file names, relative to the page.
 
 `embed` also takes `render`'s [terrain and look](#terrain-and-look), [scene, light and route](#scene-light-and-route), [camera](#camera), [text and overlay](#text-and-overlays) and [data](#data) options. It reads [config files](configuration.md) too. The poster is drawn with all of them.
 
@@ -436,6 +448,7 @@ These options set how the live diorama plays and what it shows. Each one that is
 | `--intro SECONDS` | 5% of a play | Time on the scene before the route draws, from 0 to 180s |
 | `--hold SECONDS` | 15% of a play | Time on the finished hike before the next play, from 0 to 180s |
 | `--loop-back` | off | Between plays, undraw the route and turn the camera back |
+| `--rewind SECONDS` | `1s` | Time a press of play takes to undraw the finished route, from 0 to 10s |
 | `--orbit DEG` | `30` | How far the camera turns while the route draws, from -360 to 360 degrees |
 | `--pace distance\|time` | `distance` | Draw the route at an even speed, or follow the recorded times |
 | `--loop forever\|once\|N` | `once` | How many times the diorama plays: forever, once, or 1 to 1000 times |
@@ -446,6 +459,8 @@ These options set how the live diorama plays and what it shows. Each one that is
 | `--strings FILE` | none | A JSON file of words to use instead of the built-in ones |
 
 A play is split as an [animation](#animation) is. For every 10s, it spends 0.5s on the scene and 8s drawing the route. The 1.5s on the finished hike only shows between loops. `--orbit 0` keeps the camera still, and a negative angle turns the other way.
+
+The diorama starts with the whole route drawn, like the poster. Pressing play first undraws the route over `--rewind` seconds, while the camera turns to where the play starts. The light stays as it was until the route draws again. `--rewind 0` empties the route at once. With reduced motion, the route undraws but the camera doesn't turn.
 
 The scrubber is the progress line along the bottom. With `--controls none`, visitors can still turn and zoom the diorama by hand and with the keys.
 

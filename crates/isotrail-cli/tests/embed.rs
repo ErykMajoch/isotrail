@@ -354,6 +354,89 @@ fn the_starting_view_and_size_reach_the_snippet() {
 }
 
 #[test]
+fn the_poster_is_the_still_render_makes() {
+    let temp = with_hike("ridge.itb");
+    let run = |args: &[&str]| {
+        let output = isotrail(temp.path(), args);
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            text(&output.stderr)
+        );
+    };
+    run(&[
+        "embed",
+        "ridge.itb",
+        "-o",
+        "site",
+        "--scale",
+        "10",
+        "--zoom",
+        "1.5",
+    ]);
+    run(&[
+        "render",
+        "ridge.itb",
+        "-o",
+        "still.png",
+        "--aspect",
+        "wide",
+        "--scale",
+        "10",
+        "--zoom",
+        "1.5",
+    ]);
+    assert_eq!(
+        fs::read(temp.path().join("site/ridge.png")).unwrap(),
+        fs::read(temp.path().join("still.png")).unwrap()
+    );
+}
+
+#[test]
+fn the_embed_takes_one_size() {
+    let temp = with_hike("ridge.itb");
+    let output = isotrail(
+        temp.path(),
+        &[
+            "embed",
+            "ridge.itb",
+            "-o",
+            "site",
+            "--size",
+            "640x480,400x300",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = text(&output.stderr);
+    assert!(
+        stderr.contains("--size lists 2 sizes, but embed makes one poster"),
+        "{stderr}"
+    );
+    assert!(!temp.path().join("site").exists());
+
+    // A list in [render] is for render; one size reaches the embed
+    let config = temp.path().join("config.toml");
+    fs::write(&config, "[render]\nsize = [\"640x480\", \"400x300\"]\n").unwrap();
+    let args = [
+        "embed",
+        "ridge.itb",
+        "-o",
+        "site",
+        "--scale",
+        "10",
+        "--overlay",
+        "none",
+    ];
+    let output = isotrail_with_config(temp.path(), &args, &config);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert_eq!(png_size(&temp.path().join("site/ridge.png")), (1920, 1080));
+    fs::write(&config, "[render]\nsize = [\"640x480\"]\n").unwrap();
+    let output = isotrail_with_config(temp.path(), &args, &config);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert_eq!(png_size(&temp.path().join("site/ridge.png")), (640, 480));
+}
+
+#[test]
 fn a_palette_file_is_copied_beside_the_bundle() {
     let temp = with_hike("ridge.itb");
     fs::create_dir(temp.path().join("colours")).unwrap();

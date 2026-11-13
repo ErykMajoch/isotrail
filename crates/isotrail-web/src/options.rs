@@ -23,7 +23,7 @@ pub struct Options {
     /// The sun held at `time` or set by hand, through playback and scrubbing
     pub held_sun: Option<SunState>,
     /// The starting view's turn, pitch and zoom
-    aim: Aim,
+    pub aim: Aim,
     /// How the route's drawing follows the hike
     pub pace: Pace,
     pub pacing: Pacing,
@@ -119,21 +119,9 @@ impl Options {
         }
     }
 
-    /// The view the diorama is fitted for: zoom below 1 leaves more room
-    /// round the slab, while zoom above it starts the view magnified
-    pub fn fitted_aim(&self) -> Aim {
-        Aim {
-            zoom: self.aim.zoom.min(1.0),
-            ..self.aim
-        }
-    }
-
     /// Where the view starts, and returns to on reset
     pub fn start_view(&self) -> View {
-        View {
-            zoom: self.aim.zoom.clamp(1.0, self.max_zoom),
-            ..View::default()
-        }
+        self.aim.start_view(self.max_zoom)
     }
 
     /// Whether the diorama must be fitted again to go from `self` to `other`

@@ -14,6 +14,8 @@ const LOOP_SHARE: f32 = 0.25;
 pub const MAX_ZOOM: f32 = 3.0;
 /// What a viewer may set as its largest zoom
 pub const MAX_ZOOM_RANGE: std::ops::RangeInclusive<f32> = 1.0..=6.0;
+/// The margins the live view keeps clear, and a frame of any size by default
+pub const LIVE_SAFE_AREA: Insets = Insets::even(0.05);
 
 /// Shares of the frame, per side, that the diorama must stay out of
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -56,7 +58,7 @@ impl Canvas {
         Canvas {
             width,
             height,
-            safe: Insets::even(0.05),
+            safe: LIVE_SAFE_AREA,
         }
     }
 
@@ -178,13 +180,6 @@ impl Default for Aim {
     }
 }
 
-/// The still's view, and the turns from it that a diorama will be seen at
-#[derive(Clone, Copy, Debug)]
-pub struct Viewpoints<'a> {
-    pub aim: Aim,
-    pub yaw_offsets_deg: &'a [f32],
-}
-
 impl Aim {
     /// Slab-frame angle the camera looks along
     pub fn heading(&self, bundle: &SceneBundle) -> f32 {
@@ -204,6 +199,20 @@ impl Aim {
             self.turn_deg
         } else {
             (turn * 100.0).round() / 100.0
+        }
+    }
+
+    /// The zoom a turntable is fitted at: below 1 it leaves more room round
+    /// the slab, while above 1 the view starts magnified instead
+    pub fn fitted_zoom(&self) -> f32 {
+        self.zoom.min(1.0)
+    }
+
+    /// Where a turntable's view starts, so that it shows what the still does
+    pub fn start_view(&self, max_zoom: f32) -> View {
+        View {
+            zoom: self.zoom.clamp(1.0, max_zoom.max(1.0)),
+            ..View::default()
         }
     }
 }
@@ -238,40 +247,14 @@ impl Camera {
         points: impl IntoIterator<Item = Vec3>,
         framing: &Framing,
     ) -> Camera {
-        let fit = Fit::new(heading, pitch_deg, points);
+        let fit = Projected::new(heading, pitch_deg, points);
         let per_pixel = fit.scale(framing) / zoom;
         fit.camera(framing, per_pixel, Vec2::ZERO, false)
-    }
-
-    /// Like [`Camera::diorama`] at a set `metres_per_px`, as an animation
-    /// keeps the same scale while it turns, and moved to whole internal
-    /// pixels so that the terrain doesn't shimmer
-    pub fn at_scale(
-        heading: f32,
-        points: impl IntoIterator<Item = Vec3>,
-        framing: &Framing,
-        metres_per_px: f32,
-    ) -> Camera {
-        Fit::new(heading, PITCH_DEG, points).camera(
-            framing,
-            metres_per_px.max(f32::EPSILON),
-            Vec2::ZERO,
-            true,
-        )
-    }
-
-    /// The `metres_per_px` at which `points` fit the framing's safe area
-    /// from every one of `headings`
-    pub fn fit_scale(headings: &[f32], pitch_deg: f32, points: &[Vec3], framing: &Framing) -> f32 {
-        headings
-            .iter()
-            .map(|&heading| Fit::new(heading, pitch_deg, points.iter().copied()).scale(framing))
-            .fold(f32::EPSILON, f32::max)
     }
 }
 
 /// Points seen from a heading, in view space
-struct Fit {
+struct Projected {
     view: Mat4,
     forward: Vec3,
     pitch: f32,
@@ -279,8 +262,8 @@ struct Fit {
     max: Vec3,
 }
 
-impl Fit {
-    fn new(heading: f32, pitch_deg: f32, points: impl IntoIterator<Item = Vec3>) -> Fit {
+impl Projected {
+    fn new(heading: f32, pitch_deg: f32, points: impl IntoIterator<Item = Vec3>) -> Projected {
         let pitch = pitch_deg.to_radians();
         let forward = Vec3::new(
             heading.cos() * pitch.cos(),
@@ -297,7 +280,7 @@ impl Fit {
         if min.x > max.x {
             (min, max) = (Vec3::splat(-1.0), Vec3::ONE);
         }
-        Fit {
+        Projected {
             view,
             forward,
             pitch,
@@ -398,42 +381,35 @@ impl View {
     }
 }
 
-/// A slab seen at one scale from any heading, as a viewer turns, zooms and
-/// pans it without ever seeing past the whole-slab view
+/// A slab seen from any heading, as a viewer turns, zooms and pans it
+/// without ever seeing past the whole-slab view. Each heading shows the slab
+/// as large as fits there, so the still's view is the still
 #[derive(Clone, Debug)]
 pub struct Turntable {
     heading: f32,
     pitch_deg: f32,
+    zoom: f32,
     points: Vec<Vec3>,
     framing: Framing,
-    metres_per_px: f32,
     max_zoom: f32,
 }
 
 impl Turntable {
-    /// `heading` is the still's, `pitch_deg` holds for every turn, and the
-    /// scale is `zoom` times the one that fits `points` from every turn of
-    /// `yaw_offsets_deg` from it
+    /// `heading` is the still's, `pitch_deg` holds for every turn, and each
+    /// heading's scale is `zoom` times the one that fits `points` there
     pub fn new(
         heading: f32,
         pitch_deg: f32,
         zoom: f32,
         points: Vec<Vec3>,
         framing: &Framing,
-        yaw_offsets_deg: &[f32],
     ) -> Turntable {
-        let mut headings: Vec<f32> = yaw_offsets_deg
-            .iter()
-            .map(|offset| heading + offset.to_radians())
-            .collect();
-        headings.dedup();
-        let metres_per_px = Camera::fit_scale(&headings, pitch_deg, &points, framing) / zoom;
         Turntable {
             heading,
             pitch_deg,
+            zoom: zoom.max(f32::EPSILON),
             points,
             framing: *framing,
-            metres_per_px,
             max_zoom: MAX_ZOOM,
         }
     }
@@ -449,21 +425,27 @@ impl Turntable {
         }
     }
 
-    /// At 1x
-    pub fn metres_per_px(&self) -> f32 {
-        self.metres_per_px
+    /// Size of an internal pixel as `view` shows the slab
+    pub fn metres_per_px(&self, view: &View) -> f32 {
+        self.whole(&self.fit(view)) / view.zoom.max(1.0)
     }
 
-    /// Moved to whole internal pixels at the view's zoom, like
-    /// [`Camera::at_scale`]
+    /// Moved to whole internal pixels, so that the terrain doesn't shimmer as
+    /// it turns or pans. The still's view stays as the still draws it
     pub fn camera(&self, view: &View) -> Camera {
         let fit = self.fit(view);
+        let still = view.yaw_offset_deg == 0.0 && view.focus == Vec2::ZERO;
         fit.camera(
             &self.framing,
-            self.metres_per_px / view.zoom.max(1.0),
+            self.whole(&fit) / view.zoom.max(1.0),
             fit.to_screen(view.focus),
-            true,
+            !still,
         )
+    }
+
+    /// Size of an internal pixel at 1x from the heading `fit` is seen from
+    fn whole(&self, fit: &Projected) -> f32 {
+        fit.scale(&self.framing) / self.zoom
     }
 
     /// Magnified `factor` times, keeping the ground under internal pixel
@@ -474,10 +456,8 @@ impl Turntable {
         }
         let zoom = (view.zoom * factor).clamp(1.0, self.max_zoom);
         let fit = self.fit(&view);
-        let (before, after) = (
-            self.metres_per_px / view.zoom.max(1.0),
-            self.metres_per_px / zoom,
-        );
+        let whole = self.whole(&fit);
+        let (before, after) = (whole / view.zoom.max(1.0), whole / zoom);
         let centre = safe_centre(&self.framing);
         let towards = Vec2::new(pixel.x - centre.x, centre.y - pixel.y);
         let shift = fit.to_screen(view.focus) + towards * (before - after);
@@ -494,7 +474,7 @@ impl Turntable {
             return view;
         }
         let fit = self.fit(&view);
-        let per_pixel = self.metres_per_px / view.zoom.max(1.0);
+        let per_pixel = self.whole(&fit) / view.zoom.max(1.0);
         let shift = fit.to_screen(view.focus) + Vec2::new(-pixels.x, pixels.y) * per_pixel;
         self.clamp(View {
             focus: fit.to_ground(shift),
@@ -518,7 +498,7 @@ impl Turntable {
         let fit = self.fit(&view);
         let centre = safe_centre(&self.framing);
         let (width, height) = (self.framing.width as f32, self.framing.height as f32);
-        let room = self.metres_per_px * (1.0 - 1.0 / zoom);
+        let room = self.whole(&fit) * (1.0 - 1.0 / zoom);
         let shift = fit.to_screen(view.focus);
         let shift = Vec2::new(
             shift.x.clamp(-centre.x * room, (width - centre.x) * room),
@@ -531,8 +511,8 @@ impl Turntable {
         }
     }
 
-    fn fit(&self, view: &View) -> Fit {
-        Fit::new(
+    fn fit(&self, view: &View) -> Projected {
+        Projected::new(
             self.heading + view.yaw_offset_deg.to_radians(),
             self.pitch_deg,
             self.points.iter().copied(),
@@ -790,28 +770,35 @@ mod tests {
     }
 
     #[test]
-    fn one_scale_fits_every_heading() {
+    fn each_heading_shows_the_slab_as_large_as_fits_there() {
         let grid = grid(200, 100, 30.0);
         let framing = Aspect::Story.framing(3).unwrap();
         let points = slab_corners(&grid, 800.0);
-        let headings = [0.2, 0.5, 0.9];
-        let scale = Camera::fit_scale(&headings, PITCH_DEG, &points, &framing);
-        let fits: Vec<f32> = headings
-            .iter()
-            .map(|&h| Camera::diorama(h, points.clone(), &framing).metres_per_px)
-            .collect();
-        assert!(fits.iter().all(|&fit| fit <= scale));
-        assert!(fits.contains(&scale));
+        let turntable = Turntable::new(0.4, PITCH_DEG, 1.0, points.clone(), &framing);
+        // The still's view is the still
+        assert_eq!(
+            turntable.camera(&View::default()),
+            Camera::diorama(0.4, points.clone(), &framing)
+        );
+        let mut scales = Vec::new();
+        for yaw in [0.0, 30.0, 90.0, 180.0] {
+            let fits = Camera::diorama(0.4 + f32::to_radians(yaw), points.clone(), &framing);
+            let scale = turntable.metres_per_px(&View::turned(yaw));
+            assert!((scale - fits.metres_per_px).abs() < 1e-4, "{yaw}°");
+            scales.push(scale);
+        }
+        // A long slab seen end-on fits larger than seen side-on
+        assert!(scales[2] > scales[0] * 1.2, "{scales:?}");
     }
 
     #[test]
-    fn fixed_scale_cameras_sit_on_whole_pixels() {
+    fn turned_cameras_sit_on_whole_pixels() {
         let grid = grid(200, 100, 30.0);
         let framing = Aspect::Story.framing(3).unwrap();
         let points = slab_corners(&grid, 800.0);
-        for heading in [0.1, 0.37, 1.3] {
-            let camera = Camera::at_scale(heading, points.clone(), &framing, 9.3);
-            assert_eq!(camera.metres_per_px, 9.3);
+        let turntable = Turntable::new(0.0, PITCH_DEG, 1.0, points.clone(), &framing);
+        for yaw in [5.7, 21.2, 74.5] {
+            let camera = turntable.camera(&View::turned(yaw));
             let origin = to_pixels(&camera, &framing, Vec3::ZERO);
             assert!((origin.x - origin.x.round()).abs() < 1e-3, "{origin}");
             assert!((origin.y - origin.y.round()).abs() < 1e-3, "{origin}");
@@ -892,17 +879,17 @@ mod tests {
         let plain = Camera::diorama(0.4, points.clone(), &framing);
         let close = Camera::aimed(0.4, PITCH_DEG, 2.0, points.clone(), &framing);
         assert!((close.metres_per_px * 2.0 - plain.metres_per_px).abs() < 1e-4);
-        let far = Turntable::new(0.4, PITCH_DEG, 0.5, points.clone(), &framing, &[0.0]);
-        let whole = Turntable::new(0.4, PITCH_DEG, 1.0, points, &framing, &[0.0]);
-        assert!((far.metres_per_px() - whole.metres_per_px() * 2.0).abs() < 1e-4);
+        let far = Turntable::new(0.4, PITCH_DEG, 0.5, points.clone(), &framing);
+        let whole = Turntable::new(0.4, PITCH_DEG, 1.0, points, &framing);
+        let view = View::turned(25.0);
+        assert!((far.metres_per_px(&view) - whole.metres_per_px(&view) * 2.0).abs() < 1e-4);
     }
 
     fn turntable() -> (Turntable, Framing) {
         let framing = Aspect::Wide.framing(3).unwrap();
         let points = slab_corners(&grid(200, 100, 30.0), 800.0);
-        let turn: Vec<f32> = (0..360).step_by(5).map(|d| d as f32).collect();
         (
-            Turntable::new(0.4, PITCH_DEG, 1.0, points, &framing, &turn),
+            Turntable::new(0.4, PITCH_DEG, 1.0, points, &framing),
             framing,
         )
     }
@@ -918,20 +905,6 @@ mod tests {
             to_pixels(&zoomed, framing, point),
         );
         a.truncate() - b.truncate() / view.zoom
-    }
-
-    #[test]
-    fn unzoomed_turntables_match_fixed_scale_cameras() {
-        let (turntable, framing) = turntable();
-        for yaw in [0.0, 37.0, -120.0] {
-            let camera = Camera::at_scale(
-                0.4 + f32::to_radians(yaw),
-                turntable.points.iter().copied(),
-                &framing,
-                turntable.metres_per_px(),
-            );
-            assert_eq!(turntable.camera(&View::turned(yaw)), camera);
-        }
     }
 
     #[test]
@@ -1043,6 +1016,39 @@ mod tests {
             };
             let pixel = to_pixels(&turntable.camera(&turned), &framing, middle).truncate();
             assert!(pixel.distance(centre) <= 0.75, "{yaw}°: {pixel}");
+        }
+    }
+
+    #[test]
+    fn the_live_view_keeps_the_margins_of_any_size() {
+        assert_eq!(Canvas::new(640, 480).safe, LIVE_SAFE_AREA);
+    }
+
+    #[test]
+    fn a_turntable_fits_at_one_at_most_and_starts_magnified_above_it() {
+        let aim = |zoom| Aim {
+            zoom,
+            ..Aim::default()
+        };
+        assert_eq!(aim(0.5).fitted_zoom(), 0.5);
+        assert_eq!(aim(1.5).fitted_zoom(), 1.0);
+        assert_eq!(aim(0.5).start_view(MAX_ZOOM), View::default());
+        assert_eq!(aim(1.5).start_view(MAX_ZOOM).zoom, 1.5);
+        assert_eq!(aim(2.0).start_view(1.5).zoom, 1.5);
+
+        // Either way, the starting view is the still's camera
+        let grid = grid(200, 100, 30.0);
+        let framing = Aspect::Wide.framing(3).unwrap();
+        let points = slab_corners(&grid, 800.0);
+        for zoom in [0.5, 1.0, 1.5] {
+            let aim = aim(zoom);
+            let turntable =
+                Turntable::new(0.4, PITCH_DEG, aim.fitted_zoom(), points.clone(), &framing);
+            assert_eq!(
+                turntable.camera(&aim.start_view(MAX_ZOOM)),
+                Camera::aimed(0.4, PITCH_DEG, zoom, points.clone(), &framing),
+                "zoom {zoom}"
+            );
         }
     }
 

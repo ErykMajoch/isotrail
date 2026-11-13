@@ -5,11 +5,12 @@ use isotrail_export::{
     ExportError, GifOptions, GifWriter, Plays, render_clip, render_still, upscale,
 };
 use isotrail_render::{
-    Aim, Aspect, Background, Conditions, DEFAULT_PALETTE, DEFAULT_STATS, DateFormat, Diorama,
-    Edges, Frame, GodRays, Gpu, HiddenRoute, Look, Markers, Mesher, Motion, OffscreenTarget, Orbit,
-    OverlayStyle, OverlayText, Overlays, Pace, Palette, RouteStyle, Shaped, SmoothMesher, StatKind,
-    SunState, Terrain, TerrainRenderer, Theme, Timeline, View, Viewpoints, VoxelMesher, Walk,
-    WeatherEffects, When, draw_test_scene,
+    Aim, Aspect, Background, Canvas, Conditions, DEFAULT_PALETTE, DEFAULT_STATS, DateFormat,
+    Diorama, Edges, Frame, Framing, GodRays, Gpu, HiddenRoute, LIVE_SAFE_AREA, Look, MAX_ZOOM,
+    Markers, Mesher, Motion, OffscreenTarget, Orbit, OverlayStyle, OverlayText, Overlays, Pace,
+    Palette, PixelGrid, RouteStyle, Shaped, SmoothMesher, StatKind, SunState, Terrain,
+    TerrainRenderer, Theme, Timeline, View, VoxelMesher, Walk, WeatherEffects, When,
+    draw_test_scene, mesh_within,
 };
 use isotrail_testkit::{
     Tolerance, assert_golden, decode_gif, differing_share, diorama_bundle, hike_bundle,
@@ -419,10 +420,7 @@ fn rain_moves_with_the_clock_and_repeats() {
         &bundle,
         VoxelMesher::default().mesh(&bundle),
         &framing,
-        &Viewpoints {
-            aim: Aim::default(),
-            yaw_offsets_deg: &[0.0],
-        },
+        &Aim::default(),
         sun,
     )
     .unwrap();
@@ -489,6 +487,8 @@ fn clips_follow_the_sun_unless_one_is_held() {
             step_fps: None,
             ..Timeline::default()
         },
+        // Still, so that only the light changes how bright a frame is
+        orbit: Orbit { sweep_deg: 0.0 },
         ..Motion::default()
     };
     let clip = |motion: &Motion| {
@@ -780,6 +780,176 @@ fn animation_frames_match_goldens() {
             frame.height,
             &frame.rgba,
         );
+    }
+}
+
+/// The live view draws the diorama as the viewer does: on a turntable,
+/// from its starting view, at the size of a canvas
+fn live_first_frame(
+    gpu: &Gpu,
+    bundle: &SceneBundle,
+    framing: &Framing,
+    aim: &Aim,
+    sun: SunState,
+) -> Frame {
+    let renderer = TerrainRenderer::new(gpu);
+    let mesh = mesh_within(&VoxelMesher::default(), bundle, gpu.max_buffer_size()).unwrap();
+    let mut diorama = Diorama::new(gpu, &renderer, bundle, mesh, framing, aim, sun).unwrap();
+    diorama.set_max_zoom(MAX_ZOOM);
+    diorama.set_time(0.0);
+    let target = OffscreenTarget::new(gpu, framing.width, framing.height);
+    let view = diorama.start_view(aim);
+    diorama.draw(gpu, &renderer, &target, &view, 1.0, &Look::default());
+    target.read_back(gpu).unwrap()
+}
+
+#[test]
+fn the_live_views_first_frame_is_the_still() {
+    let gpu = isotrail_testkit::gpu();
+    let bundle = hike_bundle();
+    let sun = SunState::for_hike(&bundle);
+    // A 640 x 360 canvas at one device pixel per CSS pixel, and a story
+    let grid = PixelGrid::for_canvas(640, 360);
+    let live = Framing {
+        width: grid.width,
+        height: grid.height,
+        safe: LIVE_SAFE_AREA,
+    };
+    assert_eq!(Canvas::new(640, 360).framing(1), Some(live));
+    for (framing, zoom) in [
+        (live, 1.0),
+        (live, 1.5),
+        (live, 0.6),
+        (Aspect::Story.framing(6).unwrap(), 1.0),
+    ] {
+        let aim = Aim {
+            zoom,
+            ..Aim::default()
+        };
+        let still = render_still(
+            &gpu,
+            &bundle,
+            &VoxelMesher::default(),
+            &framing,
+            &aim,
+            &sun,
+            &Look::default(),
+        )
+        .unwrap();
+        let first = live_first_frame(&gpu, &bundle, &framing, &aim, sun);
+        assert!(
+            still.rgba() == first.rgba(),
+            "{} x {} at zoom {zoom}: the frames differ",
+            framing.width,
+            framing.height
+        );
+    }
+}
+
+/// The smallest box round the pixels that aren't transparent
+fn drawn_box(frame: &Frame) -> (u32, u32, u32, u32) {
+    let (mut left, mut top, mut right, mut bottom) = (u32::MAX, u32::MAX, 0, 0);
+    for y in 0..frame.height() {
+        for x in 0..frame.width() {
+            if frame.pixel(x, y)[3] > 0 {
+                (left, top) = (left.min(x), top.min(y));
+                (right, bottom) = (right.max(x), bottom.max(y));
+            }
+        }
+    }
+    (left, top, right, bottom)
+}
+
+#[test]
+fn a_turned_diorama_shrinks_only_as_far_as_its_heading_needs() {
+    let gpu = isotrail_testkit::gpu();
+    let bundle = hike_bundle();
+    let framing = Aspect::Story.framing(6).unwrap();
+    let renderer = TerrainRenderer::new(&gpu);
+    let mesh = mesh_within(&VoxelMesher::default(), &bundle, gpu.max_buffer_size()).unwrap();
+    let aim = Aim::default();
+    let diorama = Diorama::new(
+        &gpu,
+        &renderer,
+        &bundle,
+        mesh,
+        &framing,
+        &aim,
+        SunState::for_hike(&bundle),
+    )
+    .unwrap();
+    let target = OffscreenTarget::new(&gpu, framing.width, framing.height);
+    let look = Look {
+        background: Background::Transparent,
+        ..Look::default()
+    };
+    let (width, height) = (framing.width as f32, framing.height as f32);
+    let safe = framing.safe;
+    let mut sizes = Vec::new();
+    for yaw in [0.0, 30.0, 90.0, 180.0, 270.0] {
+        diorama.draw(&gpu, &renderer, &target, &View::turned(yaw), 1.0, &look);
+        let (left, top, right, bottom) = drawn_box(&target.read_back(&gpu).unwrap());
+        // Inside the safe area, give or take the pixel the camera snaps to
+        let inside = left as f32 >= width * safe.left - 2.0
+            && right as f32 <= width * (1.0 - safe.right) + 1.0
+            && top as f32 >= height * safe.top - 2.0
+            && bottom as f32 <= height * (1.0 - safe.bottom) + 1.0;
+        assert!(inside, "{yaw}°: {left},{top} to {right},{bottom}");
+        // And reaching across it one way or the other
+        let across = (right - left + 1) as f32 / (width * (1.0 - safe.left - safe.right));
+        let down = (bottom - top + 1) as f32 / (height * (1.0 - safe.top - safe.bottom));
+        assert!(across.max(down) > 0.96, "{yaw}°: {across} x {down}");
+        sizes.push((right - left + 1) * (bottom - top + 1));
+    }
+    assert!(sizes.windows(2).any(|w| w[0] != w[1]), "{sizes:?}");
+}
+
+#[test]
+fn a_clip_that_orbits_ends_on_the_still() {
+    let gpu = isotrail_testkit::gpu();
+    let bundle = hike_bundle();
+    let framing = Aspect::Story.framing(6).unwrap();
+    let look = Look::default();
+    let sun = SunState::for_hike(&bundle);
+    let mesher = VoxelMesher::default();
+    for zoom in [1.0, 1.5] {
+        let aim = Aim {
+            zoom,
+            ..Aim::default()
+        };
+        let still = render_still(&gpu, &bundle, &mesher, &framing, &aim, &sun, &look).unwrap();
+        let motion = Motion {
+            timeline: Timeline {
+                duration_s: 2.0,
+                fps: 3,
+                ..Timeline::default()
+            },
+            sun: Some(sun),
+            aim,
+            ..Motion::default()
+        };
+        assert!(motion.orbit.sweep_deg != 0.0);
+        let mut frames = Vec::new();
+        render_clip(
+            &gpu,
+            &bundle,
+            &mesher,
+            &framing,
+            &look,
+            &motion,
+            |moment, frame| -> Result<(), ExportError> {
+                frames.push((moment.progress, frame.clone()));
+                Ok(())
+            },
+        )
+        .unwrap();
+        let (progress, last) = frames.last().unwrap();
+        assert_eq!(*progress, 1.0);
+        assert!(
+            last.rgba() == still.rgba(),
+            "zoom {zoom}: the last frame differs"
+        );
+        assert!(frames[0].1.rgba() != still.rgba());
     }
 }
 

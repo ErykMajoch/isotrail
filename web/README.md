@@ -32,6 +32,18 @@ The `?v=` on the script's address is the isotrail version, and the script passes
 
 `--base-url` is the address the folder will be served at. Without it, the snippet uses bare file names, so you can serve the folder and open `snippet.html` to preview it. `--aspect` sets the shape of the element and its poster. The poster also takes `render`'s overlay options, such as `--title` or `--overlay none`. [The usage guide](../docs/usage.md#embed) lists every option.
 
+### A poster the live view replaces without a jump
+
+The live diorama starts at the poster's size. It shrinks only as far as each angle needs while it turns. With `--overlay none` and a shape with 5% margins, such as `wide`, the poster is the live view's first frame. Both must be drawn at the same size for that.
+
+The live view draws one pixel for each device pixel while the element's longer side is at most 640, and coarser pixels above that. For an element shown at 640 x 360 on a screen with one device pixel per CSS pixel, make the poster like this:
+
+```sh
+isotrail embed hike.gpx -o site --size 640x360 --scale 1 --overlay none
+```
+
+A still you make with `render` and the same options matches too. A poster with the title and stats panels doesn't, because the panels move its diorama.
+
 ### One runtime for several hikes
 
 `--with-runtime` copies the web runtime from the `web` folder that sits next to `isotrail` in the release downloads. In the repository, build it first and add `--runtime-dir web`.
@@ -168,6 +180,7 @@ The playback attributes set how the route plays, like `isotrail render`'s [anima
 | `duration` | `10`, or from `1` to `180` seconds |
 | `intro`, `hold` | 5% and 15% of `duration`, or from `0` to `180` seconds |
 | `loop-back` | Between plays, the route undraws and the camera turns back |
+| `rewind` | `1`, or from `0` to `10` seconds |
 | `orbit` | `30`, or from `-360` to `360` degrees |
 | `pace` | `distance`, or `time` to follow the recorded times |
 | `loop` | How many times it plays: once when not set, until paused for `loop` or `loop="forever"`, or a number |
@@ -175,6 +188,8 @@ The playback attributes set how the route plays, like `isotrail render`'s [anima
 `duration` is one play, split as in an animation. Out of every 10s, 0.5s show the scene, 8s draw the route and 1.5s rest on the finished hike. That rest, the `hold`, only comes between loops, so a single play stops when the route is drawn. `intro` and `hold` must leave half a second to draw the route.
 
 `orbit` is how far the camera turns while the route draws, easing back to the starting view. `0` keeps it still. With `loop-back`, one loop runs into the next without a jump. A hike without times draws at an even speed, even with `pace="time"`.
+
+The diorama opens with the whole route drawn, like the poster. Pressing play first undraws it over `rewind` seconds, while the camera turns to where the play starts. The light stays as it was until the route draws again. `rewind="0"` empties the route at once. With reduced motion, the route undraws without the turn.
 
 ### The element
 
@@ -479,8 +494,9 @@ Arguments that aren't finite numbers, such as `NaN`, are ignored. `Viewer.load` 
 - the script API, the words in Polish and from `strings`, and a theme file
 - twenty embeds on one page, touch targets and a strict Content-Security-Policy
 - that playing creates no GPU objects
+- that a poster without overlays covers the same pixels as the first live frame
 
-It needs Node 22 or later and the runtime built with `sh web/build.sh`:
+It needs Node 22 or later and the runtime built with `sh web/build.sh`. It renders the poster with `cargo`, which needs a graphics card. On a machine without one, set `ISOTRAIL_GPU=software`.
 
 ```bash
 node web/test/check.mjs chrome           # WebGPU where the browser has it

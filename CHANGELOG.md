@@ -4,6 +4,22 @@ All notable changes to `isotrail` are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- `--size` takes several sizes, such as `--size 640x480,320x240`. Each gets its own image, named like `hike-640x480.png`.
+- The web embed's `rewind` attribute, and `embed --rewind`, set how long pressing play takes to undraw the route. It is 1s by default, and `rewind="0"` empties the route at once.
+
+### Changed
+
+- The web embed starts at the size of the still. It shrinks only as far as each angle needs while it turns, instead of staying small enough for every angle.
+- A poster without overlays, with 5% margins and at the element's size, is now the embed's first frame. Nothing jumps when the live view takes over.
+- Pressing play no longer jumps to an empty route and a turned camera. The route undraws first, while the camera turns to where the play starts.
+- Animations draw the diorama as large as fits at each angle. Their last frame is the still at its full size.
+
+### Fixed
+
+- The web embed's clouds, rain and snow start where the poster has them.
+
 ## [1.4.1] - 2026-11-12
 
 Plain error messages, grouped help and rewritten docs. No new options, and everything that worked in 1.4.0 still works.

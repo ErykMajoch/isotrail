@@ -2,9 +2,10 @@
 //
 //   node web/test/check.mjs [chrome|edge] [--webgl]
 //
-// Needs Node 22 or later, Chrome or Edge, cargo, and the runtime built into
-// web/pkg (sh web/build.sh). --webgl forces every embed onto WebGL2, drawn by
-// SwiftShader, so it also runs on machines without a GPU. ISOTRAIL_BROWSER
+// Needs Node 22 or later, Chrome or Edge, cargo, a graphics card for one
+// native still (ISOTRAIL_GPU=software uses a software one), and the runtime
+// built into web/pkg (sh web/build.sh). --webgl forces every embed onto
+// WebGL2, drawn by SwiftShader, so the browser needs no GPU. ISOTRAIL_BROWSER
 // overrides the browser's path. Exits with 1 if any check fails
 
 import { spawn, spawnSync } from 'node:child_process';
@@ -14,7 +15,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { crc32, deflateSync } from 'node:zlib';
+import { crc32, deflateSync, inflateSync } from 'node:zlib';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const WEB = join(ROOT, 'web');
@@ -38,6 +39,21 @@ const made = spawnSync(
 );
 if (made.status !== 0) {
   console.error('could not make the test bundles with cargo');
+  process.exit(1);
+}
+// A still at the size a 640 x 360 element draws, which the live view starts from
+const FIT = { width: 640, height: 360, page: [255, 0, 255] };
+const posterMade = spawnSync(
+  'cargo',
+  [
+    'run', '--quiet', '-p', 'isotrail-cli', '--', 'render', join(data, 'hike.itb'),
+    '-o', join(data, 'still.png'), '--size', `${FIT.width}x${FIT.height}`, '--scale', '1',
+    '--overlay', 'none', '--background', 'transparent', '--quiet',
+  ],
+  { cwd: ROOT, stdio: 'inherit' },
+);
+if (posterMade.status !== 0) {
+  console.error('could not render the poster with cargo');
   process.exit(1);
 }
 const hike = await readFile(join(data, 'hike.itb'));
@@ -197,16 +213,17 @@ Object.assign(pages, {
   '/play.html': page(
     grid([
       embed('id="s" src="/data/hike.itb" aspect="wide" duration="1.5"'),
-      embed('id="l2" src="/data/hike.itb" aspect="wide" duration="1" loop="2"'),
+      embed('id="l2" src="/data/hike.itb" aspect="wide" duration="1" loop="2" rewind="0"'),
       embed('id="lf" src="/data/hike.itb" aspect="wide" duration="1" loop loop-back'),
-      embed('id="o0" src="/data/hike.itb" aspect="wide" orbit="0"'),
-      embed('id="od" src="/data/hike.itb" aspect="wide"'),
+      embed('id="o0" src="/data/hike.itb" aspect="wide" orbit="0" rewind="0"'),
+      embed('id="od" src="/data/hike.itb" aspect="wide" rewind="0"'),
       embed('id="tw" src="/data/hike.itb" aspect="wide"'),
       embed('id="pt" src="/data/paced.itb" aspect="wide" pace="time"'),
       embed('id="pd" src="/data/paced.itb" aspect="wide"'),
       embed('id="pu" src="/data/hike.itb" aspect="wide" pace="time"'),
-      embed('id="b" src="/data/hike.itb" aspect="wide" duration="0" orbit="400" loop="many" pace="walk" max-zoom="9" controls="play,map"'),
+      embed('id="b" src="/data/hike.itb" aspect="wide" duration="0" orbit="400" loop="many" pace="walk" max-zoom="9" controls="play,map" rewind="20"'),
       embed('id="i" src="/data/hike.itb" aspect="wide" duration="2" intro="1" hold="0.8"'),
+      embed('id="nj" src="/data/timed.itb" aspect="wide"'),
     ]),
     { head: '<style>.grid{grid-template-columns:repeat(3,288px)}</style>' },
   ),
@@ -269,6 +286,10 @@ Object.assign(pages, {
       '<isotrail-hike id="bm" src="/data/hike.itb" aspect="wide" backend="metal"></isotrail-hike>',
     ]) + `<div style="width:300px">${embed('id="tall" src="/data/hike.itb" aspect="1:1000000"')}</div>`,
     { head: '<style>.grid{grid-template-columns:repeat(3,288px)}</style>' },
+  ),
+  '/fit.html': page(
+    embed(`id="f" src="/data/hike.itb" poster="/data/still.png" aspect="wide" background="transparent" controls="none" credit="none" style="display:block;width:${FIT.width}px"`),
+    { head: `<style>body{background:rgb(${FIT.page.join(' ')})}</style>` },
   ),
   '/many.html': page(
     Array.from({ length: 20 }, (_, i) =>
@@ -571,8 +592,8 @@ try {
     cdp.evaluate(`__events.filter((e) => e.id === ${JSON.stringify(id)} && ${JSON.stringify(names)}.includes(e.name)).map((e) => e.name)`);
   const allReady = (ids) => cdp.waitFor(`${JSON.stringify(ids)}.every((id) => document.getElementById(id).dataset.state === 'ready')`);
   await go('/play.html');
-  const playIds = ['s', 'l2', 'lf', 'o0', 'od', 'tw', 'pt', 'pd', 'pu', 'b', 'i'];
-  check('eleven playback embeds become ready', await allReady(playIds));
+  const playIds = ['s', 'l2', 'lf', 'o0', 'od', 'tw', 'pt', 'pd', 'pu', 'b', 'i', 'nj'];
+  check('twelve playback embeds become ready', await allReady(playIds));
   await sleep(300);
   // Waits for events rather than a time: SwiftShader draws slowly, and a
   // slow frame moves the clip on by at most a tenth of a second
@@ -591,11 +612,19 @@ try {
     order.join(', '),
   );
   const progressS = await cdp.evaluate(`__events.filter((e) => e.id === 's' && e.name === 'isotrail-progress').map((e) => e.progress)`);
+  // A slow frame can step over the moment the route is empty
+  const lowest = progressS.indexOf(Math.min(...progressS));
   check(
-    'progress rises from 0 to 1',
-    progressS[0] === 0 && progressS.at(-1) === 1 && progressS.every((p, i) => i === 0 || p >= progressS[i - 1]),
+    'a play first undraws the route, then draws it from 0 to 1',
+    lowest > 0 &&
+      progressS[lowest] < 0.05 &&
+      progressS.slice(0, lowest + 1).every((p, i) => i === 0 || p <= progressS[i - 1]) &&
+      progressS.slice(lowest).every((p, i, rest) => i === 0 || p >= rest[i - 1]) &&
+      progressS.at(-1) === 1,
     progressS.slice(0, 3).concat(progressS.slice(-2)).join(', '),
   );
+  const firstL2 = await cdp.evaluate(`__events.find((e) => e.id === 'l2' && e.name === 'isotrail-progress')?.progress`);
+  check('rewind="0" starts the route from nothing at once', firstL2 === 0, String(firstL2));
   check('an ended play stops on the finished hike', !(await cdp.evaluate(`${el('s')}.playing`)) && (await cdp.evaluate(`${el('s')}.progress`)) === 1);
   check('loop="2" plays twice, then ends', JSON.stringify(await eventsOf('l2', ['isotrail-ended'])) === '["isotrail-ended"]' && !(await cdp.evaluate(`${el('l2')}.playing`)));
   const l2Progress = await cdp.evaluate(`__events.filter((e) => e.id === 'l2' && e.name === 'isotrail-progress').map((e) => e.progress)`);
@@ -627,12 +656,23 @@ try {
   const playWarnings = await cdp.evaluate('__warnings');
   check(
     'bad playback values warn on the console',
-    ['duration "0"', 'orbit "400"', 'loop "many"', 'pace "walk"', 'max-zoom "9"', 'controls "map"', 'ignored intro and hold', 'paces by distance'].every((part) =>
+    ['duration "0"', 'orbit "400"', 'loop "many"', 'pace "walk"', 'max-zoom "9"', 'controls "map"', 'rewind "20"', 'ignored intro and hold', 'paces by distance'].every((part) =>
       playWarnings.some((w) => w.includes(part)),
     ),
     playWarnings.join(' | '),
   );
   check('and the bad embed keeps every control', (await visible(`${el('b')}.shadowRoot.querySelector('[part=play]')`)) && !(await visible(`${el('b')}.shadowRoot.querySelector('[part=reset]')`)));
+  // Pressing play shows the same frame first: the route, the view and the
+  // light of the poster, on a hike whose sun moves
+  const beforePlay = await shot('nj');
+  await cdp.evaluate(`(() => { const e = ${el('nj')}; e.play(); e.pause(); })()`);
+  await sleep(300);
+  check('pressing play starts from the frame before it', (await shot('nj')) === beforePlay);
+  await cdp.evaluate(`${el('nj')}.play()`);
+  await cdp.waitFor(`${el('nj')}.progress < 0.9`);
+  await cdp.evaluate(`${el('nj')}.pause()`);
+  const undrawing = await cdp.evaluate(`${el('nj')}.progress`);
+  check('then the route undraws', undrawing > 0 && undrawing < 0.9, String(undrawing));
   check('no uncaught errors on the playback page', cdp.exceptions.length === 0, cdp.exceptions.join(' | '));
 
   // The script API: play() and progress before ready, ready, progress and reset()
@@ -763,6 +803,39 @@ try {
   );
   check('credit="hidden" and backend="metal" warn once each', warnedFor('credit "hidden"') === 1 && warnedFor('backend "metal"') === 1, sizeWarnings.join(' | '));
   check('no uncaught errors on the sizes page', cdp.exceptions.length === 0, cdp.exceptions.join(' | '));
+
+  // A still at the element's size is its first frame
+  await go('/fit.html');
+  const fitReady = await cdp.waitFor(`${el('f')}?.dataset.state === 'ready'`);
+  check('the embed for the still becomes ready', fitReady, await stateOf('f'));
+  await sleep(300);
+  const fitBox = await cdp.evaluate(`(() => { const r = ${el('f')}.shadowRoot.querySelector('canvas').getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, scale: 1 }; })()`);
+  const liveFrame = decodePng(Buffer.from(await cdp.screenshot(fitBox), 'base64'));
+  const posterFrame = decodePng(await readFile(join(data, 'still.png')));
+  // Where the canvas can't be transparent, its empty pixels are black
+  const empty = (rgba, i) => [FIT.page, [0, 0, 0]].some((colour) => colour.every((value, c) => rgba[i + c] === value));
+  const inLive = (rgba, i) => !empty(rgba, i);
+  const inPoster = (rgba, i) => rgba[i + 3] > 0;
+  const liveBox = boundingBox(liveFrame, inLive);
+  const posterBox = boundingBox(posterFrame, inPoster);
+  check(
+    'the poster and the first live frame are the same size',
+    liveFrame.width === posterFrame.width && liveFrame.height === posterFrame.height,
+    `${liveFrame.width} x ${liveFrame.height} live, ${posterFrame.width} x ${posterFrame.height} poster`,
+  );
+  check(
+    'the slab sits on the same pixels in the poster and the first live frame',
+    JSON.stringify(liveBox) === JSON.stringify(posterBox),
+    `live ${JSON.stringify(liveBox)}, poster ${JSON.stringify(posterBox)}`,
+  );
+  if (liveFrame.width === posterFrame.width && liveFrame.height === posterFrame.height) {
+    let differing = 0;
+    for (let i = 0; i < liveFrame.rgba.length; i += 4) {
+      const [live, poster] = [inLive(liveFrame.rgba, i), inPoster(posterFrame.rgba, i)];
+      if (live !== poster || (live && [0, 1, 2].some((c) => posterFrame.rgba[i + c] !== liveFrame.rgba[i + c]))) differing++;
+    }
+    console.log(`     ${((differing / (liveFrame.width * liveFrame.height)) * 100).toFixed(2)}% of the pixels differ between the poster and the first live frame`);
+  }
 
   // The snippet's poster, with and without the script
   await go('/noscript.html');
@@ -985,6 +1058,71 @@ async function connect(port) {
   };
   const screenshot = async (clip) => (await send('Page.captureScreenshot', { format: 'png', clip })).data;
   return { send, evaluate, waitFor, screenshot, exceptions, close: () => ws.close() };
+}
+
+// An 8-bit RGB or RGBA PNG without interlacing, as RGBA
+function decodePng(bytes) {
+  let at = 8;
+  let width = 0;
+  let height = 0;
+  let channels = 0;
+  const idat = [];
+  while (at < bytes.length) {
+    const length = bytes.readUInt32BE(at);
+    const type = bytes.toString('latin1', at + 4, at + 8);
+    const body = bytes.subarray(at + 8, at + 8 + length);
+    if (type === 'IHDR') {
+      width = body.readUInt32BE(0);
+      height = body.readUInt32BE(4);
+      const [depth, colour, , , interlace] = body.subarray(8, 13);
+      channels = { 2: 3, 6: 4 }[colour];
+      if (depth !== 8 || !channels || interlace) throw new Error(`can't decode a PNG of depth ${depth}, colour type ${colour}`);
+    } else if (type === 'IDAT') {
+      idat.push(body);
+    }
+    at += 12 + length;
+  }
+  const raw = inflateSync(Buffer.concat(idat));
+  const stride = width * channels;
+  const rows = Buffer.alloc(stride * height);
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (stride + 1)];
+    const line = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
+    for (let x = 0; x < stride; x++) {
+      const left = x >= channels ? rows[y * stride + x - channels] : 0;
+      const up = y > 0 ? rows[(y - 1) * stride + x] : 0;
+      const corner = x >= channels && y > 0 ? rows[(y - 1) * stride + x - channels] : 0;
+      const guess = [0, left, up, (left + up) >> 1, paeth(left, up, corner)][filter];
+      rows[y * stride + x] = (line[x] + guess) & 0xff;
+    }
+  }
+  const rgba = Buffer.alloc(width * height * 4);
+  for (let i = 0; i < width * height; i++) {
+    for (let c = 0; c < 3; c++) rgba[i * 4 + c] = rows[i * channels + c];
+    rgba[i * 4 + 3] = channels === 4 ? rows[i * channels + 3] : 255;
+  }
+  return { width, height, rgba };
+}
+
+function paeth(a, b, c) {
+  const p = a + b - c;
+  const [pa, pb, pc] = [Math.abs(p - a), Math.abs(p - b), Math.abs(p - c)];
+  return pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+}
+
+// The smallest box round the pixels `inside` accepts
+function boundingBox({ width, height, rgba }, inside) {
+  const box = { left: width, top: height, right: -1, bottom: -1 };
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (!inside(rgba, (y * width + x) * 4)) continue;
+      box.left = Math.min(box.left, x);
+      box.right = Math.max(box.right, x);
+      box.top = Math.min(box.top, y);
+      box.bottom = Math.max(box.bottom, y);
+    }
+  }
+  return box;
 }
 
 // A plain RGB image, for the poster

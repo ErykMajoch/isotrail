@@ -103,6 +103,12 @@ pub struct EmbedArgs {
 pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
     crate::check_input(&args.file)?;
     let mut report = Report::new(&args.report);
+    if args.frame.size.len() > 1 {
+        return Err(usage(format!(
+            "--size lists {} sizes, but embed makes one poster; give one size, or use render for several",
+            args.frame.size.len()
+        )));
+    }
     let shape = args.frame.shapes(&[Aspect::from(args.aspect)])[0];
     let framing = args.frame.framings(&[shape], args.scale)?[0];
     let dir = &args.output;

@@ -107,6 +107,12 @@ impl RenderArgs {
                 return Err(usage(format!("--aspect lists {} twice", aspect.name())));
             }
         }
+        let sizes = &self.frame.size;
+        for (i, (width, height)) in sizes.iter().enumerate() {
+            if sizes[..i].contains(&(*width, *height)) {
+                return Err(usage(format!("--size lists {width}x{height} twice")));
+            }
+        }
         Ok(self.frame.shapes(&aspects))
     }
 }
@@ -440,7 +446,7 @@ impl Source {
     }
 }
 
-/// One file per shape, named after its aspect when there are several, and
+/// One file per shape, named after its aspect or size when there are several, and
 /// the format their extension asks for
 fn output_paths(
     input: &Path,
@@ -481,7 +487,7 @@ fn output_paths(
         .iter()
         .map(|shape| {
             let mut name = stem.to_owned();
-            name.push(format!("-{}.", shape.label()));
+            name.push(format!("-{}.", shape.file_label()));
             name.push(&extension);
             output.with_file_name(name)
         })

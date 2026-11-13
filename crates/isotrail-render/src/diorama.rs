@@ -4,13 +4,12 @@ use glam::Vec3;
 use isotrail_bundle::SceneBundle;
 
 use crate::{
-    Framing, Gpu, GpuMesh, Look, OffscreenTarget, RenderError, RouteLine, Scene, SunState,
-    TerrainMesh, TerrainRenderer, Turntable, View, Viewpoints,
+    Aim, Framing, Gpu, GpuMesh, Look, MAX_ZOOM_RANGE, OffscreenTarget, RenderError, RouteLine,
+    Scene, SunState, TerrainMesh, TerrainRenderer, Turntable, View,
 };
 
-/// A bundle's terrain and route on the GPU, at one scale that fits the slab
-/// from every heading it will be seen from, so that it can turn without
-/// changing size
+/// A bundle's terrain and route on the GPU, on a turntable. Its starting
+/// view is the still with the same aim and framing
 pub struct Diorama {
     mesh: GpuMesh,
     route: RouteLine,
@@ -28,20 +27,19 @@ impl Diorama {
         bundle: &SceneBundle,
         mut mesh: TerrainMesh,
         framing: &Framing,
-        viewpoints: &Viewpoints,
+        aim: &Aim,
         sun: SunState,
     ) -> Result<Diorama, RenderError> {
-        let outline = outline(&mesh, bundle.grid.cell_size_m as f32);
-        let aim = &viewpoints.aim;
         let turntable = Turntable::new(
             aim.heading(bundle),
             aim.pitch_deg,
-            aim.zoom,
-            outline,
+            aim.fitted_zoom(),
+            outline(&mesh),
             framing,
-            viewpoints.yaw_offsets_deg,
         );
-        let metres_per_px = turntable.metres_per_px();
+        // Props and the route are sized for the starting view, as in the still
+        let start = aim.start_view(*MAX_ZOOM_RANGE.end());
+        let metres_per_px = turntable.camera(&start).metres_per_px;
         mesh.add_props(bundle, metres_per_px);
         // About one point per internal pixel
         let route = RouteLine::drape(bundle, &mesh.surface, metres_per_px / 2.0);
@@ -53,6 +51,13 @@ impl Diorama {
             star_seed: bundle.prop_seed as u32,
             time_s: 0.0,
         })
+    }
+
+    /// Where the view of a diorama made with `aim` starts, and returns to on
+    /// reset
+    pub fn start_view(&self, aim: &Aim) -> View {
+        self.turntable
+            .clamp(aim.start_view(self.turntable.max_zoom()))
     }
 
     pub fn turntable(&self) -> &Turntable {
@@ -96,12 +101,13 @@ impl Diorama {
     }
 }
 
-/// The highest and lowest point of the mesh over each cell, enough to frame
-/// it from any side to within a cell
-fn outline(mesh: &TerrainMesh, cell_m: f32) -> Vec<Vec3> {
-    let mut cells: HashMap<(i32, i32), (Vec3, Vec3)> = HashMap::new();
+/// The highest and lowest vertex at each place on the ground. The camera
+/// keeps up as up, so from any side these reach as far across the frame as
+/// the whole mesh does, and frame it exactly as a still does
+fn outline(mesh: &TerrainMesh) -> Vec<Vec3> {
+    let mut cells: HashMap<(u32, u32), (Vec3, Vec3)> = HashMap::new();
     for p in mesh.positions() {
-        let key = ((p.x / cell_m).floor() as i32, (p.y / cell_m).floor() as i32);
+        let key = (p.x.to_bits(), p.y.to_bits());
         cells
             .entry(key)
             .and_modify(|(low, high)| {

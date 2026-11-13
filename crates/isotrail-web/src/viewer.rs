@@ -4,22 +4,13 @@ use std::collections::HashMap;
 use glam::Vec2;
 use isotrail_bundle::{BundleError, SceneBundle};
 use isotrail_render::{
-    Diorama, Framing, Gpu, Insets, OffscreenTarget, PixelGrid, Present, SunState, TerrainMesh,
-    TerrainRenderer, View, Viewpoints, Walk, When, canvas_within, credit_line, mesh_within,
+    Diorama, Framing, Gpu, LIVE_SAFE_AREA, OffscreenTarget, PixelGrid, Present, SunState,
+    TerrainMesh, TerrainRenderer, View, Walk, When, canvas_within, credit_line, mesh_within,
 };
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
 use crate::options::Options;
-
-const SAFE_AREA: Insets = Insets {
-    top: 0.05,
-    bottom: 0.05,
-    left: 0.05,
-    right: 0.05,
-};
-/// The diorama fits the canvas from every heading this far apart
-const FIT_STEP_DEG: usize = 5;
 
 // wgpu wants a device-lost callback it could send between threads, which a
 // JavaScript function can't be, so the callback finds it by the viewer's id
@@ -278,9 +269,8 @@ impl Viewer {
         let framing = Framing {
             width: grid.width,
             height: grid.height,
-            safe: SAFE_AREA,
+            safe: LIVE_SAFE_AREA,
         };
-        let turn: Vec<f32> = (0..360).step_by(FIT_STEP_DEG).map(|d| d as f32).collect();
         self.stage = None;
         let mut diorama = Diorama::new(
             &self.gpu,
@@ -288,10 +278,7 @@ impl Viewer {
             &self.bundle,
             self.mesh.clone(),
             &framing,
-            &Viewpoints {
-                aim: self.options.fitted_aim(),
-                yaw_offsets_deg: &turn,
-            },
+            &self.options.aim,
             self.sun,
         )
         .map_err(|err| failure("gpu", err))?;
@@ -320,6 +307,16 @@ impl Viewer {
         self.share = Some(share);
         self.progress = self.walk.step(self.options.pace, share).progress;
         self.light();
+    }
+
+    /// Draws `share` of the route as `setProgress` does, but keeps the light,
+    /// as a play does while it undraws the route under the poster's light
+    #[wasm_bindgen(js_name = setRoute)]
+    pub fn set_route(&mut self, share: f32) {
+        if !share.is_finite() {
+            return;
+        }
+        self.progress = self.walk.step(self.options.pace, share).progress;
     }
 
     /// Moves the rain, snow and clouds on to `seconds`, any steadily rising

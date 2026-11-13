@@ -47,7 +47,7 @@ const LOOK = [
 ];
 // Attributes the renderer takes besides the look
 const VIEWER = [...LOOK, 'pace', 'max-zoom'];
-const CLIP = ['duration', 'intro', 'hold', 'loop-back', 'orbit', 'loop'];
+const CLIP = ['duration', 'intro', 'hold', 'loop-back', 'rewind', 'orbit', 'loop'];
 const CONTROLS = ['play', 'zoom', 'reset', 'scrubber'];
 const ROUTE_COLOUR = /^#[0-9a-f]{6}$/i;
 // The parts of a clip, as the animated exports split it
@@ -58,6 +58,9 @@ const DRAW_SHARE = 0.8;
 const HOLD_SHARE = 0.15;
 const REWIND_SHARE = 0.15;
 const MIN_DRAW_S = 0.5;
+// A play from the finished hike first undraws the route, so nothing jumps
+const REWIND_S = 1;
+const MAX_REWIND_S = 10;
 const ORBIT_DEG = 30;
 const MAX_PLAYS = 1000;
 const TURN_PER_PX = 0.4;
@@ -180,19 +183,20 @@ function ignored(name, value, reason) {
 }
 
 // Seconds such as 10 or 2.5s, within a range
-function seconds(element, name, min, fallback) {
+function seconds(element, name, min, fallback, max = MAX_DURATION_S) {
   const value = element.getAttribute(name);
   if (value === null || value.trim() === '') return fallback;
   const number = Number(value.trim().replace(/s$/, ''));
-  if (Number.isFinite(number) && number >= min && number <= MAX_DURATION_S) return number;
-  ignored(name, value, `must be between ${min} and ${MAX_DURATION_S} seconds`);
+  if (Number.isFinite(number) && number >= min && number <= max) return number;
+  ignored(name, value, `must be between ${min} and ${max} seconds`);
   return fallback;
 }
 
 // How a play runs, in seconds, split as in the animated exports: the intro
 // showing the scene, the route drawing itself, the hold on the finished
 // hike and, with loop-back, the rewind; the hold and the rewind only play
-// between loops
+// between loops. A play that starts on the finished hike first undraws it
+// and turns away over `lead` seconds, before the clip's time 0
 function readClip(element) {
   const duration = seconds(element, 'duration', 1, DURATION_S);
   let intro = seconds(element, 'intro', 0, null);
@@ -233,6 +237,8 @@ function readClip(element) {
     else if (Number.isInteger(count) && count >= 1 && count <= MAX_PLAYS) plays = count;
     else ignored('loop', loop, `expected forever, once or a number of plays from 1 to ${MAX_PLAYS}`);
   }
+  const lead = seconds(element, 'rewind', 0, REWIND_S, MAX_REWIND_S);
+  const leading = (time) => (time < 0 && lead > 0 ? ease((time + lead) / lead) : null);
   const settled = introS + drawS;
   const rewindStart = settled + holdS;
   const rewound = (time) =>
@@ -245,8 +251,11 @@ function readClip(element) {
     draw: drawS,
     settled,
     plays,
+    lead,
     // Share of the route drawn at a time in the clip
     share(time) {
+      const undrawn = leading(time);
+      if (undrawn !== null) return 1 - undrawn;
       const back = rewound(time);
       if (back !== null) return 1 - ease(back);
       return Math.min(Math.max((time - introS) / drawS, 0), 1);
@@ -254,6 +263,8 @@ function readClip(element) {
     // Degrees turned from the still's view, easing back to it as the route
     // finishes, and away again as it rewinds
     yaw(time) {
+      const undrawn = leading(time);
+      if (undrawn !== null) return -orbit * undrawn;
       const back = rewound(time);
       if (back !== null) return -orbit * ease(back);
       return time >= settled ? 0 : -orbit * (1 - ease(time / settled));
@@ -602,6 +613,8 @@ class IsotrailHike extends HTMLElement {
   #frame = 0;
   #drawn = false;
   #sized = false;
+  // The weather's clock starts at 0 on the first frame, where the poster has it
+  #clockStart = null;
   #restartedAt = null;
   #lookChanges = 0;
   #ready = null;
@@ -617,6 +630,7 @@ class IsotrailHike extends HTMLElement {
   // play() before the diorama is up
   #wantsPlay = false;
   #settling = false;
+  #holdLight = false;
   #last = null;
   #pointers = new Map();
 
@@ -738,19 +752,22 @@ class IsotrailHike extends HTMLElement {
       return;
     }
     this.#wantsPlay = false;
-    this.#moved = true;
     const clip = this.#clip;
     const restart = this.#progress >= 1 && !(this.#time > clip.settled && this.#playsLeft > 1);
+    const cut = restart && clip.lead === 0;
     if (restart) {
-      this.#time = 0;
+      this.#time = -clip.lead;
       this.#playsLeft = clip.plays;
       this.#settling = !reducedMotion();
+      // Under the poster's light the route undraws without moving the sun
+      this.#holdLight = clip.lead > 0 && !this.#moved;
     }
+    this.#moved = true;
     this.#playing = true;
     this.#last = null;
     this.#syncPlayButton();
-    this.#emit('isotrail-play', { progress: restart ? 0 : this.#progress });
-    if (restart) this.#setProgress(0);
+    this.#emit('isotrail-play', { progress: cut ? 0 : this.#progress });
+    if (cut) this.#setProgress(0);
     this.#schedule();
   }
 
@@ -790,6 +807,7 @@ class IsotrailHike extends HTMLElement {
   #seek(share) {
     this.#cancelSettle();
     this.#moved = true;
+    this.#holdLight = false;
     this.#time = this.#clip.intro + share * this.#clip.draw;
     this.#setProgress(share);
     this.#schedule();
@@ -1021,9 +1039,11 @@ class IsotrailHike extends HTMLElement {
     this.#canvas = null;
     this.#drawn = false;
     this.#sized = false;
+    this.#clockStart = null;
     this.#pointers.clear();
     this.#progress = 1;
     this.#moved = false;
+    this.#holdLight = false;
     this.#time = this.#clip.settled;
     this.#playsLeft = 1;
     this.#yaw = 0;
@@ -1115,9 +1135,11 @@ class IsotrailHike extends HTMLElement {
     if (!this.#viewer) return;
     if (this.#playing) this.#advance(now);
     const drawn = this.#guard((viewer) => {
-      if (this.#moved) viewer.setProgress(this.#progress);
+      if (this.#holdLight) viewer.setRoute(this.#progress);
+      else if (this.#moved) viewer.setProgress(this.#progress);
       viewer.setYaw(this.#yaw + (this.#settling ? this.#clip.yaw(this.#time) : 0));
-      viewer.setTime(reducedMotion() ? 0 : now / 1000);
+      this.#clockStart ??= now;
+      viewer.setTime(reducedMotion() ? 0 : (now - this.#clockStart) / 1000);
       viewer.draw();
       return true;
     });
@@ -1147,6 +1169,7 @@ class IsotrailHike extends HTMLElement {
       this.#time = Math.min(this.#time - clip.duration, clip.duration);
       this.#playsLeft -= 1;
     }
+    if (this.#time >= 0) this.#holdLight = false;
     const ended = this.#playsLeft <= 1 && this.#time >= clip.settled;
     if (ended) this.#time = clip.settled;
     this.#setProgress(clip.share(this.#time));

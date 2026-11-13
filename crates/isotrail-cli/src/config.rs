@@ -484,7 +484,7 @@ fn takes_from_render(name: &str, command: &Command, key: &str, value: &Value) ->
     match name {
         "style-lab" => STYLE_LAB_FROM_RENDER.contains(&key),
         // The embed has one shape
-        "embed" if key == "aspect" => match value {
+        "embed" if key == "aspect" || key == "size" => match value {
             Value::Array(items) => items.len() == 1,
             _ => true,
         },

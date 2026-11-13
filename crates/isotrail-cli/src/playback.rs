@@ -7,11 +7,12 @@ use isotrail_render::{
 };
 use serde_json::{Map, Value};
 
-use crate::animation::{PaceArg, parse_duration, parse_orbit, parse_part};
+use crate::animation::{PaceArg, parse_duration, parse_orbit, parse_part, parse_rewind};
 use crate::encoding::parse_plays;
 use crate::usage;
 
 const DEFAULT_DURATION_S: f32 = 10.0;
+const DEFAULT_REWIND_S: f32 = 1.0;
 /// The controls the embed shows, all of them by default
 const CONTROLS: [&str; 4] = ["play", "zoom", "reset", "scrubber"];
 /// The words the embed shows or reads out, which `--strings` may replace
@@ -54,6 +55,10 @@ pub struct PlaybackArgs {
     /// Between plays, undraw the route and turn back, for a loop without a jump
     #[arg(long)]
     loop_back: bool,
+
+    /// Seconds a press of play takes to undraw the finished route, from 0 to 10
+    #[arg(long, value_name = "SECONDS", default_value = "1s", value_parser = parse_rewind)]
+    rewind: f32,
 
     /// How far the camera turns while the route draws, in degrees from -360 to 360
     #[arg(
@@ -218,6 +223,9 @@ impl PlaybackArgs {
         if self.loop_back {
             attributes.push(("loop-back", String::new()));
         }
+        if self.rewind != DEFAULT_REWIND_S {
+            attributes.push(("rewind", self.rewind.to_string()));
+        }
         if self.orbit != DEFAULT_ORBIT_DEG {
             attributes.push(("orbit", self.orbit.to_string()));
         }
@@ -301,6 +309,8 @@ mod tests {
             "reset,zoom,scrubber,play",
             "--max-zoom",
             "3",
+            "--rewind",
+            "1s",
         ];
         assert!(attributes(&same).is_empty());
         let all = attributes(&[
@@ -311,6 +321,8 @@ mod tests {
             "--hold",
             "2.5s",
             "--loop-back",
+            "--rewind",
+            "0",
             "--orbit",
             "-90",
             "--pace",
@@ -332,6 +344,7 @@ mod tests {
                 ("intro", "1"),
                 ("hold", "2.5"),
                 ("loop-back", ""),
+                ("rewind", "0"),
                 ("orbit", "-90"),
                 ("pace", "time"),
                 ("loop", ""),

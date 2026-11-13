@@ -116,6 +116,12 @@ jobs:
         with:
           node-version: 24
 
+      # The check renders one still natively, through a software Vulkan driver
+      - name: Install software Vulkan driver
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
+
       # The runner has no GPU, so every embed is drawn on WebGL2 by SwiftShader
       - name: Browser check of the embed
+        env:
+          ISOTRAIL_GPU: software
         run: node web/test/check.mjs chrome --webgl
