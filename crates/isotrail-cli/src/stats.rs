@@ -4,11 +4,14 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use chrono::{DateTime, SecondsFormat, TimeDelta, TimeZone, Utc};
 use clap::Args;
-use isotrail_bundle::{HikeStats, SceneBundle, Weather};
+use isotrail_bundle::{HikeStats, ProfileSample, SceneBundle, Weather, format_version};
+use isotrail_geo::{PROFILE_SAMPLES, elevation_profile};
+use isotrail_render::parse_count;
 use isotrail_track::{Bounds, TrackStats, Units};
 use serde::Serialize;
 use tracing::warn;
 
+use crate::overlay::data_credit;
 use crate::servers::{CacheDirArg, WeatherUrlArg};
 use crate::{UnitsArg, weather};
 
@@ -20,6 +23,10 @@ pub struct StatsArgs {
     /// Print JSON for scripts, always in metres and seconds
     #[arg(long)]
     json: bool,
+
+    /// Add the elevation profile to the JSON as N points, from 2 to 256
+    #[arg(long, value_name = "N", value_parser = parse_profile, requires = "json")]
+    profile: Option<usize>,
 
     /// Units for the table
     #[arg(long, value_enum, value_name = "metric|imperial", default_value_t = UnitsArg::Metric,
@@ -41,11 +48,15 @@ pub struct StatsArgs {
     cache_dir: CacheDirArg,
 }
 
+fn parse_profile(value: &str) -> Result<usize, String> {
+    parse_count(value, &(2..=PROFILE_SAMPLES as u32)).map(|n| n as usize)
+}
+
 pub fn run(args: &StatsArgs) -> anyhow::Result<()> {
     let summary = Summary::read(&args.file, args.weather.then_some(args.offline), args)?;
     let mut out = io::stdout().lock();
     if args.json {
-        serde_json::to_writer_pretty(&mut out, &Report::new(&summary))?;
+        serde_json::to_writer_pretty(&mut out, &Report::new(&summary, args.profile))?;
         writeln!(out)?;
     } else {
         let units = args.units.into();
@@ -66,6 +77,16 @@ struct Summary {
     desc: Option<String>,
     stats: TrackStats,
     weather: Option<Weather>,
+    /// Evenly spaced along the route, as a bundle holds it
+    profile: Option<Vec<ProfileSample>>,
+    scene: Option<SceneFacts>,
+}
+
+/// What only a scene bundle can say about itself
+struct SceneFacts {
+    format: u16,
+    generator: String,
+    caption_credit: Option<String>,
 }
 
 impl Summary {
@@ -79,6 +100,11 @@ impl Summary {
             if weather.is_some() && bundle.weather.is_none() {
                 warn!("the bundle has no weather");
             }
+            let scene = SceneFacts {
+                format: format_version(&bytes).unwrap_or_default(),
+                generator: bundle.meta.provenance.generator.clone(),
+                caption_credit: data_credit(&bundle),
+            };
             let meta = bundle.meta;
             return Ok(Summary {
                 stats: track_stats(&meta.stats, meta.timezone.as_deref()),
@@ -86,6 +112,8 @@ impl Summary {
                 name: meta.name,
                 desc: meta.desc,
                 weather: bundle.weather.filter(|_| weather.is_some()),
+                profile: Some(bundle.profile),
+                scene: Some(scene),
             });
         }
         let track = crate::parse_track(&bytes, path)?;
@@ -96,12 +124,17 @@ impl Summary {
             }
             None => None,
         };
+        let stats = track.stats()?;
         Ok(Summary {
-            stats: track.stats()?,
+            profile: args
+                .profile
+                .and_then(|_| elevation_profile(&track, stats.distance_m)),
+            stats,
             title: crate::title(&track, path),
             name: track.name,
             desc: track.desc,
             weather,
+            scene: None,
         })
     }
 }
@@ -245,6 +278,49 @@ struct Report<'a> {
     bounds: BoundsReport,
     #[serde(skip_serializing_if = "Option::is_none")]
     weather: Option<weather::Report>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    profile: Option<Vec<ProfilePoint>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    format: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    generator: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    caption_credit: Option<&'a str>,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+struct ProfilePoint {
+    distance_m: f64,
+    ele_m: f64,
+}
+
+/// `n` points evenly spaced over the profile's distance, linear between
+/// its samples, in decimetres
+fn resample(profile: &[ProfileSample], n: usize) -> Vec<ProfilePoint> {
+    let decimetres = |m: f64| (m * 10.0).round() / 10.0;
+    let series: Vec<(f64, f64)> = profile
+        .iter()
+        .map(|s| (f64::from(s.distance_m), f64::from(s.ele_m)))
+        .collect();
+    let Some(&(total, _)) = series.last() else {
+        return Vec::new();
+    };
+    let last = (n - 1).max(1);
+    (0..n)
+        .map(|i| {
+            let at = (i * (series.len() - 1)) as f64 / last as f64;
+            let below = (at.floor() as usize).min(series.len().saturating_sub(2));
+            let ele = match (series.get(below), series.get(below + 1)) {
+                (Some(&(_, e0)), Some(&(_, e1))) => e0 + (e1 - e0) * (at - below as f64),
+                (Some(&(_, e)), None) | (None, Some(&(_, e))) => e,
+                (None, None) => 0.0,
+            };
+            ProfilePoint {
+                distance_m: decimetres(total * i as f64 / last as f64),
+                ele_m: decimetres(ele),
+            }
+        })
+        .collect()
 }
 
 #[derive(Serialize)]
@@ -256,7 +332,8 @@ struct BoundsReport {
 }
 
 impl<'a> Report<'a> {
-    fn new(summary: &'a Summary) -> Self {
+    /// With `profile` points, if asked for and known
+    fn new(summary: &'a Summary, profile: Option<usize>) -> Self {
         let stats = &summary.stats;
         let decimetres = |m: f64| (m * 10.0).round() / 10.0;
         let rfc3339 = |t: DateTime<_>| t.to_rfc3339_opts(SecondsFormat::Secs, true);
@@ -287,7 +364,17 @@ impl<'a> Report<'a> {
                 max_lat: stats.bounds.max_lat,
                 max_lon: stats.bounds.max_lon,
             },
-            weather: summary.weather.as_ref().map(weather::Report::new),
+            weather: summary.weather.as_ref().map(|weather| {
+                let span = stats.start.zip(stats.end);
+                weather::Report::new(weather, span.map(|(s, e)| (s.timestamp(), e.timestamp())))
+            }),
+            profile: profile.and_then(|n| Some(resample(summary.profile.as_ref()?, n))),
+            format: summary.scene.as_ref().map(|scene| scene.format),
+            generator: summary.scene.as_ref().map(|scene| &*scene.generator),
+            caption_credit: summary
+                .scene
+                .as_ref()
+                .and_then(|scene| scene.caption_credit.as_deref()),
         }
     }
 }
@@ -306,6 +393,51 @@ mod tests {
             duration(TimeDelta::seconds(3 * 86_400 + 5 * 3600 + 60)),
             "3d 05h 01m"
         );
+    }
+
+    /// 256 samples over 2550m, climbing 2m every 10m
+    fn profile() -> Vec<ProfileSample> {
+        (0..PROFILE_SAMPLES)
+            .map(|i| ProfileSample {
+                distance_m: i as f32 * 10.0,
+                ele_m: 300.0 + i as f32 * 2.0,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn profiles_are_evenly_resampled() {
+        let point = |distance_m, ele_m| ProfilePoint { distance_m, ele_m };
+        let samples = profile();
+        assert_eq!(
+            resample(&samples, 2),
+            [point(0.0, 300.0), point(2550.0, 810.0)]
+        );
+        let all = resample(&samples, 256);
+        assert_eq!(all.len(), 256);
+        for (point, sample) in all.iter().zip(&samples) {
+            assert_eq!(point.distance_m, f64::from(sample.distance_m));
+            assert_eq!(point.ele_m, f64::from(sample.ele_m));
+        }
+        let some = resample(&samples, 64);
+        assert_eq!(some.len(), 64);
+        assert_eq!(some[0], point(0.0, 300.0));
+        assert_eq!(some[63], point(2550.0, 810.0));
+        // 2550m / 63 = 40.476m, between samples 4 and 5
+        assert_eq!(some[1], point(40.5, 308.1));
+        assert!(some.windows(2).all(|w| w[0].distance_m < w[1].distance_m));
+    }
+
+    #[test]
+    fn profile_points_range_from_2_to_256() {
+        assert_eq!(parse_profile("2"), Ok(2));
+        assert_eq!(parse_profile("256"), Ok(256));
+        for wrong in ["1", "257", "0", "many"] {
+            assert_eq!(
+                parse_profile(wrong),
+                Err("expected a whole number from 2 to 256".into())
+            );
+        }
     }
 
     #[test]

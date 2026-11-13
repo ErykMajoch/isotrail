@@ -489,7 +489,7 @@ The release downloads have the runtime in a `web` folder next to the `isotrail` 
 ## stats
 
 ```text
-isotrail stats <hike.gpx | hike.itb> [--json] [--units metric|imperial] [--weather [--offline]] [--weather-url URL] [--cache-dir DIR]
+isotrail stats <hike.gpx | hike.itb> [--json [--profile N]] [--units metric|imperial] [--weather [--offline]] [--weather-url URL] [--cache-dir DIR]
 ```
 
 `stats` prints a hike's distance, climb and times:
@@ -511,6 +511,23 @@ The rest of the table gives the end time, the time zone, the bounding box, and t
 
 `--json` prints the same values as JSON for scripts. They are always in metres and seconds (`distance_m`, `gain_m`, `moving_s` and so on), whatever `--units` says.
 
+`--profile N` adds the elevation profile to the JSON, as N points evenly spaced along the route. N goes from 2 to 256. Each point has its `distance_m` from the start and its `ele_m`:
+
+```json
+"profile": [
+  { "distance_m": 0.0, "ele_m": 311.4 },
+  { "distance_m": 196.8, "ele_m": 342.0 }
+]
+```
+
+The points come from the bundle's profile, which is the one the image draws. A GPX file gives the same points from its own elevations. A GPX file without elevations gives no profile.
+
+A bundle adds three keys that a GPX file doesn't have:
+
+- `format`: the bundle's format number
+- `generator`: the isotrail that made it, such as `isotrail 1.5.0`
+- `caption_credit`: the data credit for the hike, as `render` prints it for a caption
+
 `--weather` adds the weather during the hike. It comes from the bundle, or from [Open-Meteo](https://open-meteo.com/) for a GPX file, and `--offline` only uses the cache. A summary comes first, then one row per hour in local time. Temperatures and wind are values at the hour. Rain and snow are what fell in the hour before it.
 
 ```text
@@ -529,6 +546,24 @@ The rest of the table gives the end time, the time zone, the bounding box, and t
 ```
 
 With `--json`, the hourly samples are under `weather.samples`. Their keys include `temperature_c`, `cloud_cover_low_pct`, `precipitation_mm`, `snowfall_cm`, `snow_depth_m`, `wind_speed_m_s` and `wind_direction_deg`, which is where the wind blows from. Each also has the WMO `weather_code` and its `condition`.
+
+The summary is under `weather.summary`, with the same values as the table:
+
+```json
+"summary": {
+  "condition": "light rain",
+  "weather_code": 61,
+  "min_temperature_c": 11.2,
+  "max_temperature_c": 14.0,
+  "rain_mm": 1.2,
+  "snowfall_cm": 0.0,
+  "max_snow_depth_m": 0.0,
+  "max_wind_speed_m_s": 8.9,
+  "max_wind_direction_deg": 247.0
+}
+```
+
+`max_wind_direction_deg` is where the strongest wind blew from.
 
 ## style-lab
 
@@ -631,11 +666,38 @@ None of this hides the area the hike was in. The slab, its map and the route sho
 }
 ```
 
-Each file has its `path` as written and its size in `bytes`. Images add `width` and `height`, and animations their number of `frames`. `stats --json` keeps its own format.
+Each file has its `path` as written and its size in `bytes`. Images add `width` and `height`, and animations their number of `frames`. `stats --json` keeps [its own format](#stats).
 
 `caption_credit` is the data credit to paste into a caption when the image doesn't show it, and `null` otherwise. The image leaves it out with `--no-attribution` or `--overlay none`, or when it doesn't fit.
 
 `-q` (`--quiet`) prints only errors. Warnings and the lines about files written are left out, and so is the caption credit, which `--json` still reports. A command's own output still prints: the `stats` table, `cache path` and the JSON object.
+
+When a command fails with `--json`, it prints an error object on standard output instead:
+
+```json
+{
+  "error": {
+    "reason": "offline",
+    "message": "the elevation data for this area isn't in the cache yet; run once without --offline to download it"
+  }
+}
+```
+
+The `message` is the same as the error line on standard error, which still prints. The [exit code](#exit-codes) stays the same as without `--json`. This works for `render`, `embed`, `bundle`, `style-lab` and `stats`.
+
+| Reason | What went wrong |
+| --- | --- |
+| `usage` | A bad option or config file |
+| `input` | The hike file is missing or isn't a hike |
+| `version` | A scene file from an older or newer isotrail |
+| `network` | A download failed |
+| `offline` | Data missing from the cache |
+| `ffmpeg` | ffmpeg is missing or failed |
+| `gpu` | The graphics card couldn't draw |
+| `interrupted` | Stopped with Ctrl+C |
+| `other` | Anything else |
+
+A `usage` error has exit code 2 and `interrupted` has 130. The others have 1. After a `version` error, make the scene file again from its GPX file, or update isotrail. An `other` error is often a file that couldn't be written.
 
 ## Writing files
 
@@ -667,6 +729,8 @@ Code 2 covers mistakes that isotrail finds before any work:
 - a trim that leaves none of the route
 
 Nothing has been downloaded or written then. Overlays that don't fit the frame at all are only found once the hike is prepared. A GPX file's data may then have been downloaded and cached, but nothing is written.
+
+With `--json`, a failure also prints [an error object](#output-for-scripts) that names its reason.
 
 ## Which command takes what
 

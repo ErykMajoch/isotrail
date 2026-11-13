@@ -13,6 +13,7 @@ use crate::usage;
 
 /// Exit code of a run stopped by Ctrl+C, as shells report it
 pub const INTERRUPTED_EXIT: u8 = 130;
+pub const STOPPED: &str = "Stopped; nothing was left half-written";
 
 /// Temporary files being written, removed if the run is stopped
 static PENDING: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
@@ -43,6 +44,7 @@ pub fn catch_interrupts() {
                 let _ = fs::remove_file(path);
             }
         }
+        crate::report::failed(crate::report::Reason::Interrupted, STOPPED);
         process::exit(i32::from(INTERRUPTED_EXIT));
     };
     if let Err(error) = ctrlc::set_handler(handler) {

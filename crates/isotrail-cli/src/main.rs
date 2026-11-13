@@ -29,11 +29,13 @@ use std::io::{self, IsTerminal, Read};
 use std::path::Path;
 use std::process::ExitCode;
 
-use anyhow::{Context, anyhow, bail};
+use anyhow::{Context, anyhow};
 use clap::error::ErrorKind;
 use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
 use isotrail_track::{GpxReader, Track, TrackReader, Units};
 use tracing::level_filters::LevelFilter;
+
+use crate::report::Reason;
 
 /// Help headings, in the order `--help` shows them
 const OUTPUT: &str = "Output";
@@ -149,23 +151,146 @@ fn usage(message: impl Into<String>) -> anyhow::Error {
     UsageError(message.into()).into()
 }
 
+/// A hike file that is missing, unreadable or not a hike
+#[derive(Debug)]
+struct BadInput(String);
+
+impl fmt::Display for BadInput {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for BadInput {}
+
 fn report(error: &anyhow::Error, command: Option<&str>) -> ExitCode {
-    if output::interrupted() || error.is::<output::Interrupted>() {
-        eprintln!("Stopped; nothing was left half-written");
+    let reason = reason(error);
+    if reason == Reason::Interrupted {
+        report::failed(reason, output::STOPPED);
+        eprintln!("{}", output::STOPPED);
         return ExitCode::from(output::INTERRUPTED_EXIT);
     }
-    if error.is::<UsageError>() {
+    if reason == Reason::Usage {
         let mut cli = Cli::command();
         cli.build();
         let message = format!("{error:#}");
+        report::failed(reason, &message);
         let clap_error = match command.and_then(|name| cli.find_subcommand_mut(name)) {
             Some(subcommand) => subcommand.error(ErrorKind::ValueValidation, message),
             None => cli.error(ErrorKind::ValueValidation, message),
         };
         clap_error.exit();
     }
-    let _ = clap::Error::raw(ErrorKind::Io, format!("{}\n", describe(error))).print();
+    let message = describe(error);
+    report::failed(reason, &message);
+    let _ = clap::Error::raw(ErrorKind::Io, format!("{message}\n")).print();
     ExitCode::FAILURE
+}
+
+/// Exits as clap does, after reporting a mistake in the arguments in JSON
+/// when asked to
+fn exit_with(error: clap::Error) -> ! {
+    if error.exit_code() != 0 {
+        report::failed(Reason::Usage, &clap_message(&error));
+    }
+    error.exit()
+}
+
+/// Clap's error without its `error:` label, usage line or advice, on one line
+fn clap_message(error: &clap::Error) -> String {
+    let text = error.render().to_string();
+    let text = text.trim_start().trim_start_matches("error:");
+    let first = text.split("\n\n").next().unwrap_or_default();
+    first
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Which kind of failure `error` is, judged by the first cause that says
+fn reason(error: &anyhow::Error) -> Reason {
+    if output::interrupted() {
+        return Reason::Interrupted;
+    }
+    error
+        .chain()
+        .find_map(cause_reason)
+        .unwrap_or(Reason::Other)
+}
+
+fn cause_reason(cause: &(dyn std::error::Error + 'static)) -> Option<Reason> {
+    use isotrail_bundle::BundleError;
+    use isotrail_export::ExportError;
+    use isotrail_geo::{DemError, FetchError, GeoError, OsmError};
+
+    if cause.is::<output::Interrupted>() {
+        return Some(Reason::Interrupted);
+    }
+    if cause.is::<UsageError>() {
+        return Some(Reason::Usage);
+    }
+    if cause.is::<bundle::NotCached>() {
+        return Some(Reason::Offline);
+    }
+    if cause.is::<BadInput>() || cause.is::<isotrail_track::TrackError>() {
+        return Some(Reason::Input);
+    }
+    if cause.is::<isotrail_render::RenderError>() {
+        return Some(Reason::Gpu);
+    }
+    if let Some(error) = cause.downcast_ref::<BundleError>() {
+        return Some(match error {
+            BundleError::OlderVersion { .. } | BundleError::NewerVersion { .. } => Reason::Version,
+            _ => Reason::Input,
+        });
+    }
+    if let Some(error) = cause.downcast_ref::<ExportError>() {
+        return export_reason(error);
+    }
+    if let Some(error) = cause.downcast_ref::<GeoError>() {
+        return Some(match error {
+            GeoError::EmptyTrack | GeoError::Track(_) => Reason::Input,
+            _ => Reason::Other,
+        });
+    }
+    if let Some(error) = cause.downcast_ref::<FetchError>() {
+        return match error {
+            FetchError::Offline { .. } => Some(Reason::Offline),
+            // Its cause says more
+            FetchError::Cache { .. } => None,
+            _ => Some(Reason::Network),
+        };
+    }
+    if let Some(error) = cause.downcast_ref::<OsmError>() {
+        return Some(if error.is_offline() {
+            Reason::Offline
+        } else {
+            Reason::Network
+        });
+    }
+    if let Some(error) = cause.downcast_ref::<DemError>() {
+        return match error {
+            DemError::Fetch { source, .. } => cause_reason(source),
+            _ => Some(Reason::Network),
+        };
+    }
+    None
+}
+
+/// Transparent variants hide their inner error from the chain
+fn export_reason(error: &isotrail_export::ExportError) -> Option<Reason> {
+    use isotrail_export::ExportError;
+    match error {
+        ExportError::FfmpegMissing
+        | ExportError::FfmpegAt { .. }
+        | ExportError::Ffmpeg { .. }
+        | ExportError::FfmpegStalled { .. } => Some(Reason::Ffmpeg),
+        ExportError::Render(_) => Some(Reason::Gpu),
+        ExportError::Write { source, .. } => export_reason(source),
+        _ => None,
+    }
 }
 
 /// The error and its causes on one line, with file errors in words and no
@@ -229,16 +354,21 @@ fn file_problem(path: &Path, error: &io::Error) -> String {
 /// a file, and not a picture or a video
 fn check_input(path: &Path) -> anyhow::Result<()> {
     let shown = path.display();
+    let bad = |message: String| Err(BadInput(message).into());
     match fs::metadata(path) {
         // Reading it says why
         Err(_) => return Ok(()),
         Ok(meta) if meta.is_dir() => {
-            bail!("{shown} is a folder; give a GPX file or a scene bundle (.itb)")
+            return bad(format!(
+                "{shown} is a folder; give a GPX file or a scene bundle (.itb)"
+            ));
         }
         Ok(_) => {}
     }
     if let Some(kind) = media(path) {
-        bail!("{shown} is {kind}, not a GPX file or a scene bundle (.itb)");
+        return bad(format!(
+            "{shown} is {kind}, not a GPX file or a scene bundle (.itb)"
+        ));
     }
     Ok(())
 }
@@ -298,8 +428,9 @@ fn read_track(path: &Path) -> anyhow::Result<Track> {
     parse_track(&bytes, path)
 }
 
+/// The hike file's bytes
 fn read_file(path: &Path) -> anyhow::Result<Vec<u8>> {
-    read_named(path, "")
+    read_named(path, "").map_err(|error| BadInput(error.to_string()).into())
 }
 
 /// The file's bytes, or one message naming `what` it is and the file, such
@@ -394,6 +525,79 @@ mod tests {
     #[test]
     fn cli_definition_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn failures_are_told_apart_through_their_causes() {
+        use isotrail_bundle::BundleError;
+        use isotrail_export::ExportError;
+        use isotrail_geo::{FetchError, GeoError};
+        use isotrail_render::RenderError;
+
+        let gpu = || RenderError::UnknownAdapterMode("abacus".into());
+        let cases: Vec<(anyhow::Error, Reason)> = vec![
+            (output::Interrupted.into(), Reason::Interrupted),
+            (usage("--scale 7 doesn't divide 1080"), Reason::Usage),
+            (
+                BadInput("hike.png is an image".into()).into(),
+                Reason::Input,
+            ),
+            (
+                anyhow::Error::new(GeoError::EmptyTrack).context("can't frame the hike"),
+                Reason::Input,
+            ),
+            (
+                anyhow::Error::new(BundleError::NewerVersion {
+                    found: 7,
+                    supported: 6,
+                })
+                .context("can't read hike.itb"),
+                Reason::Version,
+            ),
+            (ExportError::FfmpegMissing.into(), Reason::Ffmpeg),
+            (
+                ExportError::Write {
+                    path: "hike.mp4".into(),
+                    source: Box::new(ExportError::FfmpegStalled {
+                        seconds: 60,
+                        stderr: String::new(),
+                    }),
+                }
+                .into(),
+                Reason::Ffmpeg,
+            ),
+            (gpu().into(), Reason::Gpu),
+            (ExportError::Render(gpu()).into(), Reason::Gpu),
+            (
+                FetchError::status("https://example.org", 502).into(),
+                Reason::Network,
+            ),
+            (
+                FetchError::Offline {
+                    url: "https://example.org".into(),
+                }
+                .into(),
+                Reason::Offline,
+            ),
+            (
+                anyhow::Error::new(io::Error::other("disk full")).context("can't write hike.png"),
+                Reason::Other,
+            ),
+        ];
+        for (error, expected) in cases {
+            assert_eq!(reason(&error), expected, "{error:#}");
+        }
+    }
+
+    #[test]
+    fn clap_messages_lose_their_label_and_advice() {
+        let error = Cli::command()
+            .try_get_matches_from(["isotrail", "stats", "hike.gpx", "--profile", "3"])
+            .unwrap_err();
+        assert_eq!(
+            clap_message(&error),
+            "the following required arguments were not provided: --json"
+        );
     }
 
     const HEADINGS: [&str; 11] = [

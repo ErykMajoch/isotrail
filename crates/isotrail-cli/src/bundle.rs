@@ -417,11 +417,24 @@ fn not_cached(what: &str, url: &str, usual: &str, more: &str) -> anyhow::Error {
     } else {
         format!(" from {}", origin(url))
     };
-    anyhow::anyhow!(
+    NotCached(format!(
         "the {what}{from} for this area isn't in the cache yet; run once without --offline \
          to download it{more}"
-    )
+    ))
+    .into()
 }
+
+/// Data that --offline found missing from the cache
+#[derive(Debug)]
+pub struct NotCached(String);
+
+impl std::fmt::Display for NotCached {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for NotCached {}
 
 /// Whether a download failed only because it wasn't cached and --offline is on
 fn is_offline(error: &(dyn std::error::Error + 'static)) -> bool {

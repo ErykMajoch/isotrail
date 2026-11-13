@@ -1,3 +1,4 @@
+use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::fs;
 use std::io::{self, Write};
@@ -9,10 +10,75 @@ use serde::Serialize;
 
 static QUIET: AtomicBool = AtomicBool::new(false);
 static JSON: AtomicBool = AtomicBool::new(false);
+static JSON_ERRORS: AtomicBool = AtomicBool::new(false);
 static DOWNLOADING: AtomicBool = AtomicBool::new(false);
+
+/// Commands whose --json also reports a failure
+const JSON_COMMANDS: [&str; 5] = ["render", "embed", "bundle", "style-lab", "stats"];
 
 pub fn set_quiet(quiet: bool) {
     QUIET.store(quiet, Ordering::Relaxed);
+}
+
+/// Looks for --json among the arguments typed, before they are parsed, so
+/// that a mistake in them is reported in JSON too
+pub fn watch_for_json(args: &[OsString]) {
+    JSON_ERRORS.store(wants_json(args), Ordering::Relaxed);
+}
+
+fn wants_json(args: &[OsString]) -> bool {
+    let typed: Vec<&OsStr> = args
+        .iter()
+        .skip(1)
+        .map(OsString::as_os_str)
+        .take_while(|arg| *arg != "--")
+        .collect();
+    let command = typed
+        .iter()
+        .find(|arg| !arg.to_string_lossy().starts_with('-'));
+    command.is_some_and(|name| JSON_COMMANDS.iter().any(|c| name == c))
+        && typed.iter().any(|arg| *arg == "--json")
+}
+
+/// What kind of failure stopped a command, for scripts
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Reason {
+    Usage,
+    Input,
+    Version,
+    Network,
+    Offline,
+    Ffmpeg,
+    Gpu,
+    Interrupted,
+    Other,
+}
+
+#[derive(Serialize)]
+struct Failure<'a> {
+    error: FailureDetail<'a>,
+}
+
+#[derive(Serialize)]
+struct FailureDetail<'a> {
+    reason: Reason,
+    message: &'a str,
+}
+
+/// Prints the failure as one JSON object on stdout, when --json was given
+pub fn failed(reason: Reason, message: &str) {
+    if !JSON_ERRORS.load(Ordering::Relaxed) {
+        return;
+    }
+    let failure = Failure {
+        error: FailureDetail { reason, message },
+    };
+    let mut out = io::stdout().lock();
+    if serde_json::to_writer_pretty(&mut out, &failure).is_ok() {
+        let _ = writeln!(out);
+        let _ = out.flush();
+    }
 }
 
 /// Prints a line for people, unless the run is quiet or reports in JSON
@@ -177,6 +243,21 @@ mod tests {
         );
         assert!(download_line(true, false).starts_with("Downloading elevation and map data "));
         assert!(download_line(false, false).starts_with("Downloading elevation data "));
+    }
+
+    #[test]
+    fn json_is_spotted_before_the_arguments_are_parsed() {
+        let wants = |line: &str| {
+            let args: Vec<OsString> = line.split(' ').map(OsString::from).collect();
+            wants_json(&args)
+        };
+        assert!(wants("isotrail render hike.gpx --json"));
+        assert!(wants("isotrail -q stats --json --bogus hike.gpx"));
+        assert!(wants("isotrail style-lab --json"));
+        assert!(!wants("isotrail render hike.gpx"));
+        assert!(!wants("isotrail cache path --json"));
+        assert!(!wants("isotrail render -- --json"));
+        assert!(!wants("isotrail --json"));
     }
 
     #[test]

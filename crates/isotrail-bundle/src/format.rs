@@ -27,6 +27,14 @@ pub fn is_bundle(bytes: &[u8]) -> bool {
     bytes.starts_with(&MAGIC)
 }
 
+/// The format a bundle was written in, read or not
+pub fn format_version(bytes: &[u8]) -> Option<u16> {
+    match bytes.strip_prefix(&MAGIC)? {
+        [low, high, ..] => Some(u16::from_le_bytes([*low, *high])),
+        _ => None,
+    }
+}
+
 impl SceneBundle {
     /// Magic, little-endian format version, then the deflated postcard
     /// payload. Refuses a scene that [`SceneBundle::from_bytes`] would refuse
@@ -499,6 +507,15 @@ mod tests {
             assert!(message.contains("update isotrail"), "{message}");
             assert!(!message.contains("isotrail bundle"), "{message}");
         }
+    }
+
+    #[test]
+    fn the_format_is_read_from_the_header_alone() {
+        let bytes = bundle().to_bytes().unwrap();
+        assert_eq!(format_version(&bytes), Some(FORMAT_VERSION));
+        assert_eq!(format_version(b"ITB1\x07\x00garbled"), Some(7));
+        assert_eq!(format_version(b"ITB1\x05"), None);
+        assert_eq!(format_version(b"<gpx>"), None);
     }
 
     #[test]

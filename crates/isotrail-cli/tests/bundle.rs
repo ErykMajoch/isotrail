@@ -440,6 +440,8 @@ fn stats_of_a_bundle_match_the_gpx() {
         &["--units", "imperial"],
         &["--weather", "--offline"],
         &["--weather", "--offline", "--json"],
+        &["--json", "--profile", "64"],
+        &["--weather", "--offline", "--json", "--profile", "256"],
     ] {
         let stats = |file: &str| {
             let output = isotrail(&cache_dir, &[&["stats", file][..], extra].concat());
@@ -447,8 +449,162 @@ fn stats_of_a_bundle_match_the_gpx() {
             text(&output.stdout)
         };
         let expected = stats(&gpx());
-        assert_eq!(stats(itb.to_str().unwrap()), expected, "{extra:?}");
-        assert_eq!(stats(renamed.to_str().unwrap()), expected, "{extra:?}");
+        for bundle in [&itb, &renamed] {
+            let got = stats(bundle.to_str().unwrap());
+            if !extra.contains(&"--json") {
+                assert_eq!(got, expected, "{extra:?}");
+                continue;
+            }
+            // Only a bundle knows its format, maker and credit
+            let mut got: serde_json::Value = serde_json::from_str(&got).unwrap();
+            for key in SCENE_ONLY {
+                assert!(got[key] != serde_json::Value::Null, "{key} {extra:?}");
+                got.as_object_mut().unwrap().remove(key);
+            }
+            let expected: serde_json::Value = serde_json::from_str(&expected).unwrap();
+            assert_eq!(got, expected, "{extra:?}");
+        }
+    }
+}
+
+const SCENE_ONLY: [&str; 3] = ["format", "generator", "caption_credit"];
+
+/// The keys `stats --json` printed in 1.4.1, in order
+const STATS_KEYS: [&str; 18] = [
+    "name",
+    "desc",
+    "points",
+    "segments",
+    "distance_m",
+    "gain_m",
+    "loss_m",
+    "min_ele_m",
+    "max_ele_m",
+    "elapsed_s",
+    "moving_s",
+    "start",
+    "end",
+    "start_local",
+    "end_local",
+    "timezone",
+    "bounds",
+    "weather",
+];
+
+/// Top-level keys of a JSON object in the order printed
+fn keys_in_order(json: &str) -> Vec<String> {
+    let value: serde_json::Value = serde_json::from_str(json).unwrap();
+    let mut keys: Vec<(usize, String)> = value
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(|key| (json.find(&format!("\n  \"{key}\":")).unwrap(), key.clone()))
+        .collect();
+    keys.sort();
+    keys.into_iter().map(|(_, key)| key).collect()
+}
+
+#[test]
+fn stats_json_keeps_its_keys_and_adds_new_ones_at_the_end() {
+    let temp = tempfile::tempdir().unwrap();
+    let cache_dir = temp.path().join("cache");
+    warm(&cache_dir, true);
+    warm_weather(&cache_dir);
+    let itb = temp.path().join("hike.itb");
+    let itb = itb.to_str().unwrap();
+    let output = isotrail(
+        &cache_dir,
+        &["bundle", &gpx(), "-o", itb, "--detail", "32", "--offline"],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let stats = |extra: &[&str]| {
+        let output = isotrail(&cache_dir, &[&["stats"][..], extra, &["--json"]].concat());
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        text(&output.stdout)
+    };
+
+    let plain = keys_in_order(&stats(&[&gpx()]));
+    assert_eq!(plain, STATS_KEYS[..17]);
+    let all = keys_in_order(&stats(&[
+        &gpx(),
+        "--weather",
+        "--offline",
+        "--profile",
+        "2",
+    ]));
+    assert_eq!(all[..18], STATS_KEYS);
+    assert_eq!(all[18..], ["profile"]);
+    let all = keys_in_order(&stats(&[itb, "--weather", "--offline", "--profile", "2"]));
+    assert_eq!(all[..18], STATS_KEYS);
+    assert_eq!(
+        all[18..],
+        ["profile", "format", "generator", "caption_credit"]
+    );
+
+    let printed = stats(&[itb, "--weather", "--offline"]);
+    let json: serde_json::Value = serde_json::from_str(&printed).unwrap();
+    assert_eq!(json["format"], isotrail_bundle::FORMAT_VERSION);
+    let generator = json["generator"].as_str().unwrap();
+    assert_eq!(generator, format!("isotrail {}", env!("CARGO_PKG_VERSION")));
+    let credit = json["caption_credit"].as_str().unwrap();
+    assert!(credit.contains("OpenStreetMap"), "{credit}");
+    assert!(
+        credit.ends_with("Weather data by Open-Meteo.com"),
+        "{credit}"
+    );
+    let weather_at = |key: &str| printed.find(&format!("\n    \"{key}\":")).unwrap();
+    assert!(weather_at("dataset") < weather_at("attribution"));
+    assert!(weather_at("attribution") < weather_at("summary"));
+    assert!(weather_at("summary") < weather_at("samples"));
+    let summary = json["weather"]["summary"].as_object().unwrap();
+    for key in [
+        "condition",
+        "weather_code",
+        "min_temperature_c",
+        "max_temperature_c",
+        "rain_mm",
+        "snowfall_cm",
+        "max_snow_depth_m",
+        "max_wind_speed_m_s",
+        "max_wind_direction_deg",
+    ] {
+        assert!(summary.contains_key(key), "{key} in {summary:?}");
+    }
+    assert!(json["weather"]["summary"]["condition"].is_string());
+}
+
+#[test]
+fn stats_profile_takes_2_to_256_points() {
+    let temp = tempfile::tempdir().unwrap();
+    let total = 2801.9;
+    for n in [2usize, 64, 256] {
+        let output = isotrail(
+            temp.path(),
+            &["stats", &gpx(), "--json", "--profile", &n.to_string()],
+        );
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let profile = json["profile"].as_array().unwrap();
+        assert_eq!(profile.len(), n);
+        let distance = |i: usize| profile[i]["distance_m"].as_f64().unwrap();
+        assert_eq!(distance(0), 0.0);
+        assert_eq!(distance(n - 1), total);
+        assert_eq!(json["distance_m"], total);
+        for point in profile {
+            let point = point.as_object().unwrap();
+            assert_eq!(point.len(), 2, "{point:?}");
+            assert!(point["ele_m"].is_f64(), "{point:?}");
+        }
+        let step = total / (n - 1) as f64;
+        assert!((distance(1) - step).abs() <= 0.05, "{}", distance(1));
+    }
+    for wrong in [
+        &["--json", "--profile", "1"][..],
+        &["--json", "--profile", "257"],
+        &["--profile", "64"],
+    ] {
+        let output = isotrail(temp.path(), &[&["stats", &gpx()][..], wrong].concat());
+        assert_eq!(output.status.code(), Some(2), "{wrong:?}");
     }
 }
 

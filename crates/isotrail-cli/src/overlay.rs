@@ -354,17 +354,22 @@ impl OverlayArgs {
     /// The data credit to put in the caption, when the image leaves it out,
     /// as asked or because it didn't fit
     pub fn caption_credit(&self, bundle: &SceneBundle, dropped: bool) -> Option<String> {
-        let mut credits: Vec<&str> = bundle.meta.attribution.iter().map(String::as_str).collect();
-        if bundle.weather.is_some() {
-            credits.push(WEATHER_ATTRIBUTION);
-        }
         let left_off = dropped || !self.shows_attribution();
-        (left_off && !credits.is_empty()).then(|| credits.join(" · "))
+        data_credit(bundle).filter(|_| left_off)
     }
 
     fn shows_attribution(&self) -> bool {
         !self.no_attribution && !self.overlay.contains(&Part::None)
     }
+}
+
+/// The bundle's data credits for a caption, on one line
+pub fn data_credit(bundle: &SceneBundle) -> Option<String> {
+    let mut credits: Vec<&str> = bundle.meta.attribution.iter().map(String::as_str).collect();
+    if bundle.weather.is_some() {
+        credits.push(WEATHER_ATTRIBUTION);
+    }
+    (!credits.is_empty()).then(|| credits.join(" · "))
 }
 
 fn describe(step: &FitStep) -> String {

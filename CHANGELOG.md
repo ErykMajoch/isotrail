@@ -16,6 +16,8 @@ All notable changes to `isotrail` are documented here.
 - `--trim-start` and `--trim-end` cut the ends off the route, for a walk that starts at your door. The scene file and its statistics then describe only the part that is left.
 - The web embed's `credit="below"` attribute, and `embed --credit below`, put the data credit under the diorama as plain text in the page's colour. `embed --credit none` hides it.
 - The web embed's `--isotrail-hover`, `--isotrail-radius` and `--isotrail-credit-outline` properties set the buttons' hover colour, their corners and the credit's outline.
+- `stats --json` gives the weather summary, and the elevation profile with `--profile N`. For a scene file it also gives its format, the isotrail that made it and the data credit.
+- With `--json`, a command that fails prints an error object with a reason, such as `network` or `offline`. A script can tell what went wrong without reading the message.
 
 ### Changed
 

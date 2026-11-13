@@ -93,6 +93,7 @@ fn hike_hours(weather: &Weather, start: i64, end: i64) -> &[WeatherSample] {
 pub struct Summary {
     /// The most common condition over the hike's hours, the worse on a tie
     pub condition: &'static str,
+    pub weather_code: u8,
     pub min_c: f32,
     pub max_c: f32,
     pub rain_mm: f32,
@@ -128,6 +129,7 @@ impl Summary {
             .unwrap_or(first);
         Some(Summary {
             condition: weather_condition(code),
+            weather_code: code,
             min_c: hours
                 .iter()
                 .map(|s| s.temperature_c)
@@ -329,7 +331,40 @@ fn compass(deg: f32) -> &'static str {
 pub struct Report {
     dataset: &'static str,
     attribution: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    summary: Option<SummaryReport>,
     samples: Vec<SampleReport>,
+}
+
+#[derive(Serialize)]
+struct SummaryReport {
+    condition: &'static str,
+    weather_code: u8,
+    min_temperature_c: f32,
+    max_temperature_c: f32,
+    rain_mm: f32,
+    snowfall_cm: f32,
+    max_snow_depth_m: f32,
+    max_wind_speed_m_s: f32,
+    max_wind_direction_deg: f32,
+}
+
+impl SummaryReport {
+    fn new(summary: Summary) -> SummaryReport {
+        // Sums of hours would otherwise print as 0.70000005
+        let hundredths = |value: f32| (value * 100.0).round() / 100.0;
+        SummaryReport {
+            condition: summary.condition,
+            weather_code: summary.weather_code,
+            min_temperature_c: summary.min_c,
+            max_temperature_c: summary.max_c,
+            rain_mm: hundredths(summary.rain_mm),
+            snowfall_cm: hundredths(summary.snowfall_cm),
+            max_snow_depth_m: summary.snow_depth_m,
+            max_wind_speed_m_s: summary.wind.0,
+            max_wind_direction_deg: summary.wind.1,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -351,7 +386,8 @@ struct SampleReport {
 }
 
 impl Report {
-    pub fn new(weather: &Weather) -> Report {
+    /// With the summary over the hike's `span` of Unix seconds, if known
+    pub fn new(weather: &Weather, span: Option<(i64, i64)>) -> Report {
         let rfc3339 = |time| {
             DateTime::<Utc>::from_timestamp(time, 0)
                 .map(|t| t.to_rfc3339_opts(SecondsFormat::Secs, true))
@@ -359,6 +395,9 @@ impl Report {
         Report {
             dataset: dataset_name(weather.dataset),
             attribution: WEATHER_ATTRIBUTION,
+            summary: span
+                .and_then(|(start, end)| Summary::new(weather, start, end))
+                .map(SummaryReport::new),
             samples: weather
                 .samples
                 .iter()
@@ -405,6 +444,41 @@ mod tests {
             summary.line(WeatherDataset::Archive),
             "snow showers, 2 – 8°C, 0.6mm rain, 0.3cm snow (Open-Meteo archive)"
         );
+    }
+
+    #[test]
+    fn the_json_summary_holds_the_tables_values() {
+        // As a script reads the printed text
+        let printed = |report: Report| -> serde_json::Value {
+            serde_json::from_str(&serde_json::to_string(&report).unwrap()).unwrap()
+        };
+        let weather = synthetic_weather(FIRST, 8);
+        let span = (FIRST + 600, FIRST + 3 * 3600 + 600);
+        let text = serde_json::to_string(&Report::new(&weather, Some(span))).unwrap();
+        let at = |key: &str| text.find(&format!("\"{key}\":")).unwrap();
+        assert!(at("dataset") < at("attribution"));
+        assert!(at("attribution") < at("summary") && at("summary") < at("samples"));
+        let report = printed(Report::new(&weather, Some(span)));
+        assert_eq!(
+            report["summary"],
+            serde_json::json!({
+                "condition": "snow showers",
+                "weather_code": 85,
+                "min_temperature_c": 2.0,
+                "max_temperature_c": 8.0,
+                "rain_mm": 0.6,
+                "snowfall_cm": 0.35,
+                "max_snow_depth_m": 0.05,
+                "max_wind_speed_m_s": 8.0,
+                "max_wind_direction_deg": 250.0,
+            })
+        );
+
+        let report = printed(Report::new(&weather, None));
+        assert!(report.get("summary").is_none());
+        let outside = Some((FIRST + 86_400, FIRST + 90_000));
+        let report = printed(Report::new(&weather, outside));
+        assert!(report.get("summary").is_none());
     }
 
     #[test]

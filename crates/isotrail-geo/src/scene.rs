@@ -241,11 +241,7 @@ fn route(track: &Track, along: &[f64], grid: &Grid, heightmap: &Heightmap) -> Ro
 /// Evenly spaced by distance, from GPS elevation, or from the ground under
 /// the route when the track has none
 fn profile(track: &Track, along: &[f64], route: &Route, total_m: f64) -> Vec<ProfileSample> {
-    let mut series: Vec<(f64, f64)> = track
-        .points()
-        .zip(along)
-        .filter_map(|(p, &d)| Some((d, p.ele?)))
-        .collect();
+    let mut series = gps_elevations(track, along);
     if series.is_empty() {
         series = route
             .points
@@ -253,12 +249,31 @@ fn profile(track: &Track, along: &[f64], route: &Route, total_m: f64) -> Vec<Pro
             .map(|p| (f64::from(p.distance_m), f64::from(p.draped_m)))
             .collect();
     }
+    samples(&series, total_m)
+}
+
+/// The profile a bundle of `track` would hold, without the ground to fall
+/// back on: `None` when the track has no elevations
+pub fn elevation_profile(track: &Track, total_m: f64) -> Option<Vec<ProfileSample>> {
+    let series = gps_elevations(track, &distances(track));
+    (!series.is_empty()).then(|| samples(&series, total_m))
+}
+
+fn gps_elevations(track: &Track, along: &[f64]) -> Vec<(f64, f64)> {
+    track
+        .points()
+        .zip(along)
+        .filter_map(|(p, &d)| Some((d, p.ele?)))
+        .collect()
+}
+
+fn samples(series: &[(f64, f64)], total_m: f64) -> Vec<ProfileSample> {
     (0..PROFILE_SAMPLES)
         .map(|i| {
             let distance_m = total_m * i as f64 / (PROFILE_SAMPLES - 1) as f64;
             ProfileSample {
                 distance_m: distance_m as f32,
-                ele_m: interpolate(&series, distance_m) as f32,
+                ele_m: interpolate(series, distance_m) as f32,
             }
         })
         .collect()
@@ -459,6 +474,10 @@ mod tests {
             assert!((ele(PROFILE_SAMPLES - 1) - end).abs() < 0.5);
             assert!((ele(PROFILE_SAMPLES / 2) - (start + end) / 2.0).abs() < 5.0);
             assert!(profile.windows(2).all(|w| w[0].ele_m <= w[1].ele_m));
+
+            let track = track(&pieces, with_ele);
+            let alone = elevation_profile(&track, bundle.meta.stats.distance_m);
+            assert_eq!(alone.as_ref(), with_ele.then_some(profile));
         }
     }
 

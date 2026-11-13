@@ -56,6 +56,7 @@ const NOT_SETTINGS: [&str; 8] = [
 /// the error and what was typed
 pub fn parse() -> Result<(Cli, Typed), (anyhow::Error, Typed)> {
     let args: Vec<OsString> = env::args_os().collect();
+    crate::report::watch_for_json(&args);
     let matches = matches(&args);
     let typed = Typed::new(&matches);
     match with_config(args, &matches, user_config()) {
@@ -67,7 +68,7 @@ pub fn parse() -> Result<(Cli, Typed), (anyhow::Error, Typed)> {
 fn matches(args: &[OsString]) -> ArgMatches {
     Cli::command()
         .try_get_matches_from(args)
-        .unwrap_or_else(|e| explain(e, args).exit())
+        .unwrap_or_else(|e| crate::exit_with(explain(e, args)))
 }
 
 /// Clap's error, with advice for two common slips: a hike file given without
@@ -175,7 +176,7 @@ fn longer_option(typed: &str, command: String) -> Option<String> {
 }
 
 fn parse_args(args: Vec<OsString>) -> Cli {
-    Cli::from_arg_matches(&matches(&args)).unwrap_or_else(|e| e.exit())
+    Cli::from_arg_matches(&matches(&args)).unwrap_or_else(|e| crate::exit_with(e))
 }
 
 /// The command and the arguments typed for it on the command line, as
