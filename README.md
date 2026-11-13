@@ -141,7 +141,7 @@ The [usage guide](docs/usage.md) goes over a lot more options to play around wit
 | Your website | [`isotrail embed`](docs/usage.md#embed), or `--aspect wide` as a PNG |
 | Chats, forums, READMEs | `.gif` |
 
-A scene file for the web is ~100KB and every hike on a site shares one runtime of ~1.2MB. A 10-second GIF story is several MB, often over 10MB. `--gif-scale 1` makes it about a quarter of that, and a shorter `--duration` or a lower `--fps` helps too.
+A scene file for the web is ~100KB and every hike on a site shares one runtime of ~1.1MB. A 10-second GIF story is several MB, often over 10MB. `--gif-scale 1` makes it about a quarter of that, and a shorter `--duration` or a lower `--fps` helps too.
 
 ## Commands
 

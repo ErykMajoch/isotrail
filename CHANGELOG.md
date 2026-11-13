@@ -26,6 +26,7 @@ All notable changes to `isotrail` are documented here.
 - A poster without overlays, with 5% margins and at the element's size, is now the embed's first frame. Nothing jumps when the live view takes over.
 - Pressing play no longer jumps to an empty route and a turned camera. The route undraws first, while the camera turns to where the play starts.
 - Animations draw the diorama as large as fits at each angle. Their last frame is the still at its full size.
+- The web runtime is 16% smaller, about 1.1MB gzipped. It draws the same pictures, and starts a little faster on WebGL2.
 
 ### Fixed
 

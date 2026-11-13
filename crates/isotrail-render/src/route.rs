@@ -183,7 +183,7 @@ pub(crate) struct RoutePass {
 impl RoutePass {
     pub fn new(gpu: &Gpu) -> RoutePass {
         let device = gpu.device();
-        let module = device.create_shader_module(wgpu::include_wgsl!("route.wgsl"));
+        let module = device.create_shader_module(shader!("route"));
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("route"),
             entries: &[wgpu::BindGroupLayoutEntry {

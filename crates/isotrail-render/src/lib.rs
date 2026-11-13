@@ -3,6 +3,32 @@
 //!
 //! This crate is wasm-safe: no filesystem, network or thread access
 
+#[cfg(not(target_arch = "wasm32"))]
+macro_rules! shader {
+    ($name:literal) => {
+        wgpu::include_wgsl!(concat!($name, ".wgsl"))
+    };
+}
+
+// build.rs parsed the WGSL into naga IR with the same naga version
+#[cfg(target_arch = "wasm32")]
+macro_rules! shader {
+    ($name:literal) => {
+        wgpu::ShaderModuleDescriptor {
+            label: Some(concat!($name, ".wgsl")),
+            source: wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(
+                postcard::from_bytes(include_bytes!(concat!(
+                    env!("OUT_DIR"),
+                    "/",
+                    $name,
+                    ".naga"
+                )))
+                .expect("build.rs writes IR this naga reads"),
+            )),
+        }
+    };
+}
+
 mod camera;
 mod diorama;
 mod error;

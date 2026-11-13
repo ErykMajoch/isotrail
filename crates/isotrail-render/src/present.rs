@@ -55,7 +55,7 @@ pub struct Present {
 impl Present {
     pub fn new(gpu: &Gpu, format: wgpu::TextureFormat) -> Present {
         let device = gpu.device();
-        let module = device.create_shader_module(wgpu::include_wgsl!("present.wgsl"));
+        let module = device.create_shader_module(shader!("present"));
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("present"),
             entries: &[

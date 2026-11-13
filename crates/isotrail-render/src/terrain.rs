@@ -101,7 +101,7 @@ pub struct TerrainRenderer {
 impl TerrainRenderer {
     pub fn new(gpu: &Gpu) -> TerrainRenderer {
         let device = gpu.device();
-        let module = device.create_shader_module(wgpu::include_wgsl!("terrain.wgsl"));
+        let module = device.create_shader_module(shader!("terrain"));
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("terrain"),
             entries: &[

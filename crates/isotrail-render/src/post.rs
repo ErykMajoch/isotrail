@@ -558,7 +558,7 @@ pub(crate) struct PostPass {
 impl PostPass {
     pub fn new(gpu: &Gpu) -> PostPass {
         let device = gpu.device();
-        let module = device.create_shader_module(wgpu::include_wgsl!("post.wgsl"));
+        let module = device.create_shader_module(shader!("post"));
         let texture = |binding, sample_type| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::FRAGMENT,

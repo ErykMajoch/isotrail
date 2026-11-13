@@ -86,7 +86,7 @@ jobs:
 
       - name: Build
         run: |
-          wasm-pack build crates/isotrail-web --target web --release --out-dir ../../web/pkg
+          wasm-pack build crates/isotrail-web --target web --profile web --out-dir ../../web/pkg
           mkdir -p runtime/pkg
           cp web/isotrail-embed.js runtime/
           cp web/pkg/isotrail_web.js web/pkg/isotrail_web_bg.wasm runtime/pkg/

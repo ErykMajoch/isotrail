@@ -5,7 +5,7 @@ use crate::{Gpu, OffscreenTarget, TARGET_FORMAT};
 /// that the GPU path works end to end
 pub fn draw_test_scene(gpu: &Gpu, target: &OffscreenTarget) {
     let device = gpu.device();
-    let module = device.create_shader_module(wgpu::include_wgsl!("test_scene.wgsl"));
+    let module = device.create_shader_module(shader!("test_scene"));
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("test scene"),
         layout: None,

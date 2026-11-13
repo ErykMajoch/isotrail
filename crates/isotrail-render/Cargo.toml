@@ -18,14 +18,21 @@ thiserror.workspace = true
 toml.workspace = true
 tracing.workspace = true
 unicode-normalization.workspace = true
-wgpu.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 pollster.workspace = true
+wgpu = { workspace = true, features = ["default"] }
 
+# Shaders arrive as naga IR made by build.rs, so the browser needs no WGSL parser
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+naga = { workspace = true, features = ["deserialize"] }
+postcard.workspace = true
 web-sys = { workspace = true, features = ["HtmlCanvasElement"] }
-wgpu = { workspace = true, features = ["webgl"] }
+wgpu = { workspace = true, features = ["std", "webgpu", "webgl", "naga-ir"] }
+
+[build-dependencies]
+naga = { workspace = true, features = ["wgsl-in", "serialize"] }
+postcard.workspace = true
 
 [dev-dependencies]
 isotrail-testkit = { path = "../isotrail-testkit" }

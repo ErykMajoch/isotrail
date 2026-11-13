@@ -435,7 +435,7 @@ You can restyle the line with `::part(credit)`. **If you hide it, with `credit="
 
 ### Many hikes on one page
 
-The poster shows at once. The renderer, about 1.2MB gzipped, only downloads when the element comes near the screen, and only once for the whole page. With `load="press"`, it waits for a press instead. Use that for a hike at the top of a page that most visitors scroll past.
+The poster shows at once. The renderer, about 1.1MB gzipped, only downloads when the element comes near the screen, and only once for the whole page. With `load="press"`, it waits for a press instead. Use that for a hike at the top of a page that most visitors scroll past.
 
 Browsers give a page about 16 WebGL contexts. So when an element has been well off screen for a few seconds, it frees its renderer and shows its poster. It starts again when it comes back, from the starting view.
 
@@ -470,8 +470,8 @@ sh web/build.sh
 This runs three steps, which you can also run by hand:
 
 ```bash
-# The renderer, optimised with wasm-opt -Oz, into web/pkg/
-wasm-pack build crates/isotrail-web --target web --release --out-dir ../../web/pkg
+# The renderer, built for size and optimised with wasm-opt -Oz, into web/pkg/
+wasm-pack build crates/isotrail-web --target web --profile web --out-dir ../../web/pkg
 
 # A synthetic hike for the demo, into web/demo/hike.itb
 cargo run -p isotrail-testkit --example demo_bundle -- web/demo/hike.itb

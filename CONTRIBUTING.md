@@ -68,7 +68,7 @@ Release archives carry `THIRD-PARTY-NOTICES.md`, with the licence of every crate
 cargo about generate --locked --fail about.hbs -o out/THIRD-PARTY-NOTICES.md
 ```
 
-CI fails if `isotrail-embed.js`, `pkg/isotrail_web.js` and `pkg/isotrail_web_bg.wasm` come to more than 3MB gzipped. After `sh web/build.sh`, a local build of `isotrail embed` finds the runtime with `--runtime-dir web`.
+CI fails if `isotrail-embed.js`, `pkg/isotrail_web.js` and `pkg/isotrail_web_bg.wasm` come to more than 1.1MB gzipped. After `sh web/build.sh`, a local build of `isotrail embed` finds the runtime with `--runtime-dir web`.
 
 isotrail asks the GPU for WebGL2's limits on every platform, so the native tests also catch anything the browser fallback couldn't draw.
 

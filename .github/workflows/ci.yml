@@ -91,9 +91,9 @@ jobs:
           tool: wasm-pack@0.15.0
 
       - name: Build
-        run: wasm-pack build crates/isotrail-web --target web --release --out-dir ../../web/pkg
+        run: wasm-pack build crates/isotrail-web --target web --profile web --out-dir ../../web/pkg
 
-      - name: Check the gzipped size is at most 3MB
+      - name: Check the gzipped size is at most 1.1MB
         run: |
           total=0
           {
@@ -107,8 +107,8 @@ jobs:
             echo "| **Total** | **$total** |"
           } >> "$GITHUB_STEP_SUMMARY"
           echo "The web runtime is $total bytes gzipped"
-          if [ "$total" -gt 3000000 ]; then
-            echo "::error::the web runtime is $total bytes gzipped, over the 3MB budget"
+          if [ "$total" -gt 1100000 ]; then
+            echo "::error::the web runtime is $total bytes gzipped, over the 1.1MB budget"
             exit 1
           fi
 
