@@ -30,6 +30,7 @@ mod stats;
 mod sun;
 mod times;
 mod timezone;
+mod trim;
 
 pub use chrono_tz::Tz;
 pub use error::TrackError;

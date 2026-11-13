@@ -21,7 +21,7 @@ const RENDER: &str = "render";
 const COMMANDS: [&str; 4] = [RENDER, "embed", "bundle", "style-lab"];
 /// What style-lab takes from [render]: the data settings and the theme, not
 /// the looks it lays side by side
-const STYLE_LAB_FROM_RENDER: [&str; 14] = [
+const STYLE_LAB_FROM_RENDER: [&str; 16] = [
     "detail",
     "offline",
     "overpass-url",
@@ -34,6 +34,8 @@ const STYLE_LAB_FROM_RENDER: [&str; 14] = [
     "no-weather",
     "season",
     "times",
+    "trim-start",
+    "trim-end",
     "exaggeration",
     "theme",
 ];

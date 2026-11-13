@@ -397,13 +397,13 @@ isotrail-hike > img { display: block; width: 100% }
 
 Anyone can download the `.itb` file a page uses and read it. Besides the terrain, it holds the GPX file's name and description, the hike's statistics and its route. Each point of the route keeps its time, to the second.
 
-Make the bundle with `--times coarse` to round the times, or with `--times none` to leave them out. `--no-desc` leaves out the description:
+Make the bundle with `--times coarse` to round the times, or with `--times none` to leave them out. `--no-desc` leaves out the description. `--trim-start` and `--trim-end` cut the ends off the route, for a walk that starts at your door:
 
 ```sh
-isotrail embed hike.gpx -o site/hikes --times coarse --no-desc
+isotrail embed hike.gpx -o site/hikes --times coarse --no-desc --trim-start 500m --trim-end 500m
 ```
 
-These options need the GPX file, because a bundle keeps the times it was made with. The [usage guide](../docs/usage.md#what-a-scene-file-contains) lists everything a bundle holds and what each option changes.
+The times and trim options need the GPX file, because a bundle keeps the times and route it was made with. The [usage guide](../docs/usage.md#what-a-scene-file-contains) lists everything a bundle holds and what each option changes.
 
 ### Data credit
 

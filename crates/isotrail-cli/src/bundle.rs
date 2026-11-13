@@ -146,6 +146,14 @@ pub struct DataArgs {
     #[arg(long, value_enum, value_name = "recorded|coarse|none",
           default_value_t = TimesArg::Recorded, hide_possible_values = true)]
     pub times: TimesArg,
+
+    /// Cut this far off the start of the route, such as 300m or 1.5km
+    #[arg(long, value_name = "DIST", value_parser = parse_distance)]
+    trim_start: Option<f64>,
+
+    /// Cut this far off the end of the route, such as 300m or 1.5km
+    #[arg(long, value_name = "DIST", value_parser = parse_distance)]
+    trim_end: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -188,7 +196,55 @@ fn parse_padding(value: &str) -> Result<Padding, String> {
     })
 }
 
+/// Metres, as a number alone or with `m`, or kilometres with `km`
+fn parse_distance(value: &str) -> Result<f64, String> {
+    let text = value.trim().to_ascii_lowercase();
+    let (number, metres) = match text.strip_suffix("km") {
+        Some(number) => (number, 1000.0),
+        None => (text.strip_suffix('m').unwrap_or(&text), 1.0),
+    };
+    number
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|number| number.is_finite() && *number >= 0.0)
+        .map(|number| number * metres)
+        .ok_or_else(|| "expected a distance such as 300, 300m or 1.5km".to_owned())
+}
+
+/// A distance as the docs write it: 450m, 2.84km
+fn distance_text(metres: f64) -> String {
+    if metres < 999.5 {
+        format!("{metres:.0}m")
+    } else {
+        let km = format!("{:.2}", metres / 1000.0);
+        format!("{}km", km.trim_end_matches('0').trim_end_matches('.'))
+    }
+}
+
 impl DataArgs {
+    /// The track with --trim-start and --trim-end cut off, or a usage error
+    /// naming its length when nothing is left
+    fn trim<'a>(&self, track: &'a Track) -> anyhow::Result<Cow<'a, Track>> {
+        let (start, end) = (self.trim_start.unwrap_or(0.0), self.trim_end.unwrap_or(0.0));
+        if start == 0.0 && end == 0.0 {
+            return Ok(Cow::Borrowed(track));
+        }
+        track.trimmed(start, end).map(Cow::Owned).ok_or_else(|| {
+            let cuts: Vec<String> = [(start, "start"), (end, "end")]
+                .into_iter()
+                .filter(|&(metres, _)| metres > 0.0)
+                .map(|(metres, from)| format!("{} from the {from}", distance_text(metres)))
+                .collect();
+            let length = track.stats().map_or(0.0, |stats| stats.distance_m);
+            usage(format!(
+                "trimming {} leaves none of the route, which is {} long; trim less",
+                cuts.join(" and "),
+                distance_text(length)
+            ))
+        })
+    }
+
     /// The padding as `--padding` takes it, such as 15,500
     fn padding_text(&self) -> String {
         let padding = self.padding.unwrap_or(Padding {
@@ -239,9 +295,19 @@ impl DataArgs {
         }
     }
 
-    /// A scene bundle keeps the times it was made with, so a privacy option
-    /// for them is refused rather than dropped
+    /// A scene bundle keeps the times and route it was made with, so a
+    /// privacy option for them is refused rather than dropped
     pub fn refuse_with_bundle(&self) -> anyhow::Result<()> {
+        for (trim, flag) in [
+            (self.trim_start, "--trim-start"),
+            (self.trim_end, "--trim-end"),
+        ] {
+            if trim.is_some_and(|metres| metres > 0.0) {
+                return Err(usage(format!(
+                    "{flag} can't cut the route a scene bundle holds; give the GPX file instead"
+                )));
+            }
+        }
         let times = match self.times {
             TimesArg::Recorded => return Ok(()),
             TimesArg::Coarse => "coarse",
@@ -372,6 +438,8 @@ fn is_offline(error: &(dyn std::error::Error + 'static)) -> bool {
 /// Fetches terrain, map data and weather around the track read from `file`
 /// and packs them into a bundle
 pub fn prepare(track: &Track, file: &Path, data: &DataArgs) -> anyhow::Result<Prepared> {
+    let trimmed = data.trim(track)?;
+    let track = trimmed.as_ref();
     let footprint = Footprint::from_track_with(track, &data.footprint()).map_err(|error| {
         if matches!(error, GeoError::NoGround) {
             usage(format!(
@@ -760,6 +828,26 @@ mod tests {
         assert_eq!(big[4 * 12], 4);
         assert_eq!(big[big.len() - 1], 6);
         assert_eq!(enlarge(&[9, 8, 7], 1, 3), [9, 8, 7].repeat(16));
+    }
+
+    #[test]
+    fn trims_are_metres_or_kilometres() {
+        for (text, metres) in [
+            ("300", 300.0),
+            ("300m", 300.0),
+            (" 1.5km", 1500.0),
+            ("2 KM", 2000.0),
+            ("0", 0.0),
+        ] {
+            assert_eq!(parse_distance(text), Ok(metres), "{text}");
+        }
+        for bad in ["", "-5", "km", "1.5mi", "nan", "inf", "300 metres"] {
+            assert!(parse_distance(bad).is_err(), "{bad}");
+        }
+        assert_eq!(distance_text(450.2), "450m");
+        assert_eq!(distance_text(999.7), "1km");
+        assert_eq!(distance_text(2836.0), "2.84km");
+        assert_eq!(distance_text(1500.0), "1.5km");
     }
 
     #[test]

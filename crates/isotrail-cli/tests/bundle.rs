@@ -1139,6 +1139,208 @@ fn time_options_need_a_gpx_file_and_its_date() {
     assert_eq!(written, 0);
 }
 
+/// The fixture's walk as read, and as cut 300m from each end
+fn walk_and_trimmed(gpx: &Path) -> (isotrail_track::Track, isotrail_track::Track) {
+    let mut file = File::open(gpx).unwrap();
+    let track = GpxReader.read(&mut file).unwrap().clean().unwrap();
+    let trimmed = track.trimmed(300.0, 300.0).unwrap();
+    (track, trimmed)
+}
+
+#[test]
+fn a_trimmed_bundle_describes_the_kept_part_only() {
+    let temp = tempfile::tempdir().unwrap();
+    let cache_dir = temp.path().join("cache");
+    warm(&cache_dir, false);
+    let gpx = walk(temp.path());
+    let (track, kept) = walk_and_trimmed(&gpx);
+    assert!(kept.point_count() < track.point_count() - 1);
+    let itb = bundle_walk(
+        &cache_dir,
+        &gpx,
+        temp.path(),
+        "trimmed.itb",
+        &[
+            "--trim-start",
+            "300m",
+            "--trim-end",
+            "0.3km",
+            "--no-map-data",
+            "--no-weather",
+        ],
+    );
+    let bundle = read_bundle(&itb);
+    let stats = kept.stats().unwrap();
+    let meta = &bundle.meta.stats;
+    assert_eq!(meta.points as usize, kept.point_count());
+    assert!((meta.distance_m - stats.distance_m).abs() < 1e-6);
+    assert_eq!(meta.gain_m, stats.gain_m);
+    assert_eq!(meta.loss_m, stats.loss_m);
+    assert_eq!(meta.max_ele_m, stats.max_ele_m);
+    assert_eq!(meta.start, stats.start.map(|t| t.timestamp()));
+    assert_eq!(meta.end, stats.end.map(|t| t.timestamp()));
+
+    // The route and the stats' bounds hold no cut point
+    let first = kept.points().next().unwrap();
+    let last = kept.points().last().unwrap();
+    let route = &bundle.route.points;
+    assert_eq!(route[0].time, first.time.map(|t| t.timestamp()));
+    assert_eq!(
+        route[route.len() - 1].time,
+        last.time.map(|t| t.timestamp())
+    );
+    assert_eq!(route[0].distance_m, 0.0);
+    let bounds = &meta.bounds;
+    for point in track.points() {
+        let inside = (bounds.min_lat..=bounds.max_lat).contains(&point.lat)
+            && (bounds.min_lon..=bounds.max_lon).contains(&point.lon);
+        let is_kept = kept.points().any(|kept| kept == point);
+        assert_eq!(inside, is_kept, "{point:?}");
+    }
+
+    // The profile runs over the kept part, from the cut point's elevation
+    let profile = &bundle.profile;
+    assert_eq!(profile[0].distance_m, 0.0);
+    let end = f64::from(profile[profile.len() - 1].distance_m);
+    assert!((end - stats.distance_m).abs() < 0.01);
+    assert!((f64::from(profile[0].ele_m) - first.ele.unwrap()).abs() < 0.01);
+
+    let json = json(&isotrail(
+        &cache_dir,
+        &["stats", itb.to_str().unwrap(), "--json"],
+    ));
+    let rfc3339 = |time: Option<chrono::DateTime<chrono::Utc>>| {
+        time.unwrap()
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    };
+    assert_eq!(json["start"], rfc3339(first.time));
+    assert_eq!(json["end"], rfc3339(last.time));
+}
+
+#[test]
+fn a_trim_rounds_the_kept_times_with_coarse() {
+    let temp = tempfile::tempdir().unwrap();
+    let cache_dir = temp.path().join("cache");
+    warm(&cache_dir, false);
+    let gpx = walk(temp.path());
+    let (track, kept) = walk_and_trimmed(&gpx);
+    let itb = bundle_walk(
+        &cache_dir,
+        &gpx,
+        temp.path(),
+        "coarse.itb",
+        &[
+            "--trim-start",
+            "300",
+            "--trim-end",
+            "300",
+            "--times",
+            "coarse",
+            "--no-map-data",
+            "--no-weather",
+        ],
+    );
+    let bundle = read_bundle(&itb);
+    let coarse = kept.coarse_times().stats().unwrap();
+    let meta = &bundle.meta.stats;
+    assert_eq!(meta.start, coarse.start.map(|t| t.timestamp()));
+    assert_eq!(meta.start.unwrap() % 1800, 0);
+    assert_eq!(
+        meta.moving_s,
+        kept.stats().unwrap().moving.map(|d| d.num_seconds())
+    );
+    let recorded: Vec<i64> = track
+        .points()
+        .filter_map(|point| point.time)
+        .map(|time| time.timestamp())
+        .collect();
+    for point in &bundle.route.points {
+        assert!(!recorded.contains(&point.time.unwrap()));
+    }
+}
+
+#[test]
+fn a_trim_needs_a_gpx_file_and_some_route_left() {
+    let temp = tempfile::tempdir().unwrap();
+    let cache_dir = temp.path().join("cache");
+    let itb = temp.path().join("hike.itb");
+    std::fs::write(&itb, isotrail_testkit::hike_bundle().to_bytes().unwrap()).unwrap();
+    let png = temp.path().join("hike.png");
+    let gpx = walk(temp.path());
+    let config = temp.path().join("trim.toml");
+    std::fs::write(&config, "[render]\ntrim-end = \"1km\"\n").unwrap();
+    for (args, message) in [
+        (
+            vec![
+                "render",
+                itb.to_str().unwrap(),
+                "-o",
+                png.to_str().unwrap(),
+                "--trim-start",
+                "100",
+            ],
+            "--trim-start can't cut the route a scene bundle holds; give the GPX file instead",
+        ),
+        (
+            vec![
+                "render",
+                itb.to_str().unwrap(),
+                "-o",
+                png.to_str().unwrap(),
+                "--config",
+                config.to_str().unwrap(),
+            ],
+            "--trim-end can't cut the route",
+        ),
+        (
+            vec![
+                "render",
+                gpx.to_str().unwrap(),
+                "-o",
+                png.to_str().unwrap(),
+                "--trim-start",
+                "2km",
+                "--trim-end",
+                "1km",
+            ],
+            "trimming 2km from the start and 1km from the end leaves none of the route, \
+             which is 2.8km long; trim less",
+        ),
+        (
+            vec![
+                "bundle",
+                gpx.to_str().unwrap(),
+                "-o",
+                itb.to_str().unwrap(),
+                "--trim-end",
+                "5km",
+            ],
+            "trimming 5km from the end leaves none",
+        ),
+        (
+            vec![
+                "render",
+                gpx.to_str().unwrap(),
+                "-o",
+                png.to_str().unwrap(),
+                "--trim-start",
+                "300 yards",
+            ],
+            "expected a distance such as 300, 300m or 1.5km",
+        ),
+    ] {
+        let output = isotrail(&cache_dir, &args);
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        assert!(
+            text(&output.stderr).contains(message),
+            "{}",
+            text(&output.stderr)
+        );
+    }
+    assert!(!png.exists());
+    assert!(!cache_dir.exists());
+}
+
 #[test]
 fn embed_leaves_out_a_bundles_description() {
     let temp = tempfile::tempdir().unwrap();

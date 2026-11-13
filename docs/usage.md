@@ -295,12 +295,16 @@ The GIF options do nothing for an MP4, and the MP4 options nothing for a GIF. is
 | `--no-weather` | off | Leave out the weather, with the snow and ice it brings |
 | `--season SEASON` | `auto` | The [season](#season) to show: the hike's own, or `spring`, `summer`, `autumn` or `winter` |
 | `--times recorded\|coarse\|none` | `recorded` | Times to keep in the scene: as recorded, rounded, or none |
+| `--trim-start DIST` | `0` | Cut this far off the start of the route |
+| `--trim-end DIST` | `0` | Cut this far off the end of the route |
 
 The server and cache options can also be set in the environment: `ISOTRAIL_OVERPASS_URL`, `ISOTRAIL_TERRAIN_URL`, `ISOTRAIL_WEATHER_URL` and `ISOTRAIL_CACHE_DIR`. `--config FILE` reads settings from a TOML file (see [Configuration](configuration.md)).
 
 `--padding` adds `P` percent of the route's length and width on each side, and at least `M` metres. `--weather-url` points at a server you host yourself, for example. isotrail adds `/v1/archive` and `/v1/forecast` to it. `--no-weather` also leaves out the weather a bundle holds. `--times` rounds the times or leaves them out, as [What a scene file contains](#what-a-scene-file-contains) explains.
 
-A scene bundle already holds its terrain and map data. `--detail`, `--offline`, `--overpass-url`, `--terrain-url`, `--weather-url`, `--cache-dir`, `--no-map-data`, `--padding` and `--footprint` do nothing with one, and isotrail warns when you type them for a bundle. `--times coarse` and `--times none` stop with an error instead, because a bundle keeps the times it was made with.
+`--trim-start` and `--trim-end` cut the ends off the route, for a walk that starts at your door. They take metres, such as `300`, or a distance with its unit, such as `300m` or `1.5km`. The same section explains what they change.
+
+A scene bundle already holds its terrain and map data. `--detail`, `--offline`, `--overpass-url`, `--terrain-url`, `--weather-url`, `--cache-dir`, `--no-map-data`, `--padding` and `--footprint` do nothing with one, and isotrail warns when you type them for a bundle. `--times coarse`, `--times none`, `--trim-start` and `--trim-end` stop with an error instead, because a bundle keeps the times and route it was made with.
 
 With an Open-Meteo API key in `ISOTRAIL_OPEN_METEO_KEY`, the weather comes from Open-Meteo's servers for customers, or from `--weather-url` with the key added. The key is only read from the environment, never from a flag or a config file. It is left out of the cache, the bundle and every message.
 
@@ -586,15 +590,16 @@ A scene bundle is often shared, for example beside an embed on a website. Anyone
 - the sun and moon every 5 minutes from the start to the end
 - the weather hour by hour, and the season
 
-`isotrail stats hike.itb --json` prints most of it. Three options keep a bundle from saying more than you want:
+`isotrail stats hike.itb --json` prints most of it. These options keep a bundle from saying more than you want:
 
 | Option | What it leaves out |
 | --- | --- |
 | `--times coarse` | The minute the hike started, and where you were when |
 | `--times none` | The date and every time |
 | `--no-desc` | The GPX file's description |
+| `--trim-start`, `--trim-end` | Where the walk started and ended |
 
-`--times` works with a GPX file on `render`, `embed`, `bundle` and `style-lab`. `--no-desc` works on `bundle` and `embed`, and also on a bundle given to `embed`.
+`--times` and the trim options work with a GPX file on `render`, `embed`, `bundle` and `style-lab`. `--no-desc` works on `bundle` and `embed`, and also on a bundle given to `embed`.
 
 `--times coarse` rounds the start to the nearest half hour in local time. It rounds the length to the nearest quarter hour. Each point is then timed as if you walked at an even pace. The sun, moon and weather follow these times. The date, the season and the moving and elapsed times stay as recorded. Animations of a hike over several days no longer pause for the nights.
 
@@ -602,9 +607,13 @@ A scene bundle is often shared, for example beside an embed on a website. Anyone
 
 The terrain and trees come out the same whichever `--times` you choose. Only the light can differ.
 
-A bundle keeps the times it was made with. Given a bundle, `--times coarse` and `--times none` stop with an error rather than write a file that still holds the recorded times. Make the bundle again from the GPX file.
+`--trim-start 300m` cuts the route at the first recorded point at least 300m from the start. `--trim-end` does the same from the end. Nothing about the cut part is kept. The distance, climb, times, profile, weather and season all describe the part that is left. A trim that leaves none of the route stops with an error that gives the route's length. `isotrail stats hike.gpx` still describes the whole walk.
 
-None of this hides where the hike was. The slab, its map and the route show that.
+By default, the slab reaches at least 500m past the route. It may still show the ground you cut, without the route on it. A smaller `--padding` shows less ground round the route.
+
+A bundle keeps the times and route it was made with. Given a bundle, `--times coarse`, `--times none` and the trim options stop with an error. A file that still holds what they leave out is never written. Make the bundle again from the GPX file.
+
+None of this hides the area the hike was in. The slab, its map and the route show that.
 
 ## Output for scripts
 
@@ -652,6 +661,7 @@ Code 2 covers mistakes that isotrail finds before any work:
 - a palette, theme, config or strings file that is missing, can't be read or holds a mistake
 - options that can't go together
 - an output that would overwrite an input
+- a trim that leaves none of the route
 
 Nothing has been downloaded or written then. Overlays that don't fit the frame at all are only found once the hike is prepared. A GPX file's data may then have been downloaded and cached, but nothing is written.
 

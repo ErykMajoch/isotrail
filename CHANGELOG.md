@@ -13,6 +13,7 @@ All notable changes to `isotrail` are documented here.
 - While the web embed loads, its progress line shows how much has arrived. It shows only when the server sends the true sizes.
 - `--times coarse` rounds the times saved in a scene file, so it no longer tells when you were where. `--times none` leaves them out.
 - `--no-desc` leaves the GPX file's description out of a scene file. The usage guide lists what a scene file holds.
+- `--trim-start` and `--trim-end` cut the ends off the route, for a walk that starts at your door. The scene file and its statistics then describe only the part that is left.
 
 ### Changed
 
