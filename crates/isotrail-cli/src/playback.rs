@@ -88,6 +88,11 @@ pub struct PlaybackArgs {
           hide_possible_values = true)]
     load: LoadArg,
 
+    /// Where the data credit goes: over the diorama's bottom edge, below it, or nowhere
+    #[arg(long, value_enum, value_name = "overlay|below|none", default_value_t = CreditArg::Overlay,
+          hide_possible_values = true)]
+    credit: CreditArg,
+
     /// Controls to show: play, zoom, reset and scrubber, or none [default: all]
     #[arg(long, value_name = "LIST|none", value_parser = parse_controls)]
     controls: Option<Controls>,
@@ -109,6 +114,13 @@ pub struct PlaybackArgs {
 enum LoadArg {
     Visible,
     Press,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum CreditArg {
+    Overlay,
+    Below,
+    None,
 }
 
 /// The controls to show
@@ -164,6 +176,10 @@ fn parse_lang(value: &str) -> Result<String, String> {
 impl PlaybackArgs {
     pub fn strings_file(&self) -> Option<&Path> {
         self.strings.as_deref()
+    }
+
+    pub fn credit_below(&self) -> bool {
+        self.credit == CreditArg::Below
     }
 
     /// Checks that the parts leave time to draw the route, and reads the
@@ -255,6 +271,11 @@ impl PlaybackArgs {
         if self.load == LoadArg::Press {
             attributes.push(("load", "press".to_owned()));
         }
+        match self.credit {
+            CreditArg::Overlay => {}
+            CreditArg::Below => attributes.push(("credit", "below".to_owned())),
+            CreditArg::None => attributes.push(("credit", "none".to_owned())),
+        }
         if let Some(Controls(shown)) = &self.controls
             && shown.len() < CONTROLS.len()
         {
@@ -328,6 +349,8 @@ mod tests {
             "1s",
             "--load",
             "visible",
+            "--credit",
+            "overlay",
         ];
         assert!(attributes(&same).is_empty());
         let all = attributes(&[
@@ -349,6 +372,8 @@ mod tests {
             "--autoplay",
             "--load",
             "press",
+            "--credit",
+            "below",
             "--controls",
             "scrubber,play",
             "--max-zoom",
@@ -369,6 +394,7 @@ mod tests {
                 ("loop", ""),
                 ("autoplay", ""),
                 ("load", "press"),
+                ("credit", "below"),
                 ("controls", "play,scrubber"),
                 ("max-zoom", "6"),
                 ("lang", "pl"),
@@ -378,6 +404,10 @@ mod tests {
         assert_eq!(
             attributes(&["--controls", "none"]),
             owned(&[("controls", "none")])
+        );
+        assert_eq!(
+            attributes(&["--credit", "none"]),
+            owned(&[("credit", "none")])
         );
     }
 
@@ -392,6 +422,7 @@ mod tests {
         assert!(refused(&["--duration", "0"]));
         assert!(refused(&["--loop", "0"]));
         assert!(refused(&["--load", "later"]));
+        assert!(refused(&["--credit", "hidden"]));
         for lang in ["pl", "en-GB", "pt-BR", "zh-Hant-TW"] {
             assert_eq!(parse_lang(lang), Ok(lang.to_owned()));
         }

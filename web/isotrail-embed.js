@@ -394,15 +394,22 @@ const CSS = `
   :host {
     --isotrail-panel: rgb(32 46 55 / 0.78);
     --isotrail-edge: #819796;
-    --isotrail-text: #ebede9;
     --isotrail-accent: #a4dddb;
     --isotrail-track: rgb(32 46 55 / 0.45);
     --isotrail-background: transparent;
+    --isotrail-hover: rgb(52 70 80 / 0.9);
+    --isotrail-credit-outline: #10141f;
+    /* Unset unless the page sets them on the element itself: the credit below
+       the frame takes the page's colour, and the buttons keep their cut corners */
+    --isotrail-text: initial;
+    --isotrail-radius: initial;
     display: block;
     overflow: hidden;
     contain: content;
   }
   :host([hidden]) { display: none; }
+  /* The frame keeps its shape and the element grows by the line */
+  :host([credit="below"]) { aspect-ratio: auto !important; }
   .frame {
     position: relative;
     aspect-ratio: var(--isotrail-aspect, 16 / 9);
@@ -426,6 +433,7 @@ const CSS = `
     touch-action: pan-y;
     cursor: grab;
     outline: none;
+    image-rendering: pixelated;
   }
   canvas.dragging { cursor: grabbing; }
   /* An outline paints over the canvas's own pixels, an inset shadow doesn't */
@@ -442,7 +450,7 @@ const CSS = `
     box-sizing: border-box;
     text-align: center;
     font: 14px/1.4 system-ui, sans-serif;
-    color: var(--isotrail-text);
+    color: var(--isotrail-text, #ebede9);
     background: var(--isotrail-panel);
   }
   :host([data-state="fallback"]) .frame:not(.has-poster) .message { display: grid; }
@@ -452,7 +460,7 @@ const CSS = `
     position: absolute;
     inset: 0;
     pointer-events: none;
-    color: var(--isotrail-text);
+    color: var(--isotrail-text, #ebede9);
   }
   /* Finger-sized targets around buttons that look the same */
   @media (pointer: coarse) {
@@ -477,6 +485,8 @@ const CSS = `
     display: flex;
     gap: var(--gap);
   }
+  /* At the right edge, also when the credit isn't between the groups */
+  .buttons:last-child { margin-left: auto; }
   button {
     position: relative;
     display: grid;
@@ -498,10 +508,12 @@ const CSS = `
     inset: calc((var(--hit) - 28px) / 2);
     background: var(--isotrail-panel);
     box-shadow: inset 0 2px 0 -1px var(--isotrail-edge);
-    clip-path: polygon(2px 0, calc(100% - 2px) 0, 100% 2px, 100% calc(100% - 2px),
-      calc(100% - 2px) 100%, 2px 100%, 0 calc(100% - 2px), 0 2px);
+    /* Without --isotrail-radius, --round is invalid and the cut corners apply */
+    --round: inset(0 round var(--isotrail-radius));
+    clip-path: var(--round, polygon(2px 0, calc(100% - 2px) 0, 100% 2px, 100% calc(100% - 2px),
+      calc(100% - 2px) 100%, 2px 100%, 0 calc(100% - 2px), 0 2px));
   }
-  button:hover::before { background-color: rgb(52 70 80 / 0.9); }
+  button:hover::before { background-color: var(--isotrail-hover); }
   button:focus-visible::before { box-shadow: inset 0 0 0 2px var(--isotrail-accent); }
   button[aria-disabled="true"] { cursor: default; }
   button[hidden], input[hidden] { display: none; }
@@ -527,7 +539,8 @@ const CSS = `
     font: 11px/1.3 system-ui, sans-serif;
     text-align: center;
     color: var(--isotrail-accent);
-    text-shadow: 1px 0 #10141f, -1px 0 #10141f, 0 1px #10141f, 0 -1px #10141f;
+    text-shadow: 1px 0 var(--isotrail-credit-outline), -1px 0 var(--isotrail-credit-outline),
+      0 1px var(--isotrail-credit-outline), 0 -1px var(--isotrail-credit-outline);
     overflow-wrap: anywhere;
   }
   .credit span {
@@ -537,6 +550,19 @@ const CSS = `
   .credit a { color: inherit; }
   .credit .extra { display: block; }
   :host([credit="none"]) .credit { visibility: hidden; }
+  /* Under the frame, as ordinary text in the page's colour; the snippet's own
+     line shows there until the diorama is up */
+  .below .credit {
+    margin: 4px 0 0;
+    color: var(--isotrail-text, currentColor);
+    text-shadow: none;
+  }
+  .below slot { display: none; }
+  :host([credit="below"]:not([data-state="ready"])) .below slot { display: contents; }
+  :host(:not([data-state="ready"])) .below .credit { display: none; }
+  /* The route's colour, set on the lines themselves so a page's own
+     variables can't reach them; route-colour replaces it inline */
+  input, .loaded { --_route: #d64834; }
   /* The route drawn so far, as a line along the bottom edge with a light
      tick at its head; the input is taller than the line, to be easy to grab */
   input {
@@ -550,8 +576,8 @@ const CSS = `
     -webkit-appearance: none;
     --walked: 100%;
     background: linear-gradient(to right,
-        var(--isotrail-progress, var(--route, #d64834)) var(--walked),
-        var(--isotrail-text) var(--walked) calc(var(--walked) + 2px),
+        var(--isotrail-progress, var(--_route)) var(--walked),
+        var(--isotrail-text, #ebede9) var(--walked) calc(var(--walked) + 2px),
         var(--isotrail-track) calc(var(--walked) + 2px))
       bottom / 100% 4px no-repeat;
     cursor: pointer;
@@ -565,8 +591,8 @@ const CSS = `
     bottom: 0;
     height: 4px;
     background: linear-gradient(to right,
-      var(--isotrail-progress, var(--route, #d64834)) var(--loaded, 0%),
-      var(--isotrail-text) var(--loaded, 0%) calc(var(--loaded, 0%) + 2px),
+      var(--isotrail-progress, var(--_route)) var(--loaded, 0%),
+      var(--isotrail-text, #ebede9) var(--loaded, 0%) calc(var(--loaded, 0%) + 2px),
       var(--isotrail-track) calc(var(--loaded, 0%) + 2px));
     pointer-events: none;
   }
@@ -597,7 +623,7 @@ const CSS = `
     padding: 6px 10px;
     border-radius: 4px;
     background: var(--isotrail-panel);
-    color: var(--isotrail-text);
+    color: var(--isotrail-text, #ebede9);
     font: 14px/1.4 system-ui, sans-serif;
     white-space: nowrap;
     pointer-events: none;
@@ -653,6 +679,7 @@ template.innerHTML = `
     </div>
   </div>
 </div>
+<div class="below"><slot name="credit"></slot></div>
 <p class="help" id="help"></p>
 `;
 
@@ -677,6 +704,7 @@ class IsotrailHike extends HTMLElement {
   #poster;
   #message;
   #credit;
+  #below;
   #creditText = '';
   #canvas = null;
   #controls;
@@ -745,6 +773,7 @@ class IsotrailHike extends HTMLElement {
     this.#poster = root.querySelector('img');
     this.#message = root.querySelector('.message');
     this.#credit = root.querySelector('.credit');
+    this.#below = root.querySelector('.below');
     this.#controls = root.querySelector('.controls');
     this.#playButton = root.querySelector('[data-action="play"]');
     this.#scrubber = root.querySelector('input');
@@ -815,7 +844,10 @@ class IsotrailHike extends HTMLElement {
     } else if (name === 'backend') {
       if (value?.trim() && !['auto', 'webgl'].includes(value)) ignored(name, value, 'expected auto or webgl');
     } else if (name === 'credit') {
-      if (value?.trim() && value !== 'none') ignored(name, value, 'expected none, which hides the credit line');
+      if (value?.trim() && !['overlay', 'below', 'none'].includes(value)) {
+        ignored(name, value, 'expected overlay, below or none');
+      }
+      this.#placeCredit();
     } else if (name === 'credit-extra') {
       if (this.#viewer) this.#showCredit(this.#creditText);
     } else if (name === 'lang' || name === 'strings') {
@@ -949,10 +981,19 @@ class IsotrailHike extends HTMLElement {
     this.#syncPlayButton();
   }
 
+  // Between the buttons over the frame, or under it
+  #placeCredit() {
+    if (this.getAttribute('credit') === 'below') {
+      if (this.#credit.parentElement !== this.#below) this.#below.append(this.#credit);
+    } else if (this.#credit.parentElement === this.#below) {
+      this.#playButton.parentElement.after(this.#credit);
+    }
+  }
+
   #paintRoute(colour) {
     for (const line of [this.#scrubber, this.#loaded]) {
-      if (colour) line.style.setProperty('--route', colour);
-      else line.style.removeProperty('--route');
+      if (colour) line.style.setProperty('--_route', colour);
+      else line.style.removeProperty('--_route');
     }
   }
 

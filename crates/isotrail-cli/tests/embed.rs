@@ -693,6 +693,51 @@ fn playback_and_interface_choices_reach_the_snippet() {
 }
 
 #[test]
+fn a_credit_below_is_written_under_the_poster() {
+    let temp = with_hike("ridge.itb");
+    let config = temp.path().join("config.toml");
+    fs::write(&config, "[embed]\ncredit = \"below\"\n").unwrap();
+    let output = isotrail_with_config(
+        temp.path(),
+        &[
+            "embed",
+            "ridge.itb",
+            "-o",
+            "site",
+            "--credit-extra",
+            "My site",
+        ],
+        &config,
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let html = fs::read_to_string(temp.path().join("site/snippet.html")).unwrap();
+    assert!(
+        html.contains(r#" credit="below" style="display:block"><img "#),
+        "{html}"
+    );
+    assert!(
+        html.contains(r#"style="display:block;width:100%;aspect-ratio:16/9"><p slot="credit" "#),
+        "{html}"
+    );
+    assert!(
+        html.contains("Synthetic contributors") && html.contains("<br>My site</p>"),
+        "{html}"
+    );
+
+    let output = isotrail(
+        temp.path(),
+        &["embed", "ridge.itb", "-o", "none", "--credit", "none"],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let html = fs::read_to_string(temp.path().join("none/snippet.html")).unwrap();
+    assert!(
+        html.contains(r#" credit="none" style="display:block;aspect-ratio:16/9">"#),
+        "{html}"
+    );
+    assert!(!html.contains("slot="), "{html}");
+}
+
+#[test]
 fn bad_playback_choices_are_refused_before_any_work() {
     let temp = with_hike("ridge.itb");
     fs::write(temp.path().join("words.json"), r#"{"map": "Map"}"#).unwrap();

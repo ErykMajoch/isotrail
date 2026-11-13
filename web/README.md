@@ -113,12 +113,12 @@ When you update the runtime, change `version` to the new isotrail version.
 | `autoplay` | Plays as soon as the diorama is ready |
 | `load` | `press` waits for the play button before it downloads anything |
 | `backend` | `webgl` forces the WebGL2 fallback, to test it in a browser that has WebGPU |
-| `credit` | `none` hides the data credit line |
+| `credit` | Where the data credit goes: `overlay` (the default), `below` or `none` |
 | `credit-extra` | A line of your own under the data credit, such as your name or site |
 
 `story` and `video` are 9:16, `portrait` is 3:4, `feed` is 4:5 and `wide` is 16:9. The element fills its container's width at that shape.
 
-`autoplay` does nothing for visitors who prefer reduced motion. Only use `credit="none"` when the page credits the data itself, as [Data credit](#data-credit) explains. `isotrail embed` writes `autoplay`, `load` and `credit-extra` from its options of the same names.
+`autoplay` does nothing for visitors who prefer reduced motion. `credit="below"` puts the credit under the diorama, and `credit="none"` hides it. Only use `none` when the page credits the data itself, as [Data credit](#data-credit) explains. `isotrail embed` writes `autoplay`, `load`, `credit` and `credit-extra` from its options of the same names.
 
 ### Loading on a press
 
@@ -350,11 +350,16 @@ isotrail-hike {
   --isotrail-accent: #a4dddb;           /* focus rings and the data credit */
   --isotrail-progress: #d64834;         /* the route drawn so far; route-colour by default */
   --isotrail-track: rgb(32 46 55 / 0.45); /* the route still to come */
+  --isotrail-hover: rgb(52 70 80 / 0.9); /* buttons under the pointer */
+  --isotrail-radius: 4px;               /* rounds the buttons, whose corners are cut without it */
+  --isotrail-credit-outline: #10141f;   /* the outline of the credit over the diorama */
   border-radius: 6px;
 }
 ```
 
-You can style the parts `canvas`, `play`, `scrubber` (the progress line), `zoom-in`, `zoom-out`, `reset` and `credit` with `::part()`. The element sets `data-state` to `poster`, `loading`, `ready` or `fallback`, and sends `isotrail-state` each time.
+Set them on the element or on a class it has. A page's own `--route` doesn't reach the progress line.
+
+You can style the parts `canvas`, `play`, `scrubber` (the progress line), `zoom-in`, `zoom-out`, `reset` and `credit` with `::part()`. Each button draws its square in `::before`, so `::part(play)::before` restyles it. The element sets `data-state` to `poster`, `loading`, `ready` or `fallback`, and sends `isotrail-state` each time.
 
 On touch screens, the buttons take touches across 44 pixels and the progress line across 24, though they look the same size.
 
@@ -386,11 +391,20 @@ It needs no inline scripts, and its styles need no `'unsafe-inline'`. This polic
 default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self'; connect-src 'self'
 ```
 
-The `style` attributes in the snippet are inline styles, which `style-src 'self'` blocks. The element still works, but a page without the script doesn't keep room for it. Remove the two `style` attributes and add this rule to your stylesheet instead:
+The `style` attributes in the snippet are inline styles, which `style-src 'self'` blocks. The element still works, but a page without the script doesn't keep room for it. Remove the `style` attributes and add these rules to your stylesheet instead:
 
 ```css
 isotrail-hike { display: block; aspect-ratio: 16 / 9 }
 isotrail-hike > img { display: block; width: 100% }
+```
+
+For a snippet with `credit="below"`, the ratio goes on the image and the credit has a style of its own:
+
+```css
+isotrail-hike { display: block }
+isotrail-hike > img { display: block; width: 100%; aspect-ratio: 16 / 9 }
+isotrail-hike > p { margin: 4px 0 0; font: 11px/1.3 system-ui, sans-serif; text-align: center; overflow-wrap: anywhere }
+isotrail-hike > p a { color: inherit }
 ```
 
 ### What a scene file contains
@@ -408,6 +422,14 @@ The times and trim options need the GPX file, because a bundle keeps the times a
 ### Data credit
 
 Once the diorama replaces the poster, a small line along its bottom edge credits the data, as the licences require. It names OpenStreetMap (ODbL), the terrain tiles, and Open-Meteo (CC BY 4.0) when the hike has weather. The text comes from the bundle, so it matches the credit on stills. "OpenStreetMap" links to its copyright page and "Open-Meteo.com" to its site.
+
+Over a light page or a transparent background, the outlined line can be hard to read. `credit="below"` moves it under the diorama as ordinary small text without an outline. It takes the page's text colour, or `--isotrail-text` when that is set on the element. The diorama keeps its shape, and the element grows by the line. `isotrail embed --credit below` writes a snippet for it:
+
+```html
+<isotrail-hike src="derwent-edge.itb" poster="derwent-edge.png" aspect="wide" credit="below" style="display:block"><img src="derwent-edge.png" alt="Diorama of Derwent Edge" style="display:block;width:100%;aspect-ratio:16/9"><p slot="credit" style="…">© <a href="https://www.openstreetmap.org/copyright" …>OpenStreetMap</a> contributors · Terrain Tiles (AWS)</p></isotrail-hike>
+```
+
+The shape moves from the element to the image, and the credit follows it. The line shows where the script doesn't run, and until the diorama replaces it with its own.
 
 You can restyle the line with `::part(credit)`. **If you hide it, with `credit="none"` or with CSS, credit the same sources near the embed**, for example in a caption under it. `isotrail embed --no-attribution` prints the text to use.
 

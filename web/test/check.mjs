@@ -149,6 +149,9 @@ const page = (body, { head = '', script = '/web/isotrail-embed.js', style = true
   `${head}<script type="module" src="${script}"></script><main>${body}</main>`;
 const snippetMarkup = (poster) =>
   `<isotrail-hike src="/data/hike.itb"${poster ? ' poster="/data/poster.png"' : ''} aspect="wide"${backend} style="display:block;aspect-ratio:16/9"><img src="/data/poster.png" alt="Diorama of a test hike" style="display:block;width:100%"></isotrail-hike>`;
+// As embed --credit below writes it, with the bundle's credit under the poster
+const belowMarkup = (attrs, host = 'display:block') =>
+  `<isotrail-hike ${attrs} src="/data/hike.itb" poster="/data/poster.png" aspect="wide" credit="below"${backend} style="${host}"><img src="/data/poster.png" alt="Diorama of a test hike" style="display:block;width:100%;aspect-ratio:16/9"><p slot="credit" style="margin:4px 0 0;font:11px/1.3 system-ui,sans-serif;text-align:center;overflow-wrap:anywhere;color:var(--isotrail-text,currentColor)">© Synthetic contributors · Made-up Tiles</p></isotrail-hike>`;
 
 Object.assign(pages, {
   '/ready.html': page(
@@ -299,6 +302,24 @@ Object.assign(pages, {
     ]) + `<div style="width:300px">${embed('id="tall" src="/data/hike.itb" aspect="1:1000000"')}</div>`,
     { head: '<style>.grid{grid-template-columns:repeat(3,288px)}</style>' },
   ),
+  // A page's own --route and the element's properties set on an ancestor
+  // stay outside; the ones set on the element reach the controls
+  '/styling.html': page(
+    grid([
+      embed('id="d" src="/data/hike.itb" aspect="wide"'),
+      embed('id="s" src="/data/hike.itb" aspect="wide" style="--isotrail-hover:#ff0000;--isotrail-radius:6px;--isotrail-credit-outline:#00ff00"'),
+      belowMarkup('id="b"'),
+      belowMarkup('id="bt"', 'display:block;--isotrail-text:#0000ff'),
+      belowMarkup('id="bi"', 'display:block;aspect-ratio:16/9'),
+      belowMarkup('id="bp" load="press"'),
+    ]),
+    {
+      head:
+        '<style>.grid{grid-template-columns:repeat(3,288px)}' +
+        'body{--route:#00ff00;--isotrail-text:#00ff00;--isotrail-radius:9px}main{color:rgb(10 20 30)}</style>',
+    },
+  ),
+  '/below-noscript.html': page(belowMarkup('id="b"'), { script: '/web/missing.js' }),
   '/fit.html': page(
     embed(`id="f" src="/data/hike.itb" poster="/data/still.png" aspect="wide" background="transparent" controls="none" credit="none" style="display:block;width:${FIT.width}px"`),
     { head: `<style>body{background:rgb(${FIT.page.join(' ')})}</style>` },
@@ -609,7 +630,7 @@ try {
   const extraOf = (id) => cdp.evaluate(`${el(id)}.shadowRoot.querySelector('[part="credit"] .extra')?.textContent ?? null`);
   check('credit-extra adds a line under the credit', (await extraOf('r')) === 'Walked by A. Hiker', String(await extraOf('r')));
   check('without it there is no extra line', (await extraOf('d')) === null);
-  const routeOf = (id) => cdp.evaluate(`getComputedStyle(${el(id)}.shadowRoot.querySelector('input')).getPropertyValue('--route').trim()`);
+  const routeOf = (id) => cdp.evaluate(`getComputedStyle(${el(id)}.shadowRoot.querySelector('input')).getPropertyValue('--_route').trim()`);
   check('the progress line takes the route colour', (await routeOf('r')) === '#2050e0', await routeOf('r'));
   check('a bad route colour leaves the progress line in the default colour', (await routeOf('u')) === '#d64834', await routeOf('u'));
   check('the progress line takes route-color too', (await routeOf('rc')) === '#2050e0', await routeOf('rc'));
@@ -952,6 +973,90 @@ try {
   );
   check('credit="hidden" and backend="metal" warn once each', warnedFor('credit "hidden"') === 1 && warnedFor('backend "metal"') === 1, sizeWarnings.join(' | '));
   check('no uncaught errors on the sizes page', cdp.exceptions.length === 0, cdp.exceptions.join(' | '));
+
+  // Styling hooks: hover, corners and the credit's outline, a page's own
+  // variables kept out, and the credit under the frame
+  await go('/styling.html');
+  check('five styling embeds become ready', await allReady(['d', 's', 'b', 'bt', 'bi']));
+  await sleep(300);
+  const shadow = (id, selector) => `${el(id)}.shadowRoot.querySelector(${JSON.stringify(selector)})`;
+  const pseudo = (id, property) => cdp.evaluate(`getComputedStyle(${shadow(id, '[part="play"]')}, '::before').${property}`);
+  const hover = async (id) => {
+    const r = await cdp.evaluate(`(() => { const r = ${shadow(id, '[part="play"]')}.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: r.x, y: r.y });
+    await sleep(100);
+    return pseudo(id, 'backgroundColor');
+  };
+  const hoverD = await hover('d');
+  check('the hover ground is as before without --isotrail-hover', hoverD === 'rgba(52, 70, 80, 0.9)', hoverD);
+  const hoverS = await hover('s');
+  check('--isotrail-hover sets the hover ground', hoverS === 'rgb(255, 0, 0)', hoverS);
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1 });
+  const clipD = await pseudo('d', 'clipPath');
+  check('the corners stay cut without --isotrail-radius, even with one on the page', clipD.startsWith('polygon('), clipD);
+  const clipS = await pseudo('s', 'clipPath');
+  check('--isotrail-radius rounds the corners', clipS === 'inset(0px round 6px)', clipS);
+  const outline = (id) => cdp.evaluate(`getComputedStyle(${shadow(id, '[part="credit"]')}).textShadow`);
+  const outlineD = await outline('d');
+  check('the credit keeps its outline without --isotrail-credit-outline', outlineD.includes('rgb(16, 20, 31)'), outlineD);
+  const outlineS = await outline('s');
+  check('--isotrail-credit-outline sets the outline', outlineS.includes('rgb(0, 255, 0)') && !outlineS.includes('rgb(16, 20, 31)'), outlineS);
+  const iconColour = await cdp.evaluate(`getComputedStyle(${shadow('d', '.controls')}).color`);
+  check('an --isotrail-text on the page leaves the icons as they were', iconColour === 'rgb(235, 237, 233)', iconColour);
+  const lineD = await cdp.evaluate(`getComputedStyle(${shadow('d', 'input')}).backgroundImage`);
+  check('a page\'s own --route leaves the progress line in the route colour', lineD.includes('rgb(214, 72, 52)') && !lineD.includes('rgb(0, 255, 0)'), lineD);
+  const pixelated = await cdp.evaluate(`getComputedStyle(${shadow('d', 'canvas')}).imageRendering`);
+  check('the canvas keeps its pixels sharp when stretched', pixelated === 'pixelated', pixelated);
+
+  const layout = (id) =>
+    cdp.evaluate(`(() => {
+      const h = ${el(id)}; const box = (e) => { const r = e.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, width: r.width, height: r.height }; };
+      const shown = (e) => !!e && e.getBoundingClientRect().height > 0 && e.checkVisibility({ visibilityProperty: true });
+      const credit = h.shadowRoot.querySelector('[part="credit"]'); const slotted = h.querySelector('[slot="credit"]');
+      const line = shown(credit) ? credit : slotted;
+      return { host: box(h), frame: box(h.shadowRoot.querySelector('.frame')), line: box(line), margin: parseFloat(getComputedStyle(line).marginTop),
+        own: shown(credit), slotted: shown(slotted), colour: getComputedStyle(line).color, text: line.textContent };
+    })()`);
+  const fits = (l) =>
+    Math.abs(l.frame.height - (l.frame.width * 9) / 16) < 1 &&
+    l.line.top >= l.frame.bottom - 0.5 &&
+    l.line.bottom <= l.host.bottom + 0.5 &&
+    l.line.left >= l.host.left - 0.5 &&
+    l.line.right <= l.host.right + 0.5 &&
+    Math.abs(l.host.height - (l.frame.height + l.margin + l.line.height)) < 1;
+  const below = await layout('b');
+  check('credit="below" shows the whole line under a 16:9 frame', fits(below) && below.own && !below.slotted, JSON.stringify(below));
+  const corners = await cdp.evaluate(`(() => { const h = ${el('b')}.getBoundingClientRect(); const play = ${shadow('b', '[part="play"]')}.getBoundingClientRect(); const reset = ${shadow('b', '[part="reset"]')}.getBoundingClientRect(); return { left: play.left - h.left, right: h.right - reset.right }; })()`);
+  check('the buttons stay in the corners with the credit below', corners.left < 16 && corners.right < 16, JSON.stringify(corners));
+  check('in the page\'s text colour, with the bundle\'s credit', below.colour === 'rgb(10, 20, 30)' && /Made-up Tiles/.test(below.text), JSON.stringify(below));
+  const outlineB = await outline('b');
+  check('and with no outline', outlineB === 'none', outlineB);
+  const belowT = await layout('bt');
+  check('--isotrail-text on the element colours the line below', belowT.colour === 'rgb(0, 0, 255)', belowT.colour);
+  const belowI = await layout('bi');
+  check('the element grows by the line even with a ratio of its own', fits(belowI), JSON.stringify(belowI));
+  const belowP = await layout('bp');
+  check(
+    'before the diorama, the snippet\'s line shows under the poster',
+    (await stateOf('bp')) === 'poster' && belowP.slotted && !belowP.own && fits(belowP),
+    JSON.stringify(belowP),
+  );
+  check('and the element keeps its height once the diorama is up', Math.abs(belowP.host.height - below.host.height) < 1, `${belowP.host.height} ${below.host.height}`);
+  await cdp.evaluate(`${el('b')}.setAttribute('credit', 'overlay')`);
+  const overlaid = await cdp.evaluate(`(() => { const c = ${shadow('b', '[part="credit"]')}; const f = ${shadow('b', '.frame')}.getBoundingClientRect(); const r = c.getBoundingClientRect(); return c.closest('.bar') !== null && r.bottom <= f.bottom && getComputedStyle(c).color === 'rgb(164, 221, 219)'; })()`);
+  check('changing credit to overlay puts the line back over the frame', overlaid);
+  await cdp.evaluate(`${el('d')}.setAttribute('credit', 'below')`);
+  check('and changing it to below moves it under', fits(await layout('d')), JSON.stringify(await layout('d')));
+  check('no uncaught errors on the styling page', cdp.exceptions.length === 0, cdp.exceptions.join(' | '));
+
+  await go('/below-noscript.html');
+  await sleep(500);
+  const bareBelow = await cdp.evaluate(`(() => { const h = document.querySelector('isotrail-hike'); const box = (e) => e.getBoundingClientRect(); const img = box(h.querySelector('img')); const p = box(h.querySelector('p')); return { host: box(h).height, img: img.height, width: img.width, top: p.top, bottom: img.bottom, p: p.height }; })()`);
+  check(
+    'without the script, credit="below" shows the poster at 16:9 and the line under it',
+    Math.abs(bareBelow.img - (bareBelow.width * 9) / 16) < 1 && bareBelow.p > 0 && bareBelow.top >= bareBelow.bottom && bareBelow.host > bareBelow.img + bareBelow.p,
+    JSON.stringify(bareBelow),
+  );
 
   // A still at the element's size is its first frame
   await go('/fit.html');

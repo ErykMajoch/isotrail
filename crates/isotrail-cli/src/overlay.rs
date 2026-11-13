@@ -170,7 +170,7 @@ impl OverlayArgs {
             .collect()
     }
 
-    fn credit_extra(&self) -> Option<&str> {
+    pub fn credit_extra(&self) -> Option<&str> {
         self.credit_extra
             .as_deref()
             .map(str::trim)

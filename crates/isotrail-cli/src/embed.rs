@@ -7,7 +7,7 @@ use anyhow::{Context, bail};
 use clap::Args;
 use isotrail_bundle::SceneBundle;
 use isotrail_export::{DEFAULT_SCALE, encode_png, upscale};
-use isotrail_render::{Aim, Aspect, Gpu, PITCH_DEG};
+use isotrail_render::{Aim, Aspect, Gpu, PITCH_DEG, credit_line};
 use tracing::warn;
 
 use crate::bundle::DataArgs;
@@ -288,6 +288,10 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
         base_url: args.base_url.as_deref(),
         runtime_url: args.runtime_url.as_deref(),
         attributes: &attributes,
+        below: args.playback.credit_below().then(|| Below {
+            credit: credit_line(&bundle),
+            extra: args.overlay.credit_extra(),
+        }),
     });
     output::write(&snippet_path, |file| Ok(file.write_all(html.as_bytes())?))?;
     say!("Wrote {}\n\n{html}", shown(&snippet_path));
@@ -364,6 +368,45 @@ struct Snippet<'a> {
     /// The options that aren't the default; an empty value is written as
     /// the attribute's name alone
     attributes: &'a [(&'static str, String)],
+    /// The data credit and the page's own line, for `--credit below`
+    below: Option<Below<'a>>,
+}
+
+struct Below<'a> {
+    credit: Option<String>,
+    extra: Option<&'a str>,
+}
+
+/// The names in the credit that link to where their licences ask, as the
+/// element links them
+const CREDIT_LINKS: [(&str, &str); 2] = [
+    ("OpenStreetMap", "https://www.openstreetmap.org/copyright"),
+    ("Open-Meteo.com", "https://open-meteo.com/"),
+];
+
+/// The credit as a line under the poster, which shows without the script
+/// and until the diorama is up
+fn credit_line_html(below: &Below) -> Option<String> {
+    let mut text = below.credit.as_deref().map(html_attr).unwrap_or_default();
+    for (name, url) in CREDIT_LINKS {
+        text = text.replace(
+            name,
+            &format!(
+                r#"<a href="{url}" target="_blank" rel="noopener" style="color:inherit">{name}</a>"#
+            ),
+        );
+    }
+    if let Some(extra) = below.extra {
+        if !text.is_empty() {
+            text.push_str("<br>");
+        }
+        text.push_str(&html_attr(extra));
+    }
+    (!text.is_empty()).then(|| {
+        format!(
+            r#"<p slot="credit" style="margin:4px 0 0;font:11px/1.3 system-ui,sans-serif;text-align:center;overflow-wrap:anywhere;color:var(--isotrail-text,currentColor)">{text}</p>"#
+        )
+    })
 }
 
 /// `--base-url` ending in a slash, or nothing
@@ -407,6 +450,21 @@ fn snippet(snippet: &Snippet) -> String {
             value => format!(r#" {name}="{}""#, html_attr(value)),
         })
         .collect();
+    let ratio = format!("aspect-ratio:{}/{}", width / common, height / common);
+    // With the credit below, the element grows by the line, so the ratio
+    // holds the poster instead
+    let (host_style, img_style, credit) = match &snippet.below {
+        None => (
+            format!("display:block;{ratio}"),
+            "display:block;width:100%".to_owned(),
+            String::new(),
+        ),
+        Some(below) => (
+            "display:block".to_owned(),
+            format!("display:block;width:100%;{ratio}"),
+            credit_line_html(below).unwrap_or_default(),
+        ),
+    };
     let mut html = String::new();
     let _ = writeln!(
         html,
@@ -415,11 +473,9 @@ fn snippet(snippet: &Snippet) -> String {
     );
     let _ = writeln!(
         html,
-        r#"<isotrail-hike src="{}" poster="{poster}" aspect="{}"{look} style="display:block;aspect-ratio:{}/{}"><img src="{poster}" alt="{}" style="display:block;width:100%"></isotrail-hike>"#,
+        r#"<isotrail-hike src="{}" poster="{poster}" aspect="{}"{look} style="{host_style}"><img src="{poster}" alt="{}" style="{img_style}">{credit}</isotrail-hike>"#,
         html_attr(&file("itb")),
         aspect,
-        width / common,
-        height / common,
         html_attr(&alt),
     );
     html
@@ -489,6 +545,7 @@ mod tests {
             base_url,
             runtime_url,
             attributes: &[],
+            below: None,
         })
     }
 
@@ -558,9 +615,53 @@ mod tests {
             base_url: None,
             runtime_url: None,
             attributes: &[],
+            below: None,
         });
         assert!(
             html.contains(r#"aspect="3:2" style="display:block;aspect-ratio:3/2""#),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn a_credit_below_moves_the_ratio_to_the_poster_and_adds_the_line() {
+        let below = |credit: Option<&str>, extra: Option<&'static str>| {
+            snippet(&Snippet {
+                name: "ridge",
+                title: "Ridge",
+                shape: Shape::Aspect(Aspect::Wide),
+                base_url: None,
+                runtime_url: None,
+                attributes: &[("credit", "below".to_owned())],
+                below: Some(Below {
+                    credit: credit.map(str::to_owned),
+                    extra,
+                }),
+            })
+        };
+        let html = below(
+            Some(
+                "© OpenStreetMap contributors · Terrain Tiles (AWS) · Weather data by Open-Meteo.com",
+            ),
+            Some("Walked by <Jo>"),
+        );
+        assert_eq!(
+            html.lines().nth(1).unwrap(),
+            "<isotrail-hike src=\"ridge.itb\" poster=\"ridge.png\" aspect=\"wide\" credit=\"below\" \
+             style=\"display:block\"><img src=\"ridge.png\" alt=\"Diorama of Ridge\" \
+             style=\"display:block;width:100%;aspect-ratio:16/9\"><p slot=\"credit\" \
+             style=\"margin:4px 0 0;font:11px/1.3 system-ui,sans-serif;text-align:center;\
+             overflow-wrap:anywhere;color:var(--isotrail-text,currentColor)\">© \
+             <a href=\"https://www.openstreetmap.org/copyright\" target=\"_blank\" rel=\"noopener\" \
+             style=\"color:inherit\">OpenStreetMap</a> contributors · Terrain Tiles (AWS) · \
+             Weather data by <a href=\"https://open-meteo.com/\" target=\"_blank\" rel=\"noopener\" \
+             style=\"color:inherit\">Open-Meteo.com</a><br>Walked by &lt;Jo&gt;</p></isotrail-hike>"
+        );
+        let html = below(None, Some("Mine"));
+        assert!(html.contains(r#"">Mine</p></isotrail-hike>"#), "{html}");
+        let html = below(None, None);
+        assert!(
+            html.contains(r#"aspect-ratio:16/9"></isotrail-hike>"#),
             "{html}"
         );
     }
@@ -611,6 +712,7 @@ mod tests {
                 ("palette", "a&b.hex".to_owned()),
                 ("mesher", "smooth".to_owned()),
             ],
+            below: None,
         });
         assert!(
             html.contains(

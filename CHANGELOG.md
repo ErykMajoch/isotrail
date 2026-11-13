@@ -14,6 +14,8 @@ All notable changes to `isotrail` are documented here.
 - `--times coarse` rounds the times saved in a scene file, so it no longer tells when you were where. `--times none` leaves them out.
 - `--no-desc` leaves the GPX file's description out of a scene file. The usage guide lists what a scene file holds.
 - `--trim-start` and `--trim-end` cut the ends off the route, for a walk that starts at your door. The scene file and its statistics then describe only the part that is left.
+- The web embed's `credit="below"` attribute, and `embed --credit below`, put the data credit under the diorama as plain text in the page's colour. `embed --credit none` hides it.
+- The web embed's `--isotrail-hover`, `--isotrail-radius` and `--isotrail-credit-outline` properties set the buttons' hover colour, their corners and the credit's outline.
 
 ### Changed
 
@@ -25,6 +27,8 @@ All notable changes to `isotrail` are documented here.
 ### Fixed
 
 - The web embed's clouds, rain and snow start where the poster has them.
+- A page's own `--route` variable no longer colours the web embed's progress line.
+- The web embed keeps its pixels sharp when the browser stretches its canvas.
 
 ## [1.4.1] - 2026-11-12
 
