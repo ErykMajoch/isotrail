@@ -5,9 +5,35 @@ use isotrail_render::{Conditions, SunState, When};
 use isotrail_track::{Tz, timezone_at};
 use tracing::info;
 
+use crate::bundle::{DataArgs, TimesArg};
+use crate::render::Source;
+use crate::usage;
+
 pub fn parse_time(value: &str) -> Result<NaiveTime, String> {
     NaiveTime::parse_from_str(value, "%H:%M")
         .map_err(|_| "expected a local time such as 20:30".to_owned())
+}
+
+/// Refuses `--time` before any work when the scene will have no date
+pub(crate) fn check_time(
+    time: Option<NaiveTime>,
+    source: &Source,
+    data: &DataArgs,
+) -> anyhow::Result<()> {
+    if time.is_none() {
+        return Ok(());
+    }
+    if data.times == TimesArg::None && !source.is_bundle() {
+        return Err(usage(
+            "--time needs the hike's date, which --times none leaves out; place the sun with --sun instead",
+        ));
+    }
+    if !source.has_times() {
+        return Err(usage(
+            "--time needs a track with times, to know which day to light",
+        ));
+    }
+    Ok(())
 }
 
 /// The sun, moon and weather at the start of the hike, or at `time` on the

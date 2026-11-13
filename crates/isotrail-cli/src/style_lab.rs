@@ -191,6 +191,7 @@ pub fn run(args: &StyleLabArgs, typed: &Typed) -> anyhow::Result<()> {
         .collect::<anyhow::Result<Vec<Look>>>()?;
     let source = Source::open(&args.file)?;
     if source.is_bundle() {
+        args.data.refuse_with_bundle()?;
         args.data.warn_unused_with_bundle(typed);
     }
     let mut bundle = source.into_bundle(&args.file, &args.data)?;

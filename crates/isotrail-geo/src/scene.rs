@@ -1,9 +1,9 @@
+use chrono::{DateTime, Utc};
 use isotrail_bundle::{
     Bounds, GridInfo, HikeStats, Metadata, MoonSample, ProfileSample, Provenance, Route,
     RoutePoint, SceneBundle, Season, SunSample, Terrain,
 };
 use isotrail_track::{Track, TrackPoint, TrackStats, haversine_m, moon_position, sun_position};
-
 use tracing::warn;
 
 use crate::{GeoError, Grid, Heightmap, LandcoverMap, leaf_day, vertical_exaggeration};
@@ -80,9 +80,47 @@ pub fn scene_bundle(
             ..Season::default()
         },
     };
-    (bundle.sun, bundle.moon) = sky_track(&stats, origin_lat, origin_lon);
+    (bundle.sun, bundle.moon) = sky_track(stats.start, stats.end, origin_lat, origin_lon);
     bundle.prop_seed = bundle.content_seed();
     Ok(bundle)
+}
+
+/// Gives the route, the start and end, and the sun and moon the times of
+/// `track`, the bundle's own track timed another way. The seed, the date,
+/// and the moving and elapsed times stay as they were
+pub fn retime(bundle: &mut SceneBundle, track: &Track) {
+    let kept = track.simplified_indices(ROUTE_TOLERANCE_CELLS * bundle.grid.cell_size_m);
+    let times = track.segments.iter().zip(kept).flat_map(|(segment, kept)| {
+        kept.into_iter()
+            .map(|i| segment.points[i].time.map(|t| t.timestamp()))
+    });
+    for (point, time) in bundle.route.points.iter_mut().zip(times) {
+        point.time = time;
+    }
+    let times = || track.points().filter_map(|point| point.time);
+    let (start, end) = (times().min(), times().max());
+    let stats = &mut bundle.meta.stats;
+    stats.start = start.map(|t| t.timestamp());
+    stats.end = end.map(|t| t.timestamp());
+    let grid = &bundle.grid;
+    (bundle.sun, bundle.moon) = sky_track(start, end, grid.origin_lat, grid.origin_lon);
+}
+
+/// Leaves out every time and what follows from them, as for a track
+/// without times; the seed stays
+pub fn untime(bundle: &mut SceneBundle) {
+    for point in &mut bundle.route.points {
+        point.time = None;
+    }
+    let meta = &mut bundle.meta;
+    meta.local_date = None;
+    meta.provenance.weather = None;
+    let stats = &mut meta.stats;
+    (stats.start, stats.end, stats.elapsed_s, stats.moving_s) = (None, None, None, None);
+    bundle.sun.clear();
+    bundle.moon.clear();
+    bundle.weather = None;
+    bundle.season = Season::default();
 }
 
 fn hike_stats(stats: &TrackStats) -> HikeStats {
@@ -109,8 +147,13 @@ fn hike_stats(stats: &TrackStats) -> HikeStats {
 
 /// The sun and moon over the slab every [`SUN_STEP_S`] from the start, and
 /// at the end; none past [`MAX_TIMED_SPAN_DAYS`]
-fn sky_track(stats: &TrackStats, lat: f64, lon: f64) -> (Vec<SunSample>, Vec<MoonSample>) {
-    let (Some(start), Some(end)) = (stats.start, stats.end) else {
+fn sky_track(
+    start: Option<DateTime<Utc>>,
+    end: Option<DateTime<Utc>>,
+    lat: f64,
+    lon: f64,
+) -> (Vec<SunSample>, Vec<MoonSample>) {
+    let (Some(start), Some(end)) = (start, end) else {
         return Default::default();
     };
     let days = (end - start).num_days();
@@ -122,9 +165,7 @@ fn sky_track(stats: &TrackStats, lat: f64, lon: f64) -> (Vec<SunSample>, Vec<Moo
     }
     // Samples are stored in whole seconds, so sampling from fractional
     // times could give the last two the same second
-    let whole = |t: chrono::DateTime<chrono::Utc>| {
-        chrono::DateTime::from_timestamp(t.timestamp(), 0).unwrap_or(t)
-    };
+    let whole = |t: DateTime<Utc>| DateTime::from_timestamp(t.timestamp(), 0).unwrap_or(t);
     let (start, end) = (whole(start), whole(end));
     let step = chrono::TimeDelta::seconds(SUN_STEP_S);
     std::iter::successors(Some(start), |&t| Some(t + step))
@@ -473,6 +514,70 @@ mod tests {
         }
         let untimed = bundle(&untimed);
         assert!(untimed.sun.is_empty() && untimed.moon.is_empty());
+    }
+
+    #[test]
+    fn coarse_times_replace_every_recorded_time_and_keep_the_rest() {
+        let track = track(&[(0.0, 2000.0), (2600.0, 8000.0)], true);
+        let recorded = bundle(&track);
+        let coarse = track.coarse_times();
+        let mut retimed = recorded.clone();
+        retime(&mut retimed, &coarse);
+
+        let recorded_times: Vec<i64> = track
+            .points()
+            .filter_map(|p| p.time)
+            .map(|t| t.timestamp())
+            .collect();
+        let route = &retimed.route.points;
+        assert_eq!(route.len(), recorded.route.points.len());
+        assert!(route.iter().all(|p| p.time.is_some()));
+        let stored = route
+            .iter()
+            .filter_map(|p| p.time)
+            .chain(retimed.sun.iter().map(|s| s.time))
+            .chain(retimed.moon.iter().map(|m| m.time));
+        for time in stored {
+            assert!(!recorded_times.contains(&time), "{time}");
+        }
+        let stats = &retimed.meta.stats;
+        let (start, end) = (stats.start.unwrap(), stats.end.unwrap());
+        assert_eq!(start % 1800, 0);
+        assert_eq!((end - start) % 900, 0);
+        assert_eq!(retimed.sun.first().map(|s| s.time), Some(start));
+        assert_eq!(retimed.sun.last().map(|s| s.time), Some(end));
+        assert_eq!(route[0].time, Some(start));
+        assert_eq!(route[route.len() - 1].time, Some(end));
+
+        assert_eq!(retimed.prop_seed, recorded.prop_seed);
+        assert_ne!(retimed.content_seed(), recorded.content_seed());
+        let kept = &recorded.meta.stats;
+        assert_eq!(
+            (stats.elapsed_s, stats.moving_s),
+            (kept.elapsed_s, kept.moving_s)
+        );
+        assert_eq!(retimed.meta.local_date, recorded.meta.local_date);
+        assert_eq!(retimed.meta.timezone, recorded.meta.timezone);
+        assert_eq!(retimed.season, recorded.season);
+        retimed.validate().unwrap();
+    }
+
+    #[test]
+    fn untimed_bundles_match_a_track_without_times_but_for_the_seed() {
+        let track = track(&[(0.0, 2000.0), (2600.0, 8000.0)], true);
+        let mut untimed = bundle(&track);
+        let seed = untimed.prop_seed;
+        untime(&mut untimed);
+        assert_eq!(untimed.prop_seed, seed);
+
+        let mut without = track.clone();
+        for point in without.segments.iter_mut().flat_map(|s| &mut s.points) {
+            point.time = None;
+        }
+        let mut expected = bundle(&without);
+        assert_ne!(expected.prop_seed, seed);
+        expected.prop_seed = seed;
+        assert_eq!(untimed, expected);
     }
 
     #[test]

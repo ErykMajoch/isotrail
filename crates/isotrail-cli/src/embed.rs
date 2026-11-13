@@ -95,6 +95,10 @@ pub struct EmbedArgs {
     #[command(flatten)]
     data: DataArgs,
 
+    /// Leave the GPX file's description out of the scene file
+    #[arg(long, help_heading = crate::DATA)]
+    no_desc: bool,
+
     /// Read settings from the [embed] and [render] tables of this TOML file
     #[arg(long, value_name = "FILE", help_heading = crate::GENERAL)]
     config: Option<PathBuf>,
@@ -196,13 +200,10 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
 
     let source = Source::open(&args.file)?;
     if source.is_bundle() {
+        args.data.refuse_with_bundle()?;
         args.data.warn_unused_with_bundle(typed);
     }
-    if args.look.time.is_some() && !source.has_times() {
-        return Err(usage(
-            "--time needs a track with times, to know which day to light",
-        ));
-    }
+    crate::sun::check_time(args.look.time, &source, &args.data)?;
     let original = match (&source, in_place) {
         (Source::Bundle(bundle), true) => Some(bundle.clone()),
         _ => None,
@@ -214,6 +215,9 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
     // Saved in the bundle, so the live embed is labelled the same
     if let Some(title) = args.overlay.given_title() {
         title.clone_into(&mut bundle.meta.title);
+    }
+    if args.no_desc {
+        bundle.meta.desc = None;
     }
     if original.is_some_and(|original| *original != bundle) {
         return Err(usage(format!(

@@ -364,6 +364,7 @@ On touch screens, the buttons take touches across 44 pixels and the progress lin
 - Let browsers cache `isotrail-embed.js`, `pkg/` and the bundles for a long time
 - Serve the page over HTTPS, so browsers offer WebGPU
 - If the site has a Content-Security-Policy, allow the element in it, as [shown below](#content-security-policy)
+- Check what the bundle says about the hike, as [shown below](#what-a-scene-file-contains)
 
 Most servers and static hosts already send the right types. With another type for `.wasm`, the renderer still loads, but more slowly and with a warning in the console. `.itb` can be `application/octet-stream`.
 
@@ -391,6 +392,18 @@ The `style` attributes in the snippet are inline styles, which `style-src 'self'
 isotrail-hike { display: block; aspect-ratio: 16 / 9 }
 isotrail-hike > img { display: block; width: 100% }
 ```
+
+### What a scene file contains
+
+Anyone can download the `.itb` file a page uses and read it. Besides the terrain, it holds the GPX file's name and description, the hike's statistics and its route. Each point of the route keeps its time, to the second.
+
+Make the bundle with `--times coarse` to round the times, or with `--times none` to leave them out. `--no-desc` leaves out the description:
+
+```sh
+isotrail embed hike.gpx -o site/hikes --times coarse --no-desc
+```
+
+These options need the GPX file, because a bundle keeps the times it was made with. The [usage guide](../docs/usage.md#what-a-scene-file-contains) lists everything a bundle holds and what each option changes.
 
 ### Data credit
 

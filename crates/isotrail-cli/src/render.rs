@@ -17,7 +17,7 @@ use isotrail_track::Track;
 use tracing::{info, warn};
 
 use crate::animation::AnimationArgs;
-use crate::bundle::DataArgs;
+use crate::bundle::{DataArgs, TimesArg};
 use crate::config::Typed;
 use crate::encoding::{Clip as ClipKind, EncodingArgs};
 use crate::frame::{AspectArg, FrameArgs, Shape, parse_scale};
@@ -163,13 +163,10 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
     };
     let source = Source::open(&args.file)?;
     if source.is_bundle() {
+        args.data.refuse_with_bundle()?;
         args.data.warn_unused_with_bundle(typed);
     }
-    if args.look.time.is_some() && !source.has_times() {
-        return Err(usage(
-            "--time needs a track with times, to know which day to light",
-        ));
-    }
+    crate::sun::check_time(args.look.time, &source, &args.data)?;
     let mut bundle = source.into_bundle(&args.file, &args.data)?;
     if let Some(exaggeration) = args.exaggeration {
         bundle.grid.exaggeration = exaggeration;
@@ -197,7 +194,9 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
                 .fit(&text, themed, &shape.label(), framing, args.scale, &style)
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
+    // --times none has said so already
     if motion.is_some_and(|motion| motion.pace == Pace::Time)
+        && args.data.times != TimesArg::None
         && !Walk::paced(&bundle, theme.pacing).is_timed()
     {
         warn!("the track has no times to pace the route by, so it draws at an even speed");

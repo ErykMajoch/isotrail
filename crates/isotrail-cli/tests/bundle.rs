@@ -881,3 +881,294 @@ fn the_first_download_of_a_run_is_announced() {
     }
     server.join().unwrap();
 }
+
+/// The fixture's walk with every time 17s past the minute, so no time it
+/// holds is on a quarter hour
+fn walk(dir: &Path) -> PathBuf {
+    let gpx = std::fs::read_to_string(fixtures().join("gpx/snowdon.gpx")).unwrap();
+    let path = dir.join("walk.gpx");
+    std::fs::write(&path, gpx.replace(":00Z</time>", ":17Z</time>")).unwrap();
+    path
+}
+
+fn read_bundle(path: &Path) -> SceneBundle {
+    SceneBundle::from_bytes(&std::fs::read(path).unwrap()).unwrap()
+}
+
+fn json(output: &Output) -> serde_json::Value {
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+/// Bundles `gpx` offline into `dir/name` with `extra` flags
+fn bundle_walk(cache_dir: &Path, gpx: &Path, dir: &Path, name: &str, extra: &[&str]) -> PathBuf {
+    let itb = dir.join(name);
+    let args = [
+        &[
+            "bundle",
+            gpx.to_str().unwrap(),
+            "-o",
+            itb.to_str().unwrap(),
+            "--detail",
+            "32",
+            "--offline",
+        ][..],
+        extra,
+    ]
+    .concat();
+    let output = isotrail(cache_dir, &args);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    itb
+}
+
+#[test]
+fn coarse_times_keep_no_recorded_time_and_no_description() {
+    let temp = tempfile::tempdir().unwrap();
+    let cache_dir = temp.path().join("cache");
+    warm(&cache_dir, true);
+    warm_weather(&cache_dir);
+    let gpx = walk(temp.path());
+    let recorded = bundle_walk(&cache_dir, &gpx, temp.path(), "recorded.itb", &[]);
+    let coarse = bundle_walk(
+        &cache_dir,
+        &gpx,
+        temp.path(),
+        "coarse.itb",
+        &["--times", "coarse", "--no-desc"],
+    );
+
+    let stats = |itb: &Path| {
+        json(&isotrail(
+            &cache_dir,
+            &["stats", itb.to_str().unwrap(), "--json"],
+        ))
+    };
+    let (before, after) = (stats(&recorded), stats(&coarse));
+    assert_eq!(before["start"], "2025-06-14T09:00:17Z");
+    assert!(before["desc"].is_string());
+    assert_eq!(after["start"], "2025-06-14T09:00:00Z");
+    assert_eq!(after["start_local"], "2025-06-14T10:00:00+01:00");
+    assert_eq!(after["end"], "2025-06-14T09:15:00Z");
+    assert!(after["desc"].is_null());
+    for key in ["moving_s", "elapsed_s", "distance_m", "gain_m", "timezone"] {
+        assert_eq!(after[key], before[key], "{key}");
+    }
+
+    let mut file = File::open(&gpx).unwrap();
+    let track = GpxReader.read(&mut file).unwrap();
+    let times: Vec<i64> = track
+        .points()
+        .filter_map(|point| point.time)
+        .map(|time| time.timestamp())
+        .collect();
+    let (recorded, coarse) = (read_bundle(&recorded), read_bundle(&coarse));
+    let stored: Vec<i64> = coarse
+        .route
+        .points
+        .iter()
+        .map(|point| point.time.unwrap())
+        .chain(coarse.sun.iter().map(|sample| sample.time))
+        .chain(coarse.moon.iter().map(|sample| sample.time))
+        .collect();
+    assert!(stored.len() > coarse.route.points.len());
+    for time in stored {
+        assert!(!times.contains(&time), "{time}");
+    }
+    assert_eq!(coarse.prop_seed, recorded.prop_seed);
+    assert_eq!(coarse.meta.local_date, recorded.meta.local_date);
+    assert_eq!(coarse.season, recorded.season);
+    assert!(coarse.weather.is_some());
+}
+
+#[test]
+fn coarse_times_draw_the_same_scene_under_a_held_sun() {
+    let temp = tempfile::tempdir().unwrap();
+    let cache_dir = temp.path().join("cache");
+    warm(&cache_dir, true);
+    warm_weather(&cache_dir);
+    let gpx = walk(temp.path());
+    let render = |extra: &[&str], name: &str| {
+        let png = temp.path().join(name);
+        let args = [
+            &[
+                "render",
+                gpx.to_str().unwrap(),
+                "-o",
+                png.to_str().unwrap(),
+                "--detail",
+                "32",
+                "--offline",
+                "--aspect",
+                "square",
+                "--scale",
+                "6",
+                "--sun",
+                "150,40",
+                "--no-weather",
+            ][..],
+            extra,
+        ]
+        .concat();
+        let output = isotrail(&cache_dir, &args);
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        std::fs::read(png).unwrap()
+    };
+    let recorded = render(&[], "recorded.png");
+    assert!(recorded == render(&["--times", "coarse"], "coarse.png"));
+}
+
+#[test]
+fn no_times_is_a_track_without_times_but_for_the_seed() {
+    let temp = tempfile::tempdir().unwrap();
+    let cache_dir = temp.path().join("cache");
+    warm(&cache_dir, true);
+    let gpx = walk(temp.path());
+    let itb = temp.path().join("none.itb");
+    let output = isotrail(
+        &cache_dir,
+        &[
+            "bundle",
+            gpx.to_str().unwrap(),
+            "-o",
+            itb.to_str().unwrap(),
+            "--detail",
+            "32",
+            "--offline",
+            "--times",
+            "none",
+        ],
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let warnings: Vec<String> = text(&output.stderr).lines().map(String::from).collect();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(warnings[0].contains("--times none: leaving out the date and times"));
+
+    let untimed_gpx = temp.path().join("untimed.gpx");
+    let timed = std::fs::read_to_string(&gpx).unwrap();
+    let lines: Vec<&str> = timed
+        .lines()
+        .filter(|line| !line.contains("<time>"))
+        .collect();
+    std::fs::write(&untimed_gpx, lines.join("\n")).unwrap();
+    let untimed = bundle_walk(&cache_dir, &untimed_gpx, temp.path(), "untimed.itb", &[]);
+
+    let (none, mut untimed) = (read_bundle(&itb), read_bundle(&untimed));
+    let recorded = read_bundle(&bundle_walk(
+        &cache_dir,
+        &gpx,
+        temp.path(),
+        "recorded.itb",
+        &["--no-weather"],
+    ));
+    assert_eq!(none.prop_seed, recorded.prop_seed);
+    assert_ne!(untimed.prop_seed, none.prop_seed);
+    untimed.prop_seed = none.prop_seed;
+    assert_eq!(none, untimed);
+}
+
+#[test]
+fn time_options_need_a_gpx_file_and_its_date() {
+    let temp = tempfile::tempdir().unwrap();
+    let cache_dir = temp.path().join("cache");
+    let itb = temp.path().join("hike.itb");
+    std::fs::write(&itb, isotrail_testkit::hike_bundle().to_bytes().unwrap()).unwrap();
+    let site = temp.path().join("site");
+    let png = temp.path().join("hike.png");
+    let gpx = walk(temp.path());
+    let config = temp.path().join("coarse.toml");
+    std::fs::write(&config, "[render]\ntimes = \"coarse\"\n").unwrap();
+    for (args, flag) in [
+        (
+            vec![
+                "render",
+                itb.to_str().unwrap(),
+                "-o",
+                png.to_str().unwrap(),
+                "--config",
+                config.to_str().unwrap(),
+            ],
+            "--times coarse",
+        ),
+        (
+            vec![
+                "embed",
+                itb.to_str().unwrap(),
+                "-o",
+                site.to_str().unwrap(),
+                "--times",
+                "coarse",
+            ],
+            "--times coarse",
+        ),
+        (
+            vec![
+                "render",
+                itb.to_str().unwrap(),
+                "-o",
+                png.to_str().unwrap(),
+                "--times",
+                "none",
+            ],
+            "--times none",
+        ),
+        (
+            vec![
+                "render",
+                gpx.to_str().unwrap(),
+                "-o",
+                png.to_str().unwrap(),
+                "--times",
+                "none",
+                "--time",
+                "10:00",
+            ],
+            "--time needs the hike's date",
+        ),
+    ] {
+        let output = isotrail(&cache_dir, &args);
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        assert!(
+            text(&output.stderr).contains(flag),
+            "{}",
+            text(&output.stderr)
+        );
+    }
+    assert!(!png.exists());
+    assert!(!cache_dir.exists());
+    let written = std::fs::read_dir(&site).map_or(0, |dir| dir.count());
+    assert_eq!(written, 0);
+}
+
+#[test]
+fn embed_leaves_out_a_bundles_description() {
+    let temp = tempfile::tempdir().unwrap();
+    let cache_dir = temp.path().join("cache");
+    let mut bundle = isotrail_testkit::hike_bundle();
+    bundle.meta.desc = Some("Down from the summit".into());
+    let itb = temp.path().join("hike.itb");
+    std::fs::write(&itb, bundle.to_bytes().unwrap()).unwrap();
+    for (flags, desc) in [
+        (&[][..], Some("Down from the summit")),
+        (&["--no-desc"][..], None),
+    ] {
+        let site = temp.path().join(format!("site{}", flags.len()));
+        let args = [
+            &[
+                "embed",
+                itb.to_str().unwrap(),
+                "-o",
+                site.to_str().unwrap(),
+                "--scale",
+                "6",
+            ][..],
+            flags,
+        ]
+        .concat();
+        let output = isotrail(&cache_dir, &args);
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        assert_eq!(
+            read_bundle(&site.join("hike.itb")).meta.desc.as_deref(),
+            desc
+        );
+    }
+}

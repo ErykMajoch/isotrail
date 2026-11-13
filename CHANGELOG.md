@@ -11,6 +11,8 @@ All notable changes to `isotrail` are documented here.
 - The web embed's `load="press"` attribute, and `embed --load press`, hold the download back until a visitor presses play. Until then the page loads only the script and the poster.
 - The web embed's `load()` starts the download from a script. The `isotrail-state` event tells a page when `data-state` changes.
 - While the web embed loads, its progress line shows how much has arrived. It shows only when the server sends the true sizes.
+- `--times coarse` rounds the times saved in a scene file, so it no longer tells when you were where. `--times none` leaves them out.
+- `--no-desc` leaves the GPX file's description out of a scene file. The usage guide lists what a scene file holds.
 
 ### Changed
 

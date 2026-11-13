@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt::Write as _;
 use std::io::Write as _;
 use std::num::NonZeroU32;
@@ -11,7 +12,7 @@ use isotrail_geo::{
     FootprintOptions, GeoError, Grid, Heightmap, HttpFetcher, Landcover, LandcoverMap,
     MIN_PADDING_M, OSM_ATTRIBUTION, OVERPASS_URL, Orientation, OsmFeatures, OverpassSource,
     PADDING_FRACTION, Provenance, RetryPolicy, SceneBundle, TERRARIUM_URL, TerrariumSource,
-    line_mask, origin, redact, scene_bundle,
+    line_mask, origin, redact, retime, scene_bundle, untime,
 };
 use isotrail_render::parse_count;
 use isotrail_track::Track;
@@ -68,6 +69,10 @@ pub struct BundleArgs {
 
     #[command(flatten)]
     data: DataArgs,
+
+    /// Leave the GPX file's description out of the scene file
+    #[arg(long, help_heading = crate::DATA)]
+    no_desc: bool,
 
     /// Read settings from the [bundle] and [render] tables of this TOML file
     #[arg(long, value_name = "FILE", help_heading = crate::GENERAL)]
@@ -136,6 +141,18 @@ pub struct DataArgs {
     #[arg(long, value_enum, value_name = "auto|spring|summer|autumn|winter",
           default_value_t = SeasonArg::Auto, hide_possible_values = true)]
     pub season: SeasonArg,
+
+    /// Times to keep in the scene: as recorded, rounded, or none
+    #[arg(long, value_enum, value_name = "recorded|coarse|none",
+          default_value_t = TimesArg::Recorded, hide_possible_values = true)]
+    pub times: TimesArg,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum TimesArg {
+    Recorded,
+    Coarse,
+    None,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -221,6 +238,19 @@ impl DataArgs {
             }
         }
     }
+
+    /// A scene bundle keeps the times it was made with, so a privacy option
+    /// for them is refused rather than dropped
+    pub fn refuse_with_bundle(&self) -> anyhow::Result<()> {
+        let times = match self.times {
+            TimesArg::Recorded => return Ok(()),
+            TimesArg::Coarse => "coarse",
+            TimesArg::None => "none",
+        };
+        Err(usage(format!(
+            "--times {times} can't change the times a scene bundle holds; give the GPX file instead"
+        )))
+    }
 }
 
 /// A scene bundle and what went into it
@@ -273,7 +303,10 @@ impl DataArgs {
         let cache = Cache::new(crate::cache::dir(self.cache_dir.get())?);
         let announced = Announced {
             inner: http,
-            line: report::download_line(!self.no_map_data, !self.no_weather),
+            line: report::download_line(
+                !self.no_map_data,
+                !self.no_weather && self.times != TimesArg::None,
+            ),
         };
         Ok(CachedFetcher::new(announced, cache).offline(self.offline))
     }
@@ -381,11 +414,21 @@ pub fn prepare(track: &Track, file: &Path, data: &DataArgs) -> anyhow::Result<Pr
         info!("{cells:>6}  cells with a {name}");
     }
 
+    // Weather is asked for the hours the scene will hold
+    let timed = match data.times {
+        TimesArg::Recorded => Some(Cow::Borrowed(track)),
+        TimesArg::Coarse => Some(Cow::Owned(track.coarse_times())),
+        TimesArg::None => {
+            warn!(
+                "--times none: leaving out the date and times, with the light, weather and season that follow from them"
+            );
+            None
+        }
+    };
     let server = data.weather_url.server();
-    let weather = if data.no_weather {
-        None
-    } else {
-        weather::look_up(track, &fetcher, &server)
+    let weather = match &timed {
+        Some(timed) if !data.no_weather => weather::look_up(timed, &fetcher, &server),
+        _ => None,
     };
 
     let provenance = Provenance {
@@ -411,8 +454,17 @@ pub fn prepare(track: &Track, file: &Path, data: &DataArgs) -> anyhow::Result<Pr
             .attribution
             .retain(|credit| credit != OSM_ATTRIBUTION);
     }
+    // Built from the recorded times first, so the seed and the trees it
+    // places don't depend on --times
+    match &timed {
+        Some(Cow::Owned(timed)) => retime(&mut bundle, timed),
+        Some(Cow::Borrowed(_)) => {}
+        None => untime(&mut bundle),
+    }
     bundle.weather = weather.map(|(weather, _)| weather);
-    season::estimate(&mut bundle, track, &fetcher, &server);
+    if let Some(timed) = &timed {
+        season::estimate(&mut bundle, timed, &fetcher, &server);
+    }
     season::apply(&mut bundle, data.season);
     bundle.validate().map_err(|error| match error {
         BundleError::Invalid(reason) => {
@@ -475,6 +527,9 @@ pub fn run(args: &BundleArgs) -> anyhow::Result<()> {
     }
     if let Some(title) = &args.title {
         bundle.meta.title.clone_from(title);
+    }
+    if args.no_desc {
+        bundle.meta.desc = None;
     }
     let bytes = bundle.to_bytes()?;
     let output = &args.output;

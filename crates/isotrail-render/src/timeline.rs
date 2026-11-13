@@ -464,8 +464,7 @@ impl Walk {
         if let (Some(clock), Some(time_s), Some(total)) =
             (&self.clock, moment.hike_time_s, self.stats.elapsed_s)
         {
-            stats.elapsed_s =
-                Some(((time_s - clock.start_s).round() as i64).clamp(0, total.max(0)));
+            stats.elapsed_s = Some(clock.elapsed(time_s - clock.start_s, total));
         }
         stats
     }
@@ -509,7 +508,7 @@ impl Walk {
                 .moving_s
                 .map(|s| (s as f64 * time_share).round() as i64),
             elapsed_s: total.elapsed_s.map(|s| match &self.clock {
-                Some(clock) => (clock.real_at(distance).round() as i64).min(s),
+                Some(clock) => clock.elapsed(clock.real_at(distance), s),
                 None => (s as f64 * share).round() as i64,
             }),
             max_ele_m: total.max_ele_m.map(|max| match start {
@@ -604,6 +603,18 @@ impl Clock {
 
     fn total_s(&self) -> f64 {
         self.paced_s.last().copied().unwrap_or(0.0)
+    }
+
+    /// `real_s` of the clock as elapsed time, stretched to the stored
+    /// `elapsed_s` when the route's times span a rounded length
+    fn elapsed(&self, real_s: f64, elapsed_s: i64) -> i64 {
+        let span = self.real_s.last().copied().unwrap_or(0.0);
+        let real = if span > 0.0 && (elapsed_s as f64 - span).abs() > 1.0 {
+            real_s * elapsed_s as f64 / span
+        } else {
+            real_s
+        };
+        (real.round() as i64).clamp(0, elapsed_s.max(0))
     }
 
     /// Distance reached once `share` of the paced time has passed
@@ -1058,6 +1069,26 @@ mod tests {
         let night = at(0.4 * 0.94 + 0.03);
         assert_eq!(night.elapsed_s, Some(25_200));
         assert!((night.distance_m - 400.0).abs() < 1e-3);
+        assert_eq!(at(1.0), bundle.meta.stats);
+    }
+
+    #[test]
+    fn rounded_times_still_count_up_to_the_stored_elapsed_time() {
+        // Times rounded to 2h30m for a hike that took 2h34m
+        let mut bundle = hike(&[(0.0, Some(0)), (1000.0, Some(9_000))], vec![]);
+        bundle.meta.stats.elapsed_s = Some(9_240);
+        let walk = Walk::new(&bundle);
+        let at = |draw_share: f32| {
+            let step = walk.step(Pace::Distance, draw_share);
+            walk.stats_at(&Moment {
+                time_s: 0.0,
+                yaw_offset_deg: 0.0,
+                progress: step.progress,
+                hike_time_s: step.time_s,
+            })
+        };
+        assert_eq!(at(0.5).elapsed_s, Some(4_620));
+        assert_eq!(walk.stats(0.5).elapsed_s, Some(4_620));
         assert_eq!(at(1.0), bundle.meta.stats);
     }
 

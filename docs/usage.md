@@ -10,7 +10,7 @@ isotrail has seven commands. `isotrail <command> --help` lists a command's optio
 - [`cache`](#cache): manage downloaded data
 - [`theme`](#theme): write the built-in theme, to start your own from
 
-Every command takes `-v` (`--verbose`) to show more log output, up to `-vvv`, and `-q` (`--quiet`) to show only errors. The end of the page covers [output for scripts](#output-for-scripts), [how files are written](#writing-files), [exit codes](#exit-codes) and [which command takes which option](#which-command-takes-what).
+Every command takes `-v` (`--verbose`) to show more log output, up to `-vvv`, and `-q` (`--quiet`) to show only errors. The end of the page covers [what a scene file contains](#what-a-scene-file-contains) and [output for scripts](#output-for-scripts). It also covers [how files are written](#writing-files), [exit codes](#exit-codes) and [which command takes which option](#which-command-takes-what).
 
 ## GPX files
 
@@ -294,12 +294,13 @@ The GIF options do nothing for an MP4, and the MP4 options nothing for a GIF. is
 | `--footprint route\|north` | `route` | Which way the slab's sides run: along the route, or north-south and east-west |
 | `--no-weather` | off | Leave out the weather, with the snow and ice it brings |
 | `--season SEASON` | `auto` | The [season](#season) to show: the hike's own, or `spring`, `summer`, `autumn` or `winter` |
+| `--times recorded\|coarse\|none` | `recorded` | Times to keep in the scene: as recorded, rounded, or none |
 
 The server and cache options can also be set in the environment: `ISOTRAIL_OVERPASS_URL`, `ISOTRAIL_TERRAIN_URL`, `ISOTRAIL_WEATHER_URL` and `ISOTRAIL_CACHE_DIR`. `--config FILE` reads settings from a TOML file (see [Configuration](configuration.md)).
 
-`--padding` adds `P` percent of the route's length and width on each side, and at least `M` metres. `--weather-url` points at a server you host yourself, for example. isotrail adds `/v1/archive` and `/v1/forecast` to it. `--no-weather` also leaves out the weather a bundle holds.
+`--padding` adds `P` percent of the route's length and width on each side, and at least `M` metres. `--weather-url` points at a server you host yourself, for example. isotrail adds `/v1/archive` and `/v1/forecast` to it. `--no-weather` also leaves out the weather a bundle holds. `--times` rounds the times or leaves them out, as [What a scene file contains](#what-a-scene-file-contains) explains.
 
-A scene bundle already holds its terrain and map data. `--detail`, `--offline`, `--overpass-url`, `--terrain-url`, `--weather-url`, `--cache-dir`, `--no-map-data`, `--padding` and `--footprint` do nothing with one, and isotrail warns when you type them for a bundle.
+A scene bundle already holds its terrain and map data. `--detail`, `--offline`, `--overpass-url`, `--terrain-url`, `--weather-url`, `--cache-dir`, `--no-map-data`, `--padding` and `--footprint` do nothing with one, and isotrail warns when you type them for a bundle. `--times coarse` and `--times none` stop with an error instead, because a bundle keeps the times it was made with.
 
 With an Open-Meteo API key in `ISOTRAIL_OPEN_METEO_KEY`, the weather comes from Open-Meteo's servers for customers, or from `--weather-url` with the key added. The key is only read from the environment, never from a flag or a config file. It is left out of the cache, the bundle and every message.
 
@@ -318,7 +319,7 @@ Before its first download, a run prints one line saying what it fetches, such as
 ## bundle
 
 ```text
-isotrail bundle <hike.gpx> -o <hike.itb> [--debug-dir DIR] [--title TEXT] [--exaggeration X] [--config FILE] [--json] [data options]
+isotrail bundle <hike.gpx> -o <hike.itb> [--debug-dir DIR] [--title TEXT] [--no-desc] [--exaggeration X] [--config FILE] [--json] [data options]
 ```
 
 `bundle` downloads the elevation and OpenStreetMap data around the route and works out what covers each grid cell. It uses the map data where there is some, and the slope and height of the ground elsewhere. Lakes and reservoirs get a level surface, and the sea lies flat at sea level.
@@ -343,7 +344,7 @@ Route: 1650 points in 1 piece
 Wrote hike.itb (92KB)
 ```
 
-On a coast, the water line names the sea too (`Water: the sea and 2 lakes levelled`). `-v` also lists the map features by type. `--title TEXT` saves another title in the bundle instead of the GPX file's name, and renders and the web embed show it.
+On a coast, the water line names the sea too (`Water: the sea and 2 lakes levelled`). `-v` also lists the map features by type. `--title TEXT` saves another title in the bundle instead of the GPX file's name, and renders and the web embed show it. `--no-desc` leaves the GPX file's description out of the bundle. [What a scene file contains](#what-a-scene-file-contains) lists what else it holds.
 
 On long routes, where a grid cell is wider than 100m, footpaths, streams and minor roads are left out. They would be too small to show and would make the download much larger.
 
@@ -409,6 +410,7 @@ Once the diorama is running, it shows the same data credit as the stills along i
 | `--base-url URL` | bare names | The address `DIR` will be served at, such as `/hikes/derwent/` |
 | `--runtime-url URL` | `isotrail-embed.js` in `DIR` | The address of `isotrail-embed.js`, when one copy serves every hike |
 | `--exaggeration X` | automatic | As for [`render`](#terrain-and-look) |
+| `--no-desc` | off | Leave the GPX file's description out of the bundle |
 
 With `--size`, the element takes the poster's shape, as in `aspect="4:3"` for `1200x900`. The live diorama picks its own pixel scale to suit the page.
 
@@ -471,7 +473,7 @@ Without `--lang`, the element follows the page's own `lang`. A strings file look
 
 In a [config file](configuration.md), the `[render]` table's `duration`, `orbit`, `loop` and other playback keys reach `embed` too. An embed then plays like the animations, unless the `[embed]` table sets them.
 
-When the input is a bundle that already sits in `DIR` under the name `embed` would give it, it is left as it is. `isotrail embed site/hike.itb -o site` only writes the poster and snippet. If `--title`, `--season`, `--no-weather` or `--exaggeration` would change the bundle, the command stops instead, so the bundle you started from is never replaced. Write to another folder then.
+When the input is a bundle that already sits in `DIR` under the name `embed` would give it, it is left as it is. `isotrail embed site/hike.itb -o site` only writes the poster and snippet. If `--title`, `--no-desc`, `--season`, `--no-weather` or `--exaggeration` would change the bundle, the command stops instead, so the bundle you started from is never replaced. Write to another folder then.
 
 In Git Bash on Windows, an argument starting with `/` is turned into a Windows path before isotrail sees it. `--base-url /hikes/derwent/` becomes `C:/Program Files/Git/hikes/derwent/`, and isotrail warns when an address looks like that. Run the command as `MSYS_NO_PATHCONV=1 isotrail embed …`, or from PowerShell or Command Prompt.
 
@@ -573,6 +575,37 @@ isotrail theme print [-o FILE]
 
 `-o FILE` writes it to a file instead. Use it in Windows PowerShell 5.1, whose `>` saves text as UTF-16. isotrail doesn't read UTF-16 as a theme.
 
+## What a scene file contains
+
+A scene bundle is often shared, for example beside an embed on a website. Anyone who downloads it can read what it holds:
+
+- the title, and the name and description from the GPX file
+- the date, the time zone, the hike's statistics and the area it covers
+- the route as a line of points, each with its distance, elevation and time
+- the slab's place on the map, its terrain and what covers the ground
+- the sun and moon every 5 minutes from the start to the end
+- the weather hour by hour, and the season
+
+`isotrail stats hike.itb --json` prints most of it. Three options keep a bundle from saying more than you want:
+
+| Option | What it leaves out |
+| --- | --- |
+| `--times coarse` | The minute the hike started, and where you were when |
+| `--times none` | The date and every time |
+| `--no-desc` | The GPX file's description |
+
+`--times` works with a GPX file on `render`, `embed`, `bundle` and `style-lab`. `--no-desc` works on `bundle` and `embed`, and also on a bundle given to `embed`.
+
+`--times coarse` rounds the start to the nearest half hour in local time. It rounds the length to the nearest quarter hour. Each point is then timed as if you walked at an even pace. The sun, moon and weather follow these times. The date, the season and the moving and elapsed times stay as recorded. Animations of a hike over several days no longer pause for the nights.
+
+`--times none` makes the bundle as if the GPX file had no times. It is lit by a late-morning sun, with no weather and no season of its own. isotrail says so in one line. `--time` needs the date, so it can't go with `--times none`.
+
+The terrain and trees come out the same whichever `--times` you choose. Only the light can differ.
+
+A bundle keeps the times it was made with. Given a bundle, `--times coarse` and `--times none` stop with an error rather than write a file that still holds the recorded times. Make the bundle again from the GPX file.
+
+None of this hides where the hike was. The slab, its map and the route show that.
+
 ## Output for scripts
 
 `render`, `embed`, `bundle` and `style-lab` print a line for each file they write. With `--json` they print one JSON object at the end instead, and nothing else on standard output:
@@ -643,5 +676,6 @@ The commands that draw or prepare a hike share their options. This table shows w
 | `--orbit`, `--pace` ([animation](#animation)), `--loop` ([encoding](#encoding)) | yes | [for playback](#playback-and-controls) | – | – |
 | `--fps`, `--step-fps` ([animation](#animation)), other [encoding](#encoding) options | yes | – | – | – |
 | [Data](#data) | yes | yes | yes | yes |
+| `--no-desc` ([scene file](#what-a-scene-file-contains)) | – | yes | yes | – |
 | `--config FILE` ([configuration](configuration.md)) | yes | yes | yes | yes |
 | `--json` ([output for scripts](#output-for-scripts)) | yes | yes | yes | yes |

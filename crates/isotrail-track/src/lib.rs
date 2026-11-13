@@ -28,6 +28,7 @@ mod reader;
 mod simplify;
 mod stats;
 mod sun;
+mod times;
 mod timezone;
 
 pub use chrono_tz::Tz;
