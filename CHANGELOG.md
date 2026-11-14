@@ -34,6 +34,8 @@ All notable changes to `isotrail` are documented here.
 - The web embed's clouds, rain and snow start where the poster has them.
 - A page's own `--route` variable no longer colours the web embed's progress line.
 - The web embed keeps its pixels sharp when the browser stretches its canvas.
+- The poster in `embed`'s snippet keeps its pixels sharp too, before the script runs.
+- An error that starts with a file or folder name, such as `Photo.png is an image`, keeps the name as you typed it. It used to print the first letter in lower case.
 
 ## [1.4.1] - 2026-11-12
 

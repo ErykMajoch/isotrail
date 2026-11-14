@@ -143,6 +143,21 @@ fn a_picture_or_video_is_not_a_hike() {
 }
 
 #[test]
+fn names_at_the_start_of_a_message_keep_their_capitals() {
+    let temp = with_hike();
+    fs::create_dir(temp.path().join("Hikes")).unwrap();
+    fs::write(temp.path().join("Photo.png"), b"\x89PNG\r\n\x1a\n").unwrap();
+    let output = isotrail(temp.path(), &["render", "Hikes"]);
+    assert_error(&output, 1, "error: Hikes is a folder");
+    let output = isotrail(temp.path(), &["render", "Photo.png", "-o", "out.png"]);
+    assert_error(&output, 1, "error: Photo.png is an image");
+    let output = isotrail(temp.path(), &["batch", "Hikes", "-o", "site"]);
+    assert_error(&output, 1, "error: Hikes has no GPX files in it");
+    let output = isotrail(temp.path(), &["batch", "Photo.png", "-o", "site"]);
+    assert_error(&output, 1, "error: Photo.png is a file");
+}
+
+#[test]
 fn offline_with_an_empty_cache_says_to_go_online_once() {
     let temp = with_hike();
     let output = Command::new(env!("CARGO_BIN_EXE_isotrail"))

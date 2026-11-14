@@ -314,6 +314,8 @@ fn describe(error: &anyhow::Error) -> String {
     for cause in error.chain() {
         let text = match cause.downcast_ref::<io::Error>() {
             Some(io) => io_words(io),
+            // Written lower case already, and may start with a folder's name
+            None if cause.is::<BadInput>() => cause.to_string(),
             None => plain(&cause.to_string()),
         };
         if !text.is_empty() && !parts.iter().any(|part| part.contains(&text)) {
@@ -338,19 +340,26 @@ fn io_words(error: &io::Error) -> String {
 }
 
 /// A message without the operating system's error number, its full stop or
-/// a capital letter at the start of a sentence
+/// a capital letter at the start of a sentence. A file name or path at the
+/// start, such as `Ridge.gpx`, keeps its capital
 fn plain(text: &str) -> String {
     let text = match text.rfind(" (os error ") {
         Some(at) if text.ends_with(')') => &text[..at],
         _ => text,
     };
     let text = text.trim().trim_end_matches('.');
+    let word = text.split(' ').next().is_some_and(|word| {
+        word.chars()
+            .all(|c| c.is_alphabetic() || c == '\'' || c == '’')
+    });
     let mut chars = text.chars();
     match (chars.next(), chars.next()) {
-        (Some(first), Some(second)) if first.is_uppercase() && second.is_lowercase() => first
-            .to_lowercase()
-            .chain(text[first.len_utf8()..].chars())
-            .collect(),
+        (Some(first), Some(second)) if word && first.is_uppercase() && second.is_lowercase() => {
+            first
+                .to_lowercase()
+                .chain(text[first.len_utf8()..].chars())
+                .collect()
+        }
         _ => text.to_owned(),
     }
 }
@@ -825,5 +834,23 @@ mod tests {
             plain("GPU did not finish rendering"),
             "GPU did not finish rendering"
         );
+        assert_eq!(
+            plain("The system cannot find the path specified."),
+            "the system cannot find the path specified"
+        );
+    }
+
+    #[test]
+    fn names_at_the_start_keep_their_capitals() {
+        let clash = "Walk.gpx and walk.gpx would write the same files on Windows and macOS";
+        assert_eq!(plain(clash), clash);
+        assert_eq!(
+            plain("Hikes/.. has no file name"),
+            "Hikes/.. has no file name"
+        );
+        let error = anyhow::Error::new(BadInput("Hikes is a folder".into()));
+        assert_eq!(describe(&error), "Hikes is a folder");
+        let error = anyhow::Error::new(BadInput("Hikes is a folder".into())).context("Can't go on");
+        assert_eq!(describe(&error), "can't go on: Hikes is a folder");
     }
 }
