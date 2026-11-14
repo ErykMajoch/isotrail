@@ -20,6 +20,7 @@ All notable changes to `isotrail` are documented here.
 - With `--json`, a command that fails prints an error object with a reason, such as `network` or `offline`. A script can tell what went wrong without reading the message.
 - isotrail and the web runtime open scene files in the format before their own, as well as the current one. Updating no longer breaks the bundles a website already serves.
 - `isotrail batch` makes a scene file, an image and a JSON file of statistics for every GPX file in a folder. A second run only makes the hikes that changed.
+- The web guide walks through putting hikes on a static site. It covers a build script, sharp pixels, loading on a press, the server's settings and what a scene file tells.
 
 ### Changed
 

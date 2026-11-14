@@ -51,6 +51,9 @@
     .square {
       max-width: 420px;
     }
+    .sharp {
+      max-width: 640px;
+    }
   </style>
   <script type="module" src="demo.js"></script>
   <script type="module" src="../isotrail-embed.js"></script>
@@ -65,11 +68,16 @@
     </p>
 
     <h2>Loading on a press</h2>
-    <p>Nothing more downloads until you press play.</p>
-    <isotrail-hike src="hike.itb" poster="hike.png" aspect="wide" load="press" style="display:block;aspect-ratio:16/9"><img src="hike.png" alt="Diorama of a synthetic hike" style="display:block;width:100%"></isotrail-hike>
+    <p>
+      Nothing more downloads until you press play. At 640 pixels wide, the poster is the diorama's
+      first frame, so the picture doesn't change when the diorama takes over.
+    </p>
+    <div class="sharp">
+      <isotrail-hike src="hike.itb" poster="press.png" aspect="wide" load="press" style="display:block;aspect-ratio:16/9"><img src="press.png" alt="Diorama of a synthetic hike" style="display:block;width:100%;image-rendering:pixelated"></isotrail-hike>
+    </div>
 
     <h2>Wide, with a poster</h2>
-    <isotrail-hike src="hike.itb" poster="hike.png" aspect="wide" style="display:block;aspect-ratio:16/9"><img src="hike.png" alt="Diorama of a synthetic hike" style="display:block;width:100%"></isotrail-hike>
+    <isotrail-hike src="hike.itb" poster="hike.png" aspect="wide" style="display:block;aspect-ratio:16/9"><img src="hike.png" alt="Diorama of a synthetic hike" style="display:block;width:100%;image-rendering:pixelated"></isotrail-hike>
 
     <h2>Square, playing on its own and looping</h2>
     <div class="square">

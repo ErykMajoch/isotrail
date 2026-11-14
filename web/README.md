@@ -23,7 +23,7 @@ static/hikes/derwent/
 
 ```html
 <script type="module" src="/hikes/derwent/isotrail-embed.js?v=1.4.1"></script>
-<isotrail-hike src="/hikes/derwent/derwent-edge.itb" poster="/hikes/derwent/derwent-edge.png" aspect="wide" style="display:block;aspect-ratio:16/9"><img src="/hikes/derwent/derwent-edge.png" alt="Diorama of Derwent Edge" style="display:block;width:100%"></isotrail-hike>
+<isotrail-hike src="/hikes/derwent/derwent-edge.itb" poster="/hikes/derwent/derwent-edge.png" aspect="wide" style="display:block;aspect-ratio:16/9"><img src="/hikes/derwent/derwent-edge.png" alt="Diorama of Derwent Edge" style="display:block;width:100%;image-rendering:pixelated"></isotrail-hike>
 ```
 
 The image inside the element is for pages where the script doesn't run, because it is blocked, missing or still loading. The element already has its size and shows the poster, so nothing jumps when the script arrives. Once the script runs, the element shows its own copy of the poster and hides this one.
@@ -32,17 +32,7 @@ The `?v=` on the script's address is the isotrail version, and the script passes
 
 `--base-url` is the address the folder will be served at. Without it, the snippet uses bare file names, so you can serve the folder and open `snippet.html` to preview it. `--aspect` sets the shape of the element and its poster. The poster also takes `render`'s overlay options, such as `--title` or `--overlay none`. [The usage guide](../docs/usage.md#embed) lists every option.
 
-### A poster the live view replaces without a jump
-
-The live diorama starts at the poster's size. It shrinks only as far as each angle needs while it turns. With `--overlay none` and a shape with 5% margins, such as `wide`, the poster is the live view's first frame. Both must be drawn at the same size for that.
-
-The live view draws one pixel for each device pixel while the element's longer side is at most 640, and coarser pixels above that. For an element shown at 640 x 360 on a screen with one device pixel per CSS pixel, make the poster like this:
-
-```sh
-isotrail embed hike.gpx -o site --size 640x360 --scale 1 --overlay none
-```
-
-A still you make with `render` and the same options matches too. A poster with the title and stats panels doesn't, because the panels move its diorama.
+For a site with many hikes, [On a static site](#on-a-static-site) goes through the whole setup, from a build script to the server.
 
 ### One runtime for several hikes
 
@@ -66,7 +56,7 @@ Put the files under `static/`, with the runtime in `static/isotrail/`. Then add 
 {{- $ratios := dict "story" "9/16" "video" "9/16" "portrait" "3/4" "feed" "4/5" "square" "1/1" "wide" "16/9" -}}
 {{- $ratio := index $ratios $aspect | default (replace $aspect ":" "/") -}}
 <script type="module" src="/isotrail/isotrail-embed.js?v={{ $version }}"></script>
-<isotrail-hike src="{{ .Get "src" }}" poster="{{ .Get "poster" }}" aspect="{{ $aspect }}"{{ if .Get "autoplay" }} autoplay{{ end }} style="{{ printf "display:block;aspect-ratio:%s" $ratio | safeCSS }}"><img src="{{ .Get "poster" }}" alt="{{ .Get "alt" | default "Hike diorama" }}" style="display:block;width:100%"></isotrail-hike>
+<isotrail-hike src="{{ .Get "src" }}" poster="{{ .Get "poster" }}" aspect="{{ $aspect }}"{{ if .Get "autoplay" }} autoplay{{ end }} style="{{ printf "display:block;aspect-ratio:%s" $ratio | safeCSS }}"><img src="{{ .Get "poster" }}" alt="{{ .Get "alt" | default "Hike diorama" }}" style="display:block;width:100%;image-rendering:pixelated"></isotrail-hike>
 ```
 
 Use it in any post:
@@ -89,7 +79,7 @@ const ratios = { story: '9/16', video: '9/16', portrait: '3/4', feed: '4/5', squ
 const ratio = ratios[aspect] ?? aspect.replace(':', '/');
 ---
 <script is:inline type="module" src={`/isotrail/isotrail-embed.js?v=${version}`}></script>
-<isotrail-hike src={src} poster={poster} aspect={aspect} autoplay={autoplay} style={`display:block;aspect-ratio:${ratio}`}><img src={poster} alt={alt} style="display:block;width:100%"></isotrail-hike>
+<isotrail-hike src={src} poster={poster} aspect={aspect} autoplay={autoplay} style={`display:block;aspect-ratio:${ratio}`}><img src={poster} alt={alt} style="display:block;width:100%;image-rendering:pixelated"></isotrail-hike>
 ```
 
 `is:inline` stops Astro from bundling the script, which has to stay next to its `pkg/` folder. Use the component in a page or an MDX post:
@@ -363,17 +353,81 @@ You can style the parts `canvas`, `play`, `scrubber` (the progress line), `zoom-
 
 On touch screens, the buttons take touches across 44 pixels and the progress line across 24, though they look the same size.
 
-## Hosting checklist
+## On a static site
+
+This section puts a folder of hikes on a static site, in the order a build runs. Pages stay fast, the pixels stay sharp, and the scene files say no more than you want them to.
+
+### Make the files in a build script
+
+[`isotrail batch`](../docs/usage.md#batch) makes a scene file, a poster and a JSON file for every GPX file in a folder. It only remakes the hikes that changed, so a build script can run it every time. This script does that, then copies the runtime from the release download that `isotrail` came in:
+
+```sh
+#!/bin/sh
+set -eu
+isotrail batch hikes -o static/hikes --size 640x360 --scale 1 --overlay none --times coarse --no-desc
+mkdir -p static/isotrail
+cp -R "$(dirname "$(command -v isotrail)")/web/." static/isotrail/
+```
+
+`--size`, `--scale` and `--overlay` make a poster the live view can start from, as the next steps explain. `--times coarse` rounds the times in the scene files, and `--no-desc` leaves out the GPX file's description.
+
+Each hike's JSON file holds its statistics and its files. Its `made_from.isotrail` is the isotrail version that made it. The site's template can write each element from the JSON file, with that version after `?v=`:
+
+```html
+<script type="module" src="/isotrail/isotrail-embed.js?v=1.4.1"></script>
+<isotrail-hike src="/hikes/ridge.itb" poster="/hikes/ridge.png" aspect="wide" load="press"><img src="/hikes/ridge.png" alt="Diorama of the ridge walk"></isotrail-hike>
+```
+
+### Keep room before the script runs
+
+Until the script runs, the element is an unknown tag to the browser, with no size of its own. Give it its shape in the site's stylesheet, so nothing on the page moves when the script arrives:
+
+```css
+isotrail-hike { display: block; aspect-ratio: 16 / 9; max-width: 640px }
+isotrail-hike > img { display: block; width: 100%; image-rendering: pixelated }
+```
+
+`image-rendering: pixelated` keeps the poster's pixels square when the browser enlarges it. Snippets from `isotrail embed` hold the same rules in `style` attributes. [Content-Security-Policy](#content-security-policy) shows the rules for an element with `credit="below"`.
+
+### Keep the pixels sharp
+
+The live diorama starts at the poster's size, and shrinks only as far as each angle needs while it turns. A poster can then be the live view's first frame, so the picture doesn't change when the live view takes over. For that, the poster needs:
+
+- no overlays, with `--overlay none`
+- 5% margins, as `wide`, `square`, `feed`, `portrait` and `--size` have
+- the size the element draws at
+
+The live view draws one pixel for each device pixel while the element's longer side is at most 640 device pixels. Above that, each of its pixels covers two or more. An element 640 CSS pixels wide therefore draws 640 x 360 on screens with one, two or three device pixels per CSS pixel. The build script's `--size 640x360 --scale 1` poster matches all three.
+
+Other screens, and narrower ones such as phones, draw a little coarser than the poster. The swap then shows a small change. A poster with the title and stats panels never lines up, because the panels move its diorama. A still you make with `render` and the same options matches as the poster does.
+
+### Load on a press
+
+The renderer is about 1.1MB gzipped, and the element downloads it when it comes near the screen. With `load="press"`, the page loads only the script and the poster until a visitor presses play. Use it for a hike near the top of a page that most visitors scroll past. [Loading on a press](#loading-on-a-press) has the details, and `isotrail embed --load press` writes the attribute.
+
+### Set up the server
 
 - Serve `.wasm` as `application/wasm` and `.js` as `text/javascript`
-- Let browsers cache `isotrail-embed.js`, `pkg/` and the bundles for a long time
+- Compress `.wasm` and `.js` files with gzip or Brotli
+- Let browsers cache the runtime for a long time, and the scene files and posters for a short one
 - Serve the page over HTTPS, so browsers offer WebGPU
 - If the site has a Content-Security-Policy, allow the element in it, as [shown below](#content-security-policy)
-- Check what the bundle says about the hike, as [shown below](#what-a-scene-file-contains)
 
 Most servers and static hosts already send the right types. With another type for `.wasm`, the renderer still loads, but more slowly and with a warning in the console. `.itb` can be `application/octet-stream`.
 
-Long caching is safe because the snippet's `?v=` changes with every isotrail version. When you update isotrail, update the runtime and remake the snippets together. The runtime also opens bundles in the format before its own, so they keep working. The changelog says when a release changes the format. Remake the bundles before the next change, or they stop opening.
+The runtime is 2.7MB, and about 1.1MB with gzip. Brotli makes it smaller still. Static hosts usually compress it by themselves. A server you set up yourself may leave `application/wasm` out of the types it compresses, so add it there.
+
+A scene file is compressed already, so a server gains nothing by compressing it again. While a compressed file downloads, the progress line can't show how much has arrived, as [Controls](#controls) explains.
+
+The runtime's addresses carry `?v=`, which changes with every isotrail version. Browsers can keep `isotrail-embed.js` and `pkg/` for a year, with this header:
+
+```text
+Cache-Control: public, max-age=31536000, immutable
+```
+
+Scene files and posters keep their names when you make them again. Give them a short cache, such as an hour (`max-age=3600`), so visitors see the new ones soon.
+
+When you update isotrail, update the runtime and remake the snippets together. `batch` makes every hike again after an update. The runtime also opens scene files in the format before its own, so they keep working. The changelog says when a release changes the format. Remake the scene files before the next change, or they stop opening.
 
 Browsers only offer WebGPU on secure pages and on `localhost`. Elsewhere the element uses WebGL2.
 
@@ -395,14 +449,14 @@ The `style` attributes in the snippet are inline styles, which `style-src 'self'
 
 ```css
 isotrail-hike { display: block; aspect-ratio: 16 / 9 }
-isotrail-hike > img { display: block; width: 100% }
+isotrail-hike > img { display: block; width: 100%; image-rendering: pixelated }
 ```
 
 For a snippet with `credit="below"`, the ratio goes on the image and the credit has a style of its own:
 
 ```css
 isotrail-hike { display: block }
-isotrail-hike > img { display: block; width: 100%; aspect-ratio: 16 / 9 }
+isotrail-hike > img { display: block; width: 100%; aspect-ratio: 16 / 9; image-rendering: pixelated }
 isotrail-hike > p { margin: 4px 0 0; font: 11px/1.3 system-ui, sans-serif; text-align: center; overflow-wrap: anywhere }
 isotrail-hike > p a { color: inherit }
 ```
@@ -417,7 +471,7 @@ Make the bundle with `--times coarse` to round the times, or with `--times none`
 isotrail embed hike.gpx -o site/hikes --times coarse --no-desc --trim-start 500m --trim-end 500m
 ```
 
-The times and trim options need the GPX file, because a bundle keeps the times and route it was made with. The [usage guide](../docs/usage.md#what-a-scene-file-contains) lists everything a bundle holds and what each option changes.
+`batch` takes the same options. The times and trim options need the GPX file, because a bundle keeps the times and route it was made with. The [usage guide](../docs/usage.md#what-a-scene-file-contains) lists everything a bundle holds and what each option changes.
 
 ### Data credit
 
@@ -426,7 +480,7 @@ Once the diorama replaces the poster, a small line along its bottom edge credits
 Over a light page or a transparent background, the outlined line can be hard to read. `credit="below"` moves it under the diorama as ordinary small text without an outline. It takes the page's text colour, or `--isotrail-text` when that is set on the element. The diorama keeps its shape, and the element grows by the line. `isotrail embed --credit below` writes a snippet for it:
 
 ```html
-<isotrail-hike src="derwent-edge.itb" poster="derwent-edge.png" aspect="wide" credit="below" style="display:block"><img src="derwent-edge.png" alt="Diorama of Derwent Edge" style="display:block;width:100%;aspect-ratio:16/9"><p slot="credit" style="…">© <a href="https://www.openstreetmap.org/copyright" …>OpenStreetMap</a> contributors · Terrain Tiles (AWS)</p></isotrail-hike>
+<isotrail-hike src="derwent-edge.itb" poster="derwent-edge.png" aspect="wide" credit="below" style="display:block"><img src="derwent-edge.png" alt="Diorama of Derwent Edge" style="display:block;width:100%;aspect-ratio:16/9;image-rendering:pixelated"><p slot="credit" style="…">© <a href="https://www.openstreetmap.org/copyright" …>OpenStreetMap</a> contributors · Terrain Tiles (AWS)</p></isotrail-hike>
 ```
 
 The shape moves from the element to the image, and the credit follows it. The line shows where the script doesn't run, and until the diorama replaces it with its own.
@@ -435,7 +489,7 @@ You can restyle the line with `::part(credit)`. **If you hide it, with `credit="
 
 ### Many hikes on one page
 
-The poster shows at once. The renderer, about 1.1MB gzipped, only downloads when the element comes near the screen, and only once for the whole page. With `load="press"`, it waits for a press instead. Use that for a hike at the top of a page that most visitors scroll past.
+The poster shows at once. The renderer only downloads when an element comes near the screen, and only once for the whole page. With `load="press"`, it [waits for a press](#load-on-a-press) instead.
 
 Browsers give a page about 16 WebGL contexts. So when an element has been well off screen for a few seconds, it frees its renderer and shows its poster. It starts again when it comes back, from the starting view.
 
@@ -449,7 +503,7 @@ Serve the `web/` folder with any static file server, and open `/demo/`:
 python -m http.server -d web 8000    # then open http://localhost:8000/demo/
 ```
 
-The page shows a synthetic hike four times: waiting for a press, with a poster, looping on its own, and without controls. A link at the top switches all four to the WebGL2 fallback (`?backend=webgl` in the address).
+The page shows a synthetic hike four times: waiting for a press, with a poster, looping on its own, and without controls. The first one follows [On a static site](#on-a-static-site), with a poster that is its first frame. A link at the top switches all four to the WebGL2 fallback (`?backend=webgl` in the address).
 
 To try it on a phone on the same network, serve it with `python -m http.server -d web 8000 --bind 0.0.0.0`. Then open `http://<your computer's address>:8000/demo/` on the phone. A plain `http://` address like this isn't secure, so the phone uses WebGL2.
 
@@ -467,7 +521,7 @@ Then, from the repository root (in Git Bash on Windows):
 sh web/build.sh
 ```
 
-This runs three steps, which you can also run by hand:
+This runs these steps, which you can also run by hand:
 
 ```bash
 # The renderer, built for size and optimised with wasm-opt -Oz, into web/pkg/
@@ -476,8 +530,9 @@ wasm-pack build crates/isotrail-web --target web --profile web --out-dir ../../w
 # A synthetic hike for the demo, into web/demo/hike.itb
 cargo run -p isotrail-testkit --example demo_bundle -- web/demo/hike.itb
 
-# Its poster image
+# Its poster images: one for the wide examples, and one for the 640-pixel one
 cargo run -p isotrail-cli -- render web/demo/hike.itb -o web/demo/hike.png --aspect wide --overlay none
+cargo run -p isotrail-cli -- render web/demo/hike.itb -o web/demo/press.png --size 640x360 --scale 1 --overlay none
 ```
 
 ## JavaScript API

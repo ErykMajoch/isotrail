@@ -47,7 +47,7 @@ Without `-o`, the picture is a PNG named after the input, in the current folder.
 | --- | --- | --- |
 | `-o, --output FILE` | `<input>.png` | The file to write: `.png` for a still, `.gif` or `.mp4` for an [animation](#animation) |
 | `--aspect LIST` | `story` | Image shapes from the table below, separated by commas |
-| `--size LIST` | none | Any sizes instead of aspects, separated by commas, such as `1200x900,600x450`, each side from 16 to 8192 |
+| `--size LIST` | none | Sizes instead of aspects, such as `1200x900,600x450`, each side from 16 to 8192 |
 | `--safe-area T,R,B,L` | the shape's | Margins kept clear, in percent, each from 0 to 45 |
 | `--scale N` | `3` | Output pixels per drawn pixel, from 1 to 16, dividing both sides of the image |
 | `--background VALUE` | `sky` | `sky`, `transparent`, or a colour such as `#1e2a33` |
@@ -291,7 +291,7 @@ The GIF options do nothing for an MP4, and the MP4 options nothing for a GIF. is
 | `--weather-url URL` | Open-Meteo | Another server with [Open-Meteo](https://open-meteo.com/)'s API |
 | `--cache-dir DIR` | see [cache](#cache) | The folder for downloaded data |
 | `--no-map-data` | off | Build the diorama from the elevation alone, without lakes, woods and paths |
-| `--padding P[,M]` | `15,500` | Ground round the route, in percent from 0 to 100 and metres from 0 to 10000 |
+| `--padding P[,M]` | `15,500` | Ground round the route, from 0 to 100 percent and from 0 to 10000m |
 | `--footprint route\|north` | `route` | Which way the slab's sides run: along the route, or north-south and east-west |
 | `--no-weather` | off | Leave out the weather, with the snow and ice it brings |
 | `--season SEASON` | `auto` | The [season](#season) to show: the hike's own, or `spring`, `summer`, `autumn` or `winter` |
@@ -333,7 +333,9 @@ The result is a scene bundle: one compact file, usually under 100KB, that holds 
 
 Bundles are useful when you want to try many looks for one hike, render offline, or keep a hike's scene as it was after the map data changes. `bundle` reads GPX files only: give a bundle straight to `render`, `embed` or `stats`.
 
-isotrail reads bundles in its own format and in the format before it. `embed` saves such a bundle in the current format. When a release changes the format, the changelog says so. A bundle from before that has to be made again from the GPX file. One made by a newer version needs isotrail updated, and isotrail says which. A damaged bundle, or one holding values no render could draw, is refused with a message.
+isotrail reads bundles in its own format and in the format before it. `embed` saves such a bundle in the current format.
+
+When a release changes the format, the changelog says so. A bundle from before that has to be made again from the GPX file. One made by a newer version needs isotrail updated, and isotrail says which. A damaged bundle, or one holding values no render could draw, is refused with a message.
 
 The command reports what it found:
 
@@ -396,7 +398,7 @@ isotrail embed <hike.gpx | hike.itb> -o DIR [options]
 
 ```html
 <script type="module" src="/hikes/derwent/isotrail-embed.js?v=1.4.1"></script>
-<isotrail-hike src="/hikes/derwent/derwent-edge.itb" poster="/hikes/derwent/derwent-edge.png" aspect="wide" style="display:block;aspect-ratio:16/9"><img src="/hikes/derwent/derwent-edge.png" alt="Diorama of Derwent Edge" style="display:block;width:100%"></isotrail-hike>
+<isotrail-hike src="/hikes/derwent/derwent-edge.itb" poster="/hikes/derwent/derwent-edge.png" aspect="wide" style="display:block;aspect-ratio:16/9"><img src="/hikes/derwent/derwent-edge.png" alt="Diorama of Derwent Edge" style="display:block;width:100%;image-rendering:pixelated"></isotrail-hike>
 ```
 
 The image inside the element shows the poster on pages where the script can't run. `?v=` carries the isotrail version, so browsers load the new runtime after an update instead of a cached old one. `--runtime-url` gets it too, unless that address already has a query.
@@ -527,7 +529,9 @@ Each JSON file records how its files were made: the GPX file's contents, the opt
 
 `--offline`, `--cache-dir` and the server addresses don't count as changes. Neither does saving a GPX file without changing it. `--force` makes every hike again. Files a run no longer writes are left in place, such as the image of a shape you stopped asking for.
 
-A hike that fails doesn't stop the rest. Its error is printed and the run goes on. At the end, `batch` exits with code 1. Two GPX files whose names differ only by case, such as `Ridge.gpx` and `ridge.gpx`, both fail. They would write the same files on Windows and macOS, so rename one. Downloads run one hike at a time, and a busy server gets the usual retries.
+A hike that fails doesn't stop the rest. Its error is printed and the run goes on. At the end, `batch` exits with code 1.
+
+Two GPX files whose names differ only by case, such as `Ridge.gpx` and `ridge.gpx`, both fail. They would write the same files on Windows and macOS, so rename one. Downloads run one hike at a time, and a busy server gets the usual retries.
 
 Each hike gets a line, and the last line counts them:
 
@@ -745,13 +749,17 @@ A scene bundle is often shared, for example beside an embed on a website. Anyone
 
 `--times` and the trim options work with a GPX file on `render`, `embed`, `bundle`, `batch` and `style-lab`. `--no-desc` works on `bundle`, `batch` and `embed`, and also on a bundle given to `embed`.
 
-`--times coarse` rounds the start to the nearest half hour in local time. It rounds the length to the nearest quarter hour. Each point is then timed as if you walked at an even pace. The sun, moon and weather follow these times. The date, the season and the moving and elapsed times stay as recorded. Animations of a hike over several days no longer pause for the nights.
+`--times coarse` rounds the start to the nearest half hour in local time. It rounds the length to the nearest quarter hour. Each point is then timed as if you walked at an even pace.
+
+The sun, moon and weather follow these times. The date, the season and the moving and elapsed times stay as recorded. Animations of a hike over several days no longer pause for the nights.
 
 `--times none` makes the bundle as if the GPX file had no times. It is lit by a late-morning sun, with no weather and no season of its own. isotrail says so in one line. `--time` needs the date, so it can't go with `--times none`.
 
 The terrain and trees come out the same whichever `--times` you choose. Only the light can differ.
 
-`--trim-start 300m` cuts the route at the first recorded point at least 300m from the start. `--trim-end` does the same from the end. Nothing about the cut part is kept. The distance, climb, times, profile, weather and season all describe the part that is left. A trim that leaves none of the route stops with an error that gives the route's length. `isotrail stats hike.gpx` still describes the whole walk.
+`--trim-start 300m` cuts the route at the first recorded point at least 300m from the start. `--trim-end` does the same from the end. Nothing about the cut part is kept.
+
+The distance, climb, times, profile, weather and season all describe the part that is left. A trim that leaves none of the route stops with an error that gives the route's length. `isotrail stats hike.gpx` still describes the whole walk.
 
 By default, the slab reaches at least 500m past the route. It may still show the ground you cut, without the route on it. A smaller `--padding` shows less ground round the route.
 
@@ -844,21 +852,20 @@ The commands that draw or prepare a hike share their options. This table shows w
 
 | Options | `render` | `embed` | `bundle` | `batch` | `style-lab` |
 | --- | --- | --- | --- | --- | --- |
-| `--aspect` ([image](#image)) | several | one | – | several | one |
-| `--scale` ([image](#image)) | yes | for the poster | – | yes | several |
-| `--size`, `--safe-area` ([image](#image)) | yes | for the poster | – | yes | – |
-| `--pitch`, `--turn`, `--heading`, `--zoom` ([camera](#camera)) | yes | yes | – | yes | – |
-| `--palette` ([look](#terrain-and-look)) | yes | yes | – | yes | several |
-| `--mesher`, `--block-height`, `--background`, `--time` ([look](#terrain-and-look)) | yes | yes | – | yes | – |
-| `--occlusion`, `--soft-shadows`, `--god-rays` ([look](#terrain-and-look)) | yes | yes | – | yes | – |
-| `--exaggeration` ([look](#terrain-and-look)) | yes | yes | yes | yes | yes |
-| `--theme FILE` ([theme files](configuration.md#theme-files)) | yes | yes | – | yes | yes |
+| [`--aspect`](#image) | several | one | – | several | one |
+| [`--scale`](#image) | yes | for the poster | – | yes | several |
+| [`--size`, `--safe-area`](#image) | yes | for the poster | – | yes | – |
+| [`--pitch`, `--turn`, `--heading`, `--zoom`](#camera) | yes | yes | – | yes | – |
+| [`--palette`](#terrain-and-look) | yes | yes | – | yes | several |
+| [`--exaggeration`](#terrain-and-look) | yes | yes | yes | yes | yes |
+| Other [look options](#terrain-and-look) | yes | yes | – | yes | – |
+| [`--theme FILE`](configuration.md#theme-files) | yes | yes | – | yes | yes |
 | [Scene, light and route](#scene-light-and-route) | yes | yes | – | yes | – |
 | [Text and overlays](#text-and-overlays) | yes | for the poster | `--title` only | yes | – |
-| `--duration`, `--intro`, `--hold`, `--loop-back` ([animation](#animation)) | yes | [for playback](#playback-and-controls) | – | – | – |
-| `--orbit`, `--pace` ([animation](#animation)), `--loop` ([encoding](#encoding)) | yes | [for playback](#playback-and-controls) | – | – | – |
-| `--fps`, `--step-fps` ([animation](#animation)), other [encoding](#encoding) options | yes | – | – | – | – |
+| [`--duration`, `--intro`, `--hold`, `--loop-back`](#animation) | yes | [for playback](#playback-and-controls) | – | – | – |
+| [`--orbit`, `--pace`](#animation), [`--loop`](#encoding) | yes | [for playback](#playback-and-controls) | – | – | – |
+| [`--fps`, `--step-fps`](#animation), other [encoding](#encoding) options | yes | – | – | – | – |
 | [Data](#data) | yes | yes | yes | yes | yes |
-| `--no-desc` ([scene file](#what-a-scene-file-contains)) | – | yes | yes | yes | – |
-| `--config FILE` ([configuration](configuration.md)) | yes | yes | yes | yes | yes |
-| `--json` ([output for scripts](#output-for-scripts)) | yes | yes | yes | yes | yes |
+| [`--no-desc`](#what-a-scene-file-contains) | – | yes | yes | yes | – |
+| [`--config FILE`](configuration.md) | yes | yes | yes | yes | yes |
+| [`--json`](#output-for-scripts) | yes | yes | yes | yes | yes |

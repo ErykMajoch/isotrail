@@ -456,12 +456,12 @@ fn snippet(snippet: &Snippet) -> String {
     let (host_style, img_style, credit) = match &snippet.below {
         None => (
             format!("display:block;{ratio}"),
-            "display:block;width:100%".to_owned(),
+            "display:block;width:100%;image-rendering:pixelated".to_owned(),
             String::new(),
         ),
         Some(below) => (
             "display:block".to_owned(),
-            format!("display:block;width:100%;{ratio}"),
+            format!("display:block;width:100%;{ratio};image-rendering:pixelated"),
             credit_line_html(below).unwrap_or_default(),
         ),
     };
@@ -558,7 +558,7 @@ mod tests {
                 "<script type=\"module\" src=\"isotrail-embed.js?v={}\"></script>\n\
                  <isotrail-hike src=\"ridge.itb\" poster=\"ridge.png\" aspect=\"wide\" \
                  style=\"display:block;aspect-ratio:16/9\"><img src=\"ridge.png\" \
-                 alt=\"Diorama of Ridge &lt;walk&gt;\" style=\"display:block;width:100%\">\
+                 alt=\"Diorama of Ridge &lt;walk&gt;\" style=\"display:block;width:100%;image-rendering:pixelated\">\
                  </isotrail-hike>\n",
                 env!("CARGO_PKG_VERSION")
             )
@@ -649,7 +649,7 @@ mod tests {
             html.lines().nth(1).unwrap(),
             "<isotrail-hike src=\"ridge.itb\" poster=\"ridge.png\" aspect=\"wide\" credit=\"below\" \
              style=\"display:block\"><img src=\"ridge.png\" alt=\"Diorama of Ridge\" \
-             style=\"display:block;width:100%;aspect-ratio:16/9\"><p slot=\"credit\" \
+             style=\"display:block;width:100%;aspect-ratio:16/9;image-rendering:pixelated\"><p slot=\"credit\" \
              style=\"margin:4px 0 0;font:11px/1.3 system-ui,sans-serif;text-align:center;\
              overflow-wrap:anywhere;color:var(--isotrail-text,currentColor)\">© \
              <a href=\"https://www.openstreetmap.org/copyright\" target=\"_blank\" rel=\"noopener\" \
@@ -661,7 +661,7 @@ mod tests {
         assert!(html.contains(r#"">Mine</p></isotrail-hike>"#), "{html}");
         let html = below(None, None);
         assert!(
-            html.contains(r#"aspect-ratio:16/9"></isotrail-hike>"#),
+            html.contains(r#"aspect-ratio:16/9;image-rendering:pixelated"></isotrail-hike>"#),
             "{html}"
         );
     }

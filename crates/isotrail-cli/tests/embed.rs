@@ -86,7 +86,7 @@ fn writes_a_bundle_poster_and_snippet() {
             "<script type=\"module\" src=\"isotrail-embed.js?v={}\"></script>\n\
              <isotrail-hike src=\"ridge.itb\" poster=\"ridge.png\" aspect=\"wide\" \
              style=\"display:block;aspect-ratio:16/9\"><img src=\"ridge.png\" \
-             alt=\"Diorama of {}\" style=\"display:block;width:100%\"></isotrail-hike>\n",
+             alt=\"Diorama of {}\" style=\"display:block;width:100%;image-rendering:pixelated\"></isotrail-hike>\n",
             env!("CARGO_PKG_VERSION"),
             hike_bundle().meta.title
         )
@@ -746,7 +746,7 @@ fn a_credit_below_is_written_under_the_poster() {
         "{html}"
     );
     assert!(
-        html.contains(r#"style="display:block;width:100%;aspect-ratio:16/9"><p slot="credit" "#),
+        html.contains(r#"style="display:block;width:100%;aspect-ratio:16/9;image-rendering:pixelated"><p slot="credit" "#),
         "{html}"
     );
     assert!(

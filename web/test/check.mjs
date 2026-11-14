@@ -150,10 +150,10 @@ const page = (body, { head = '', script = '/web/isotrail-embed.js', style = true
     : '') +
   `${head}<script type="module" src="${script}"></script><main>${body}</main>`;
 const snippetMarkup = (poster) =>
-  `<isotrail-hike src="/data/hike.itb"${poster ? ' poster="/data/poster.png"' : ''} aspect="wide"${backend} style="display:block;aspect-ratio:16/9"><img src="/data/poster.png" alt="Diorama of a test hike" style="display:block;width:100%"></isotrail-hike>`;
+  `<isotrail-hike src="/data/hike.itb"${poster ? ' poster="/data/poster.png"' : ''} aspect="wide"${backend} style="display:block;aspect-ratio:16/9"><img src="/data/poster.png" alt="Diorama of a test hike" style="display:block;width:100%;image-rendering:pixelated"></isotrail-hike>`;
 // As embed --credit below writes it, with the bundle's credit under the poster
 const belowMarkup = (attrs, host = 'display:block') =>
-  `<isotrail-hike ${attrs} src="/data/hike.itb" poster="/data/poster.png" aspect="wide" credit="below"${backend} style="${host}"><img src="/data/poster.png" alt="Diorama of a test hike" style="display:block;width:100%;aspect-ratio:16/9"><p slot="credit" style="margin:4px 0 0;font:11px/1.3 system-ui,sans-serif;text-align:center;overflow-wrap:anywhere;color:var(--isotrail-text,currentColor)">© Synthetic contributors · Made-up Tiles</p></isotrail-hike>`;
+  `<isotrail-hike ${attrs} src="/data/hike.itb" poster="/data/poster.png" aspect="wide" credit="below"${backend} style="${host}"><img src="/data/poster.png" alt="Diorama of a test hike" style="display:block;width:100%;aspect-ratio:16/9;image-rendering:pixelated"><p slot="credit" style="margin:4px 0 0;font:11px/1.3 system-ui,sans-serif;text-align:center;overflow-wrap:anywhere;color:var(--isotrail-text,currentColor)">© Synthetic contributors · Made-up Tiles</p></isotrail-hike>`;
 
 Object.assign(pages, {
   '/ready.html': page(
