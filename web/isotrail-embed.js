@@ -1,6 +1,6 @@
 // <isotrail-hike>: an interactive diorama of a hike for any web page
 
-// The script's own query (such as ?v=1.4.1) goes on to the files it loads,
+// The script's own query (such as ?v=1.5.0) goes on to the files it loads,
 // so a browser never pairs a cached old renderer with a new script
 const QUERY = new URL(import.meta.url).search;
 const RUNTIME = new URL(`./pkg/isotrail_web.js${QUERY}`, import.meta.url);

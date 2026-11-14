@@ -397,7 +397,7 @@ isotrail embed <hike.gpx | hike.itb> -o DIR [options]
 `<name>` is the input's file name without its extension. The poster shows until the diorama is ready, and stays in browsers that can't draw it. The snippet names the theme copy in a `theme` attribute, so the live diorama is themed like the poster.
 
 ```html
-<script type="module" src="/hikes/derwent/isotrail-embed.js?v=1.4.1"></script>
+<script type="module" src="/hikes/derwent/isotrail-embed.js?v=1.5.0"></script>
 <isotrail-hike src="/hikes/derwent/derwent-edge.itb" poster="/hikes/derwent/derwent-edge.png" aspect="wide" style="display:block;aspect-ratio:16/9"><img src="/hikes/derwent/derwent-edge.png" alt="Diorama of Derwent Edge" style="display:block;width:100%;image-rendering:pixelated"></isotrail-hike>
 ```
 

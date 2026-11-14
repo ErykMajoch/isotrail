@@ -4,6 +4,10 @@ All notable changes to `isotrail` are documented here.
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-14
+
+Built for websites: loading on a press, privacy options for scene files, more for scripts and a batch command. The scene file format is unchanged, so scene files made by 1.4.1 still work.
+
 ### Added
 
 - `--size` takes several sizes, such as `--size 640x480,320x240`. Each gets its own image, named like `hike-640x480.png`.
@@ -256,7 +260,8 @@ The first release: render any recorded hike as a pixel-art diorama PNG.
 - **Style lab:** `isotrail style-lab` renders every mesher, scale and palette on one labelled contact sheet.
 - Prebuilt binaries for Windows, Linux and macOS.
 
-[Unreleased]: https://github.com/ErykMajoch/isotrail/compare/v1.4.1...HEAD
+[Unreleased]: https://github.com/ErykMajoch/isotrail/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/ErykMajoch/isotrail/compare/v1.4.1...v1.5.0
 [1.4.1]: https://github.com/ErykMajoch/isotrail/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/ErykMajoch/isotrail/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/ErykMajoch/isotrail/compare/v1.3.0...v1.3.1

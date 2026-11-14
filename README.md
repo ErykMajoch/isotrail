@@ -125,6 +125,12 @@ isotrail embed hike.gpx -o site/hikes/my-hike --with-runtime
 # The same in another look, for the poster and the live diorama
 isotrail embed hike.gpx -o site/hikes/my-hike --palette resurrect-64 --mesher smooth
 
+# A scene file that doesn't tell when you walked or where you started
+isotrail embed hike.gpx -o site/hikes/my-hike --times coarse --trim-start 500m
+
+# Every hike in a folder, made again only when it changed
+isotrail batch hikes -o site/hikes
+
 # A small GIF that loops without a jump
 isotrail render hike.gpx -o hike.gif --gif-scale 1 --loop-back
 ```
@@ -150,6 +156,7 @@ A scene file for the web is ~100KB and every hike on a site shares one runtime o
 | [`render`](docs/usage.md#render) | Makes a PNG, GIF or MP4 of a hike |
 | [`bundle`](docs/usage.md#bundle) | Downloads the terrain and saves the scene as an `.itb` file |
 | [`embed`](docs/usage.md#embed) | Writes what a web page needs to show a diorama visitors can turn |
+| [`batch`](docs/usage.md#batch) | Makes the scene files, images and statistics for a folder of hikes |
 | [`stats`](docs/usage.md#stats) | Prints the distance, climb, times and weather of a hike |
 | [`style-lab`](docs/usage.md#style-lab) | Renders every terrain style, pixel scale and palette on one sheet |
 | [`cache`](docs/usage.md#cache) | Shows or clears the downloaded data |
