@@ -10,8 +10,8 @@ use isotrail_export::{
     render_clip, render_still, upscale,
 };
 use isotrail_render::{
-    Aim, Aspect, Background, Fitted, Frame, Gpu, Labels, Look, Mesher, Motion, Overlays, Pace,
-    SunState, Walk,
+    Aim, Background, Fitted, Frame, Gpu, Labels, Look, Mesher, Motion, Overlays, Pace, SunState,
+    Walk,
 };
 use isotrail_track::Track;
 use tracing::{info, warn};
@@ -93,7 +93,7 @@ pub struct RenderArgs {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Format {
+pub(crate) enum Format {
     Png,
     Gif,
     Mp4,
@@ -101,19 +101,7 @@ enum Format {
 
 impl RenderArgs {
     fn shapes(&self) -> anyhow::Result<Vec<Shape>> {
-        let aspects: Vec<Aspect> = self.aspect.iter().map(|&a| a.into()).collect();
-        for (i, aspect) in aspects.iter().enumerate() {
-            if aspects[..i].contains(aspect) {
-                return Err(usage(format!("--aspect lists {} twice", aspect.name())));
-            }
-        }
-        let sizes = &self.frame.size;
-        for (i, (width, height)) in sizes.iter().enumerate() {
-            if sizes[..i].contains(&(*width, *height)) {
-                return Err(usage(format!("--size lists {width}x{height} twice")));
-            }
-        }
-        Ok(self.frame.shapes(&aspects))
+        self.frame.listed_shapes(&self.aspect)
     }
 }
 
@@ -447,7 +435,7 @@ impl Source {
 
 /// One file per shape, named after its aspect or size when there are several, and
 /// the format their extension asks for
-fn output_paths(
+pub(crate) fn output_paths(
     input: &Path,
     output: Option<&Path>,
     shapes: &[Shape],
@@ -500,7 +488,7 @@ mod tests {
 
     use anyhow::bail;
     use clap::Parser;
-    use isotrail_render::Theme;
+    use isotrail_render::{Aspect, Theme};
     use isotrail_testkit::hike_bundle;
 
     use super::*;

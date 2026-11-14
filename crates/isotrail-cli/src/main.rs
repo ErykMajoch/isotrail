@@ -2,6 +2,7 @@
 //! diorama render
 
 mod animation;
+mod batch;
 mod bundle;
 mod cache;
 mod config;
@@ -98,6 +99,9 @@ enum Command {
     /// Save the terrain around a GPX route, with the route, as a scene bundle (.itb)
     #[command(allow_negative_numbers = true)]
     Bundle(bundle::BundleArgs),
+    /// Make scene files, images and JSON files for a folder of GPX files
+    #[command(allow_negative_numbers = true)]
+    Batch(Box<batch::BatchArgs>),
     /// Print distance, elevation and time statistics for a hike
     #[command(allow_negative_numbers = true)]
     Stats(stats::StatsArgs),
@@ -122,6 +126,7 @@ fn main() -> ExitCode {
     let result = match cli.command {
         Command::Stats(args) => stats::run(&args),
         Command::Bundle(args) => bundle::run(&args),
+        Command::Batch(args) => batch::run(&args, &typed),
         Command::Render(args) => render::run(&args, &typed),
         Command::Embed(args) => embed::run(&args, &typed),
         Command::StyleLab(args) => style_lab::run(&args, &typed),
@@ -181,10 +186,19 @@ fn report(error: &anyhow::Error, command: Option<&str>) -> ExitCode {
         };
         clap_error.exit();
     }
+    if error.is::<batch::HikesFailed>() {
+        print_error(&error.to_string());
+        return ExitCode::FAILURE;
+    }
     let message = describe(error);
     report::failed(reason, &message);
-    let _ = clap::Error::raw(ErrorKind::Io, format!("{message}\n")).print();
+    print_error(&message);
     ExitCode::FAILURE
+}
+
+/// `error: ` and the message on stderr, as clap prints its own
+fn print_error(message: &str) {
+    let _ = clap::Error::raw(ErrorKind::Io, format!("{message}\n")).print();
 }
 
 /// Exits as clap does, after reporting a mistake in the arguments in JSON
@@ -659,7 +673,7 @@ mod tests {
     #[test]
     fn options_sit_under_the_usage_guides_headings() {
         let cli = built();
-        for name in ["render", "embed", "bundle", "style-lab"] {
+        for name in ["render", "embed", "bundle", "batch", "style-lab"] {
             let command = cli.find_subcommand(name).unwrap();
             for arg in options(command) {
                 let heading = arg.get_help_heading();
@@ -681,6 +695,7 @@ mod tests {
                 "render",
                 "embed",
                 "bundle",
+                "batch",
                 "stats",
                 "style-lab",
                 "cache",

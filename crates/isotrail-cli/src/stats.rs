@@ -48,7 +48,7 @@ pub struct StatsArgs {
     cache_dir: CacheDirArg,
 }
 
-fn parse_profile(value: &str) -> Result<usize, String> {
+pub(crate) fn parse_profile(value: &str) -> Result<usize, String> {
     parse_count(value, &(2..=PROFILE_SAMPLES as u32)).map(|n| n as usize)
 }
 
@@ -71,7 +71,7 @@ pub fn run(args: &StatsArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-struct Summary {
+pub(crate) struct Summary {
     title: String,
     name: Option<String>,
     desc: Option<String>,
@@ -90,6 +90,25 @@ struct SceneFacts {
 }
 
 impl Summary {
+    /// What a scene bundle read from `bytes` says about itself
+    pub(crate) fn of_bundle(bundle: SceneBundle, bytes: &[u8], weather: bool) -> Summary {
+        let scene = SceneFacts {
+            format: format_version(bytes).unwrap_or_default(),
+            generator: bundle.meta.provenance.generator.clone(),
+            caption_credit: data_credit(&bundle),
+        };
+        let meta = bundle.meta;
+        Summary {
+            stats: track_stats(&meta.stats, meta.timezone.as_deref()),
+            title: meta.title,
+            name: meta.name,
+            desc: meta.desc,
+            weather: bundle.weather.filter(|_| weather),
+            profile: Some(bundle.profile),
+            scene: Some(scene),
+        }
+    }
+
     /// `weather` is `Some(offline)` to include the weather
     fn read(path: &Path, weather: Option<bool>, args: &StatsArgs) -> anyhow::Result<Summary> {
         crate::check_input(path)?;
@@ -100,21 +119,7 @@ impl Summary {
             if weather.is_some() && bundle.weather.is_none() {
                 warn!("the bundle has no weather");
             }
-            let scene = SceneFacts {
-                format: format_version(&bytes).unwrap_or_default(),
-                generator: bundle.meta.provenance.generator.clone(),
-                caption_credit: data_credit(&bundle),
-            };
-            let meta = bundle.meta;
-            return Ok(Summary {
-                stats: track_stats(&meta.stats, meta.timezone.as_deref()),
-                title: meta.title,
-                name: meta.name,
-                desc: meta.desc,
-                weather: bundle.weather.filter(|_| weather.is_some()),
-                profile: Some(bundle.profile),
-                scene: Some(scene),
-            });
+            return Ok(Summary::of_bundle(bundle, &bytes, weather.is_some()));
         }
         let track = crate::parse_track(&bytes, path)?;
         let weather = match weather {
@@ -258,7 +263,7 @@ where
 }
 
 #[derive(Serialize)]
-struct Report<'a> {
+pub(crate) struct Report<'a> {
     name: Option<&'a str>,
     desc: Option<&'a str>,
     points: usize,
@@ -333,7 +338,7 @@ struct BoundsReport {
 
 impl<'a> Report<'a> {
     /// With `profile` points, if asked for and known
-    fn new(summary: &'a Summary, profile: Option<usize>) -> Self {
+    pub(crate) fn new(summary: &'a Summary, profile: Option<usize>) -> Self {
         let stats = &summary.stats;
         let decimetres = |m: f64| (m * 10.0).round() / 10.0;
         let rfc3339 = |t: DateTime<_>| t.to_rfc3339_opts(SecondsFormat::Secs, true);

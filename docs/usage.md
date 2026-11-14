@@ -1,10 +1,11 @@
 # Usage
 
-isotrail has seven commands. `isotrail <command> --help` lists a command's options, grouped under the same headings as this page.
+isotrail has eight commands. `isotrail <command> --help` lists a command's options, grouped under the same headings as this page.
 
 - [`render`](#render): render a hike as a PNG, an animated GIF or an MP4 video
 - [`bundle`](#bundle): save a hike's scene as a `.itb` file
 - [`embed`](#embed): put an interactive diorama of a hike on a web page
+- [`batch`](#batch): make scene files, images and statistics for a folder of hikes
 - [`stats`](#stats): print a hike's statistics
 - [`style-lab`](#style-lab): compare every look on one contact sheet
 - [`cache`](#cache): manage downloaded data
@@ -486,6 +487,111 @@ In Git Bash on Windows, an argument starting with `/` is turned into a Windows p
 
 The release downloads have the runtime in a `web` folder next to the `isotrail` program. If you built isotrail yourself, build the runtime with `sh web/build.sh` and pass `--runtime-dir web` from the repository. [`web/README.md`](../web/README.md) covers the element's attributes, Hugo and Astro examples, and how to share one runtime between hikes.
 
+## batch
+
+```text
+isotrail batch <FOLDER> -o DIR [--force] [--profile N] [--json] [image options] [data options] [--no-desc] [--config FILE]
+```
+
+`batch` makes a scene file, an image and a JSON file for every GPX file in a folder. Run it again after you add or change a hike, and it only makes what changed. It suits a website built from a folder of hikes.
+
+It reads each `.gpx` file directly in `FOLDER`, in order of name, and leaves out the folders inside it. For `ridge.gpx` it writes these files into `DIR`:
+
+| File | Holds |
+| --- | --- |
+| `ridge.itb` | The scene file, as [`bundle`](#bundle) makes it |
+| `ridge.png` | The image, as [`render`](#render) draws it |
+| `ridge.json` | The hike's statistics and its files |
+
+Several shapes or sizes give one image each, named as `render` names them: `ridge-story.png` and `ridge-wide.png`, for example.
+
+`batch` takes `render`'s options for images, with the same defaults, so it draws one story image unless you ask for more. It takes `bundle`'s data options and `--no-desc` too. It doesn't make animations or embeds. [Which command takes what](#which-command-takes-what) lists its options.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `-o`, `--output DIR` | required | The folder to write to, created if needed |
+| `--force` | off | Make every hike again |
+| `--profile N` | `64` | Points in each JSON file's elevation profile, from 2 to 256 |
+| `--json` | off | Print one summary of the run, for scripts |
+
+From config files, `batch` takes its own `[batch]` table, and the `[render]` settings that are also its options.
+
+### Only what changed
+
+Each JSON file records how its files were made: the GPX file's contents, the options and the isotrail version. The next run skips a hike when all three match and its files are still there. Otherwise it redoes as much as the change needs:
+
+- A changed GPX file, data option or isotrail version makes everything again.
+- A changed image option draws the images again from the scene file, with no downloads.
+- A missing image is drawn again the same way.
+- A changed `--profile` only writes the JSON file again.
+
+`--offline`, `--cache-dir` and the server addresses don't count as changes. Neither does saving a GPX file without changing it. `--force` makes every hike again. Files a run no longer writes are left in place, such as the image of a shape you stopped asking for.
+
+A hike that fails doesn't stop the rest. Its error is printed and the run goes on. At the end, `batch` exits with code 1. Two GPX files whose names differ only by case, such as `Ridge.gpx` and `ridge.gpx`, both fail. They would write the same files on Windows and macOS, so rename one. Downloads run one hike at a time, and a busy server gets the usual retries.
+
+Each hike gets a line, and the last line counts them:
+
+```text
+lakes.gpx (1 of 3): unchanged
+moor.gpx (2 of 3): drawing the images again
+Wrote site/moor.png
+Wrote site/moor.json
+ridge.gpx (3 of 3)
+Wrote site/ridge.itb (64KB)
+Wrote site/ridge.png
+Wrote site/ridge.json
+Hikes: 1 made, 1 redrawn, 1 unchanged
+```
+
+A second run with nothing new prints `Nothing to do: all 3 hikes are unchanged`.
+
+### The JSON files
+
+Each JSON file holds what `isotrail stats ridge.itb --json --weather --profile 64` prints. It adds the files written and what they were made from:
+
+```json
+"files": [
+  { "path": "ridge.itb", "bytes": 65231 },
+  { "path": "ridge.png", "bytes": 412877, "width": 1080, "height": 1920 }
+],
+"made_from": {
+  "gpx": "ridge.gpx",
+  "gpx_sha256": "9c1f…",
+  "isotrail": "1.5.0",
+  "scene_options": "41d2…",
+  "image_options": "e07a…",
+  "profile": 64
+}
+```
+
+The paths are file names, so the folder can move to a website as it is. The options are kept as SHA-256 hashes, so no address or key you typed ends up in the file.
+
+With `--json`, `batch` prints one summary of the run instead of its lines:
+
+```json
+{
+  "hikes": [
+    { "input": "hikes/ridge.gpx", "result": "made", "files": [ ... ] },
+    {
+      "input": "hikes/broken.gpx",
+      "result": "failed",
+      "files": [],
+      "error": { "reason": "input", "message": "can't read hikes/broken.gpx: ..." }
+    }
+  ]
+}
+```
+
+| Result | What the run did |
+| --- | --- |
+| `made` | Wrote every file |
+| `redrawn` | Wrote the images and the JSON file |
+| `rewritten` | Wrote the JSON file only |
+| `unchanged` | Nothing |
+| `failed` | Stopped with an error |
+
+`files` lists the files written in this run, the JSON file included. An `error` has a [reason](#output-for-scripts) and a message, like a command's error object. A mistake that stops the whole run, such as a bad option, prints the usual error object instead.
+
 ## stats
 
 ```text
@@ -637,7 +743,7 @@ A scene bundle is often shared, for example beside an embed on a website. Anyone
 | `--no-desc` | The GPX file's description |
 | `--trim-start`, `--trim-end` | Where the walk started and ended |
 
-`--times` and the trim options work with a GPX file on `render`, `embed`, `bundle` and `style-lab`. `--no-desc` works on `bundle` and `embed`, and also on a bundle given to `embed`.
+`--times` and the trim options work with a GPX file on `render`, `embed`, `bundle`, `batch` and `style-lab`. `--no-desc` works on `bundle`, `batch` and `embed`, and also on a bundle given to `embed`.
 
 `--times coarse` rounds the start to the nearest half hour in local time. It rounds the length to the nearest quarter hour. Each point is then timed as if you walked at an even pace. The sun, moon and weather follow these times. The date, the season and the moving and elapsed times stay as recorded. Animations of a hike over several days no longer pause for the nights.
 
@@ -666,7 +772,7 @@ None of this hides the area the hike was in. The slab, its map and the route sho
 }
 ```
 
-Each file has its `path` as written and its size in `bytes`. Images add `width` and `height`, and animations their number of `frames`. `stats --json` keeps [its own format](#stats).
+Each file has its `path` as written and its size in `bytes`. Images add `width` and `height`, and animations their number of `frames`. `stats --json` keeps [its own format](#stats), and `batch --json` prints [a summary of its run](#the-json-files).
 
 `caption_credit` is the data credit to paste into a caption when the image doesn't show it, and `null` otherwise. The image leaves it out with `--no-attribution` or `--overlay none`, or when it doesn't fit.
 
@@ -683,7 +789,7 @@ When a command fails with `--json`, it prints an error object on standard output
 }
 ```
 
-The `message` is the same as the error line on standard error, which still prints. The [exit code](#exit-codes) stays the same as without `--json`. This works for `render`, `embed`, `bundle`, `style-lab` and `stats`.
+The `message` is the same as the error line on standard error, which still prints. The [exit code](#exit-codes) stays the same as without `--json`. This works for `render`, `embed`, `bundle`, `batch`, `style-lab` and `stats`.
 
 | Reason | What went wrong |
 | --- | --- |
@@ -736,23 +842,23 @@ With `--json`, a failure also prints [an error object](#output-for-scripts) that
 
 The commands that draw or prepare a hike share their options. This table shows which command takes which:
 
-| Options | `render` | `embed` | `bundle` | `style-lab` |
-| --- | --- | --- | --- | --- |
-| `--aspect` ([image](#image)) | several | one | – | one |
-| `--scale` ([image](#image)) | yes | for the poster | – | several |
-| `--size`, `--safe-area` ([image](#image)) | yes | for the poster | – | – |
-| `--pitch`, `--turn`, `--heading`, `--zoom` ([camera](#camera)) | yes | yes | – | – |
-| `--palette` ([look](#terrain-and-look)) | yes | yes | – | several |
-| `--mesher`, `--block-height`, `--background`, `--time` ([look](#terrain-and-look)) | yes | yes | – | – |
-| `--occlusion`, `--soft-shadows`, `--god-rays` ([look](#terrain-and-look)) | yes | yes | – | – |
-| `--exaggeration` ([look](#terrain-and-look)) | yes | yes | yes | yes |
-| `--theme FILE` ([theme files](configuration.md#theme-files)) | yes | yes | – | yes |
-| [Scene, light and route](#scene-light-and-route) | yes | yes | – | – |
-| [Text and overlays](#text-and-overlays) | yes | for the poster | `--title` only | – |
-| `--duration`, `--intro`, `--hold`, `--loop-back` ([animation](#animation)) | yes | [for playback](#playback-and-controls) | – | – |
-| `--orbit`, `--pace` ([animation](#animation)), `--loop` ([encoding](#encoding)) | yes | [for playback](#playback-and-controls) | – | – |
-| `--fps`, `--step-fps` ([animation](#animation)), other [encoding](#encoding) options | yes | – | – | – |
-| [Data](#data) | yes | yes | yes | yes |
-| `--no-desc` ([scene file](#what-a-scene-file-contains)) | – | yes | yes | – |
-| `--config FILE` ([configuration](configuration.md)) | yes | yes | yes | yes |
-| `--json` ([output for scripts](#output-for-scripts)) | yes | yes | yes | yes |
+| Options | `render` | `embed` | `bundle` | `batch` | `style-lab` |
+| --- | --- | --- | --- | --- | --- |
+| `--aspect` ([image](#image)) | several | one | – | several | one |
+| `--scale` ([image](#image)) | yes | for the poster | – | yes | several |
+| `--size`, `--safe-area` ([image](#image)) | yes | for the poster | – | yes | – |
+| `--pitch`, `--turn`, `--heading`, `--zoom` ([camera](#camera)) | yes | yes | – | yes | – |
+| `--palette` ([look](#terrain-and-look)) | yes | yes | – | yes | several |
+| `--mesher`, `--block-height`, `--background`, `--time` ([look](#terrain-and-look)) | yes | yes | – | yes | – |
+| `--occlusion`, `--soft-shadows`, `--god-rays` ([look](#terrain-and-look)) | yes | yes | – | yes | – |
+| `--exaggeration` ([look](#terrain-and-look)) | yes | yes | yes | yes | yes |
+| `--theme FILE` ([theme files](configuration.md#theme-files)) | yes | yes | – | yes | yes |
+| [Scene, light and route](#scene-light-and-route) | yes | yes | – | yes | – |
+| [Text and overlays](#text-and-overlays) | yes | for the poster | `--title` only | yes | – |
+| `--duration`, `--intro`, `--hold`, `--loop-back` ([animation](#animation)) | yes | [for playback](#playback-and-controls) | – | – | – |
+| `--orbit`, `--pace` ([animation](#animation)), `--loop` ([encoding](#encoding)) | yes | [for playback](#playback-and-controls) | – | – | – |
+| `--fps`, `--step-fps` ([animation](#animation)), other [encoding](#encoding) options | yes | – | – | – | – |
+| [Data](#data) | yes | yes | yes | yes | yes |
+| `--no-desc` ([scene file](#what-a-scene-file-contains)) | – | yes | yes | yes | – |
+| `--config FILE` ([configuration](configuration.md)) | yes | yes | yes | yes | yes |
+| `--json` ([output for scripts](#output-for-scripts)) | yes | yes | yes | yes | yes |

@@ -158,6 +158,13 @@ fn a_missing_input_for_every_command() {
         let message = fails_with(in_dir(temp.path()), args, 1, "input");
         assert_eq!(message, "can't open nothere.gpx: the file doesn't exist");
     }
+    let message = fails_with(
+        in_dir(temp.path()),
+        &["batch", "nothere", "-o", "out"],
+        1,
+        "input",
+    );
+    assert_eq!(message, "can't open the folder nothere: it doesn't exist");
 }
 
 #[test]

@@ -86,6 +86,24 @@ fn embed_help_groups_every_option_under_one_heading() {
 }
 
 #[test]
+fn batch_help_groups_every_option_under_one_heading() {
+    check(
+        "batch",
+        &[
+            "Arguments",
+            "Output",
+            "Image",
+            "Camera",
+            "Terrain and look",
+            "Scene, light and route",
+            "Text and overlays",
+            "Data",
+            "General",
+        ],
+    );
+}
+
+#[test]
 fn the_top_level_help_starts_with_render_and_an_example() {
     let output = isotrail(&["--help"]);
     assert!(output.status.success());

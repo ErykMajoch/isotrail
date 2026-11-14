@@ -126,6 +126,22 @@ impl FrameArgs {
         }
     }
 
+    /// The shapes of `--aspect` or `--size`, refusing one listed twice
+    pub fn listed_shapes(&self, aspect: &[AspectArg]) -> anyhow::Result<Vec<Shape>> {
+        let aspects: Vec<Aspect> = aspect.iter().map(|&a| a.into()).collect();
+        for (i, aspect) in aspects.iter().enumerate() {
+            if aspects[..i].contains(aspect) {
+                return Err(usage(format!("--aspect lists {} twice", aspect.name())));
+            }
+        }
+        for (i, (width, height)) in self.size.iter().enumerate() {
+            if self.size[..i].contains(&(*width, *height)) {
+                return Err(usage(format!("--size lists {width}x{height} twice")));
+            }
+        }
+        Ok(self.shapes(&aspects))
+    }
+
     pub fn canvas(&self, shape: Shape) -> Canvas {
         let canvas = match shape {
             Shape::Aspect(aspect) => aspect.canvas(),

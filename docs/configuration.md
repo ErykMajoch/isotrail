@@ -43,19 +43,22 @@ The `cache-dir` in the `[render]` table of your user config file is also where `
 
 ### The other commands
 
-`embed`, `bundle` and `style-lab` read the same files. Each takes the `[render]` settings that are also its own options and ignores the rest. One file then gives your web embeds and renders the same look.
+`embed`, `bundle`, `batch` and `style-lab` read the same files. Each takes the `[render]` settings that are also its own options and ignores the rest. One file then gives your web embeds and renders the same look.
 
 | Command | Takes from `[render]` |
 | --- | --- |
 | `embed` | Every setting that is also an `embed` option |
 | `bundle` | `title`, `exaggeration` and the data settings |
+| `batch` | Every setting that is also a `batch` option |
 | `style-lab` | `exaggeration`, `theme` and the data settings only |
 
 For `embed`, that means the look, theme, scene, camera, text and data settings. It also takes `scale` and `safe-area` for the poster, and `aspect` or `size` when it names one shape. The playback settings `duration`, `intro`, `hold`, `loop-back`, `orbit`, `pace` and `loop` reach it too.
 
+For `batch`, that means every setting for still images, the data settings and `no-desc`. It takes no animation settings.
+
 The data settings include `padding`, `footprint` and the server and cache settings. `style-lab` takes no palette or scale from `[render]`, so the ones you render with don't narrow its comparison.
 
-A command's own table, `[embed]`, `[bundle]` or `[style-lab]`, holds its own options and wins over `[render]` for that command:
+A command's own table, `[embed]`, `[bundle]`, `[batch]` or `[style-lab]`, holds its own options and wins over `[render]` for that command:
 
 ```toml
 [render]
@@ -72,6 +75,10 @@ controls = ["play", "scrubber"]
 [style-lab]
 palette = ["apollo", "resurrect-64", "warm.hex"]
 scale = [3, 5]
+
+[batch]
+aspect = "wide"                # one image per hike for the website
+overlay = "none"
 ```
 
 isotrail reads two files, if they exist:
@@ -103,8 +110,8 @@ An option you type also wins over settings it can't be combined with. With `date
 
 ### Rules
 
-- Only the `[render]`, `[embed]`, `[bundle]` and `[style-lab]` tables are allowed, so typos don't go unnoticed.
-- Each table only takes its command's options. An unknown key is an error, and so are `output`, `config`, `debug-dir`, `verbose`, `quiet`, `json`, `help` and `version`, which only make sense for one run.
+- Only the `[render]`, `[embed]`, `[bundle]`, `[batch]` and `[style-lab]` tables are allowed, so typos don't go unnoticed.
+- Each table only takes its command's options. An unknown key is an error, and so are `output`, `force`, `config`, `debug-dir`, `verbose`, `quiet`, `json`, `help` and `version`, which only make sense for one run.
 - A bad value is reported with the name of the file it came from, for example `scale in hike.toml: expected a whole number from 1 to 16`.
 - `--background` in a config file keeps its exact colour, as it does on the command line.
 - `time` can be a string (`"07:30"`) or a TOML time (`07:30:00`).

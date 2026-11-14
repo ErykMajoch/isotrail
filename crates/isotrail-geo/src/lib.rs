@@ -39,7 +39,7 @@ pub use dem::{
 pub use error::GeoError;
 pub use fetch::{
     Cache, CacheStats, CachedFetcher, FetchError, Fetcher, HttpFetcher, MAX_RESPONSE_BYTES,
-    RecordedFetcher, RetryPolicy, USER_AGENT, origin, redact,
+    RecordedFetcher, RetryPolicy, USER_AGENT, origin, redact, sha256_hex,
 };
 pub use footprint::{
     Footprint, FootprintOptions, MAX_ASPECT, MIN_PADDING_M, Orientation, PADDING_FRACTION,

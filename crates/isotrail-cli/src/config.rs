@@ -18,7 +18,7 @@ const CONFIG_ENV: &str = "ISOTRAIL_CONFIG";
 /// The table every command reads, besides its own
 const RENDER: &str = "render";
 /// The commands that read config files, each from the table of its name
-const COMMANDS: [&str; 4] = [RENDER, "embed", "bundle", "style-lab"];
+const COMMANDS: [&str; 5] = [RENDER, "embed", "bundle", "batch", "style-lab"];
 /// What style-lab takes from [render]: the data settings and the theme, not
 /// the looks it lays side by side
 const STYLE_LAB_FROM_RENDER: [&str; 16] = [
@@ -40,8 +40,9 @@ const STYLE_LAB_FROM_RENDER: [&str; 16] = [
     "theme",
 ];
 /// Flags that only make sense for one run
-const NOT_SETTINGS: [&str; 8] = [
+const NOT_SETTINGS: [&str; 9] = [
     "output",
+    "force",
     "config",
     "debug-dir",
     "verbose",
@@ -527,7 +528,7 @@ fn read_tables(path: &Path, cli: &Command) -> anyhow::Result<BTreeMap<String, Ta
             .flatten()
         else {
             bail!(
-                "{}: settings go in a [render], [embed], [bundle] or [style-lab] table, found {name:?} outside them",
+                "{}: settings go in a [render], [embed], [bundle], [batch] or [style-lab] table, found {name:?} outside them",
                 path.display()
             );
         };
@@ -958,6 +959,10 @@ controls = [\"play\", \"scrubber\"]
 
 [style-lab]
 palette = [\"apollo\", \"aap-64\"]
+
+[batch]
+palette = \"aap-64\"
+profile = 32
 ",
         );
         let result = |line: &str| strings(&with_config(args(line), found(user.clone())).unwrap());
@@ -1004,9 +1009,27 @@ palette = [\"apollo\", \"aap-64\"]
                 "lab"
             ]
         );
+        assert_eq!(
+            result("isotrail batch walks -o site"),
+            [
+                "isotrail",
+                "batch",
+                "--aspect=story,feed",
+                "--mesher=smooth",
+                "--palette=aap-64",
+                "--profile=32",
+                "--scale=5",
+                "--season=autumn",
+                "--title=Ridge",
+                "walks",
+                "-o",
+                "site"
+            ]
+        );
         for line in [
             "isotrail embed hike.gpx -o site",
             "isotrail bundle hike.gpx -o hike.itb",
+            "isotrail batch walks -o site",
             "isotrail style-lab hike.gpx -o lab",
             "isotrail render hike.gpx",
         ] {

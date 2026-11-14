@@ -23,14 +23,22 @@ pub(crate) fn check_time(
     if time.is_none() {
         return Ok(());
     }
-    if data.times == TimesArg::None && !source.is_bundle() {
-        return Err(usage(
-            "--time needs the hike's date, which --times none leaves out; place the sun with --sun instead",
-        ));
+    if !source.is_bundle() {
+        check_dated(time, data)?;
     }
     if !source.has_times() {
         return Err(usage(
             "--time needs a track with times, to know which day to light",
+        ));
+    }
+    Ok(())
+}
+
+/// Refuses `--time` with `--times none`, which leaves out the date it needs
+pub(crate) fn check_dated(time: Option<NaiveTime>, data: &DataArgs) -> anyhow::Result<()> {
+    if time.is_some() && data.times == TimesArg::None {
+        return Err(usage(
+            "--time needs the hike's date, which --times none leaves out; place the sun with --sun instead",
         ));
     }
     Ok(())

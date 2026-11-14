@@ -274,6 +274,26 @@ impl DataArgs {
         }
     }
 
+    /// The settings that change the scene made from a GPX file, leaving out
+    /// --offline, the cache and the servers, which only change where data
+    /// comes from
+    pub fn shaping(&self) -> String {
+        format!(
+            "{:?}",
+            (
+                self.detail,
+                self.no_map_data,
+                self.padding,
+                self.footprint,
+                self.no_weather,
+                self.season,
+                self.times,
+                self.trim_start,
+                self.trim_end,
+            )
+        )
+    }
+
     /// Warns about flags typed for fetching data, which a bundle doesn't need
     pub fn warn_unused_with_bundle(&self, typed: &Typed) {
         for (id, flag) in [

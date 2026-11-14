@@ -14,10 +14,15 @@ static JSON_ERRORS: AtomicBool = AtomicBool::new(false);
 static DOWNLOADING: AtomicBool = AtomicBool::new(false);
 
 /// Commands whose --json also reports a failure
-const JSON_COMMANDS: [&str; 5] = ["render", "embed", "bundle", "style-lab", "stats"];
+const JSON_COMMANDS: [&str; 6] = ["render", "embed", "bundle", "batch", "style-lab", "stats"];
 
 pub fn set_quiet(quiet: bool) {
     QUIET.store(quiet, Ordering::Relaxed);
+}
+
+/// Keeps lines for people off stdout, for a command that prints its own JSON
+pub fn set_json(json: bool) {
+    JSON.store(json, Ordering::Relaxed);
 }
 
 /// Looks for --json among the arguments typed, before they are parsed, so
@@ -99,6 +104,11 @@ pub fn downloading(line: &str) {
     }
 }
 
+/// Lets the next download say so again, for a run over several areas
+pub fn next_area() {
+    DOWNLOADING.store(false, Ordering::Relaxed);
+}
+
 /// The line before a run's first download, naming what it fetches
 pub fn download_line(map_data: bool, weather: bool) -> String {
     let what = match (map_data, weather) {
@@ -136,7 +146,7 @@ pub struct ReportArgs {
 }
 
 /// A file a command wrote
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Written {
     path: String,
     bytes: u64,
@@ -165,6 +175,15 @@ impl Written {
             height: Some(height),
             ..Written::file(path)
         }
+    }
+
+    /// The same file, named by its file name alone
+    pub fn named(self) -> Written {
+        let path = match Path::new(&self.path).file_name() {
+            Some(name) => name.to_string_lossy().into_owned(),
+            None => self.path,
+        };
+        Written { path, ..self }
     }
 
     pub fn clip(path: &Path, size: (u32, u32), frames: u32) -> Written {

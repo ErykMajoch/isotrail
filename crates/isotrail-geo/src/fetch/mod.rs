@@ -95,7 +95,7 @@ pub fn origin(url: &str) -> String {
     }
 }
 
-fn sha256_hex(parts: &[&[u8]]) -> String {
+pub fn sha256_hex(parts: &[&[u8]]) -> String {
     let mut hasher = Sha256::new();
     for part in parts {
         hasher.update(part);
