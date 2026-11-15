@@ -397,7 +397,7 @@ isotrail embed <hike.gpx | hike.itb> -o DIR [options]
 `<name>` is the input's file name without its extension. The poster shows until the diorama is ready, and stays in browsers that can't draw it. The snippet names the theme copy in a `theme` attribute, so the live diorama is themed like the poster.
 
 ```html
-<script type="module" src="/hikes/derwent/isotrail-embed.js?v=1.5.0"></script>
+<script type="module" src="/hikes/derwent/isotrail-embed.js?v=1.5.1"></script>
 <isotrail-hike src="/hikes/derwent/derwent-edge.itb" poster="/hikes/derwent/derwent-edge.png" aspect="wide" style="display:block;aspect-ratio:16/9"><img src="/hikes/derwent/derwent-edge.png" alt="Diorama of Derwent Edge" style="display:block;width:100%;image-rendering:pixelated"></isotrail-hike>
 ```
 
@@ -561,7 +561,7 @@ Each JSON file holds what `isotrail stats ridge.itb --json --weather --profile 6
 "made_from": {
   "gpx": "ridge.gpx",
   "gpx_sha256": "9c1f…",
-  "isotrail": "1.5.0",
+  "isotrail": "1.5.1",
   "scene_options": "41d2…",
   "image_options": "e07a…",
   "profile": 64
@@ -635,7 +635,7 @@ The points come from the bundle's profile, which is the one the image draws. A G
 A bundle adds three keys that a GPX file doesn't have:
 
 - `format`: the format the bundle was saved in, which can be the one before the current
-- `generator`: the isotrail that made it, such as `isotrail 1.5.0`
+- `generator`: the isotrail that made it, such as `isotrail 1.5.1`
 - `caption_credit`: the data credit for the hike, as `render` prints it for a caption
 
 `--weather` adds the weather during the hike. It comes from the bundle, or from [Open-Meteo](https://open-meteo.com/) for a GPX file, and `--offline` only uses the cache. A summary comes first, then one row per hour in local time. Temperatures and wind are values at the hour. Rain and snow are what fell in the hour before it.

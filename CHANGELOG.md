@@ -4,6 +4,10 @@ All notable changes to `isotrail` are documented here.
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-11-15
+
+A diorama that turns without jiggling. No new options. The scene file format is unchanged, so scene files made by 1.5.0 still work.
+
 ### Fixed
 
 - The web embed's diorama no longer jiggles while it turns. GIF and MP4 animations with a turning camera are steadier too.
@@ -265,7 +269,8 @@ The first release: render any recorded hike as a pixel-art diorama PNG.
 - **Style lab:** `isotrail style-lab` renders every mesher, scale and palette on one labelled contact sheet.
 - Prebuilt binaries for Windows, Linux and macOS.
 
-[Unreleased]: https://github.com/ErykMajoch/isotrail/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/ErykMajoch/isotrail/compare/v1.5.1...HEAD
+[1.5.1]: https://github.com/ErykMajoch/isotrail/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/ErykMajoch/isotrail/compare/v1.4.1...v1.5.0
 [1.4.1]: https://github.com/ErykMajoch/isotrail/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/ErykMajoch/isotrail/compare/v1.3.1...v1.4.0
