@@ -249,7 +249,7 @@ impl Camera {
     ) -> Camera {
         let fit = Projected::new(heading, pitch_deg, points);
         let per_pixel = fit.scale(framing) / zoom;
-        fit.camera(framing, per_pixel, Vec2::ZERO, false)
+        fit.camera(framing, per_pixel, Vec2::ZERO)
     }
 }
 
@@ -313,12 +313,8 @@ impl Projected {
         )
     }
 
-    fn camera(&self, framing: &Framing, per_pixel: f32, shift: Vec2, snap: bool) -> Camera {
-        let mut corner = self.corner(framing, per_pixel, shift);
-        if snap {
-            corner.x = (corner.x / per_pixel).round() * per_pixel;
-            corner.y = (corner.y / per_pixel).round() * per_pixel;
-        }
+    fn camera(&self, framing: &Framing, per_pixel: f32, shift: Vec2) -> Camera {
+        let corner = self.corner(framing, per_pixel, shift);
         self.camera_from(framing, per_pixel, corner, Margins::default())
     }
 
@@ -573,7 +569,7 @@ impl Turntable {
         let anchor = Vec2::new(margins.left as f32 - moved.x, margins.top as f32 + moved.y);
         Some(Turning {
             layer: fit.camera_from(&self.framing, per_pixel, corner, margins),
-            backdrop: fit.camera(&self.framing, whole / zoom, shift, false),
+            backdrop: fit.camera(&self.framing, whole / zoom, shift),
             placement: Placement {
                 scale,
                 offset: centre * (1.0 - scale) - anchor * scale,
@@ -597,17 +593,27 @@ impl Turntable {
         self.whole(&self.fit(view)) / view.zoom.max(1.0)
     }
 
-    /// Moved to whole internal pixels, so that the terrain doesn't shimmer as
-    /// it turns or pans. The still's view stays as the still draws it
+    /// Panned by whole internal pixels from the unpanned view at the same
+    /// angle, so that the terrain doesn't shimmer as it pans. A turn isn't
+    /// moved to whole pixels: each angle has its own size, and rounding at a
+    /// size that changes makes the picture jiggle. The still's view stays as
+    /// the still draws it
     pub fn camera(&self, view: &View) -> Camera {
         let fit = self.fit(view);
-        let still = view.yaw_offset_deg == 0.0 && view.focus == Vec2::ZERO;
-        fit.camera(
-            &self.framing,
-            self.whole(&fit) / view.zoom.max(1.0),
-            fit.to_screen(view.focus),
-            !still,
-        )
+        let per_pixel = self.whole(&fit) / view.zoom.max(1.0);
+        let shift = fit.to_screen(view.focus);
+        let corner = fit.corner(&self.framing, per_pixel, shift) + self.rounding(&fit, view);
+        fit.camera_from(&self.framing, per_pixel, corner, Margins::default())
+    }
+
+    /// How far [`Turntable::camera`] moves the frame's corner from where
+    /// `view` has it, in view-space metres, to pan by whole pixels
+    fn rounding(&self, fit: &Projected, view: &View) -> Vec2 {
+        let per_pixel = self.whole(fit) / view.zoom.max(1.0);
+        let shift = fit.to_screen(view.focus);
+        let unpanned = fit.corner(&self.framing, per_pixel, Vec2::ZERO);
+        let panned = fit.corner(&self.framing, per_pixel, shift);
+        unpanned + ((panned - unpanned) / per_pixel).round() * per_pixel - panned
     }
 
     /// Size of an internal pixel at 1x from the heading `fit` is seen from
@@ -625,6 +631,9 @@ impl Turntable {
         let fit = self.fit(&view);
         let whole = self.whole(&fit);
         let (before, after) = (whole / view.zoom.max(1.0), whole / zoom);
+        // The pixel as the camera shows it, before it panned by whole pixels
+        let rounding = self.rounding(&fit, &view) / before;
+        let pixel = pixel + Vec2::new(rounding.x, -rounding.y);
         let centre = safe_centre(&self.framing);
         let towards = Vec2::new(pixel.x - centre.x, centre.y - pixel.y);
         let shift = fit.to_screen(view.focus) + towards * (before - after);
@@ -959,17 +968,36 @@ mod tests {
     }
 
     #[test]
-    fn turned_cameras_sit_on_whole_pixels() {
+    fn pans_move_by_whole_pixels() {
+        let grid = grid(200, 100, 30.0);
+        let framing = Aspect::Story.framing(3).unwrap();
+        let points = slab_corners(&grid, 800.0);
+        let turntable = Turntable::new(0.0, PITCH_DEG, 1.0, points.clone(), &framing);
+        for yaw in [0.0, 5.7, 21.2, 74.5] {
+            let view = View {
+                zoom: 2.0,
+                ..View::turned(yaw)
+            };
+            let panned = turntable.pan(view, Vec2::new(3.4, -1.7));
+            assert_ne!(panned.focus, view.focus);
+            let before = to_pixels(&turntable.camera(&view), &framing, Vec3::ZERO);
+            let after = to_pixels(&turntable.camera(&panned), &framing, Vec3::ZERO);
+            let moved = after - before;
+            assert!((moved.x - moved.x.round()).abs() < 1e-3, "{yaw}° {moved}");
+            assert!((moved.y - moved.y.round()).abs() < 1e-3, "{yaw}° {moved}");
+            assert_eq!((moved.x.round(), moved.y.round()), (3.0, -2.0), "{yaw}°");
+        }
+    }
+
+    #[test]
+    fn turned_cameras_keep_the_slab_centred() {
         let grid = grid(200, 100, 30.0);
         let framing = Aspect::Story.framing(3).unwrap();
         let points = slab_corners(&grid, 800.0);
         let turntable = Turntable::new(0.0, PITCH_DEG, 1.0, points.clone(), &framing);
         for yaw in [5.7, 21.2, 74.5] {
             let camera = turntable.camera(&View::turned(yaw));
-            let origin = to_pixels(&camera, &framing, Vec3::ZERO);
-            assert!((origin.x - origin.x.round()).abs() < 1e-3, "{origin}");
-            assert!((origin.y - origin.y.round()).abs() < 1e-3, "{origin}");
-            // Still centred on the safe area, to within a pixel
+            // Not moved to whole pixels, so exactly on the safe area's centre
             let pixels: Vec<Vec3> = points
                 .iter()
                 .map(|&p| to_pixels(&camera, &framing, p))
@@ -984,8 +1012,8 @@ mod tests {
             let (w, h) = (framing.width as f32, framing.height as f32);
             let safe_x = w * (safe.left + (1.0 - safe.left - safe.right) / 2.0);
             let safe_y = h * (safe.top + (1.0 - safe.top - safe.bottom) / 2.0);
-            assert!((centre.x - safe_x).abs() <= 0.5 + 1e-3, "{centre}");
-            assert!((centre.y - safe_y).abs() <= 0.5 + 1e-3, "{centre}");
+            assert!((centre.x - safe_x).abs() < 1e-3, "{centre}");
+            assert!((centre.y - safe_y).abs() < 1e-3, "{centre}");
         }
     }
 

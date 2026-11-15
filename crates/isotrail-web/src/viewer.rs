@@ -5,7 +5,8 @@ use glam::Vec2;
 use isotrail_bundle::{BundleError, FORMAT_VERSION, OLDEST_FORMAT_VERSION, SceneBundle};
 use isotrail_render::{
     Diorama, Framing, Gpu, LIVE_SAFE_AREA, OffscreenTarget, PixelGrid, Present, SunState,
-    TerrainMesh, TerrainRenderer, View, Walk, When, canvas_within, credit_line, mesh_within,
+    TerrainMesh, TerrainRenderer, View, Walk, When, canvas_within, credit_line, frame_origin,
+    mesh_within,
 };
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
@@ -474,7 +475,7 @@ impl Viewer {
     /// draws it
     fn frame_point(&self, stage: &Stage, x: f32, y: f32) -> Vec2 {
         let grid = stage.grid;
-        let origin = |canvas: u32, frame: u32| (canvas as f32 - (frame * grid.scale) as f32) / 2.0;
+        let origin = |canvas: u32, frame: u32| frame_origin(canvas, frame, grid.scale) as f32;
         Vec2::new(
             x - origin(self.config.width, grid.width),
             y - origin(self.config.height, grid.height),

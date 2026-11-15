@@ -155,7 +155,88 @@ const snippetMarkup = (poster) =>
 const belowMarkup = (attrs, host = 'display:block') =>
   `<isotrail-hike ${attrs} src="/data/hike.itb" poster="/data/poster.png" aspect="wide" credit="below"${backend} style="${host}"><img src="/data/poster.png" alt="Diorama of a test hike" style="display:block;width:100%;aspect-ratio:16/9;image-rendering:pixelated"><p slot="credit" style="margin:4px 0 0;font:11px/1.3 system-ui,sans-serif;text-align:center;overflow-wrap:anywhere;color:var(--isotrail-text,currentColor)">© Synthetic contributors · Made-up Tiles</p></isotrail-hike>`;
 
+// The low-level viewer turned step by step, each frame read back in the page
+const TURN = { width: 640, height: 480, steps: 300, stepDeg: 0.1, panAt: 12, pan: 30 };
+const turnPage = `<!doctype html><meta charset="utf-8"><script type="module">
+import init, { Viewer } from '/web/pkg/isotrail_web.js';
+const { width, height } = ${JSON.stringify(TURN)};
+const reader = new OffscreenCanvas(width, height).getContext('2d', { willReadFrequently: true });
+const read = (canvas) => {
+  reader.clearRect(0, 0, width, height);
+  reader.drawImage(canvas, 0, 0);
+  return reader.getImageData(0, 0, width, height).data;
+};
+// Where the canvas can't be transparent, its empty pixels are black
+const covered = (rgba, i) => rgba[i + 3] > 8 && rgba[i] + rgba[i + 1] + rgba[i + 2] > 8;
+const box = (rgba) => {
+  let [left, top, right, bottom] = [width, height, -1, -1];
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (!covered(rgba, (y * width + x) * 4)) continue;
+      left = Math.min(left, x); right = Math.max(right, x);
+      top = Math.min(top, y); bottom = Math.max(bottom, y);
+    }
+  }
+  return [left, top, right, bottom];
+};
+window.viewerFor = async (backend) => {
+  await init();
+  const bytes = new Uint8Array(await (await fetch('/data/hike.itb')).arrayBuffer());
+  const canvas = Object.assign(document.createElement('canvas'), { width, height });
+  document.body.append(canvas);
+  const viewer = await Viewer.load(canvas, bytes, backend, { background: 'transparent' });
+  viewer.resize(width, height);
+  return { canvas, viewer };
+};
+window.turnCheck = async (backend, { steps, stepDeg, panAt, pan }) => {
+  const a = await viewerFor(backend);
+  a.viewer.draw();
+  const boxes = [box(read(a.canvas))];
+  for (let i = 1; i <= steps; i++) {
+    a.viewer.setYaw(-i * stepDeg);
+    a.viewer.draw();
+    boxes.push(box(read(a.canvas)));
+  }
+  // Per side: the largest step, and moves back within 1 degree of the last
+  let largest = 0;
+  let back = 0;
+  const near = Math.round(1 / stepDeg);
+  for (let side = 0; side < 4; side++) {
+    let last = null;
+    for (let i = 1; i < boxes.length; i++) {
+      const move = boxes[i][side] - boxes[i - 1][side];
+      largest = Math.max(largest, Math.abs(move));
+      if (move === 0) continue;
+      if (last && Math.sign(move) !== last.sign && i - last.at <= near) back++;
+      last = { sign: Math.sign(move), at: i };
+    }
+  }
+  // Zoomed in at an angle, a pan moves the same picture by whole pixels
+  a.viewer.setYaw(panAt);
+  a.viewer.zoomBy(2, width / 2, height / 2);
+  a.viewer.draw();
+  const before = read(a.canvas);
+  a.viewer.pan(pan, pan / 3);
+  a.viewer.draw();
+  const after = read(a.canvas);
+  const [dx, dy] = [pan, pan / 3];
+  let compared = 0;
+  let differing = 0;
+  for (let y = dy; y < height; y++) {
+    for (let x = dx; x < width; x++) {
+      const [i, j] = [(y * width + x) * 4, ((y - dy) * width + (x - dx)) * 4];
+      compared++;
+      if ([0, 1, 2, 3].some((c) => after[i + c] !== before[j + c])) differing++;
+    }
+  }
+  a.viewer.free();
+  return { largest, back, compared, differing, first: boxes[0], last: boxes.at(-1) };
+};
+window.turnReady = true;
+</script>`;
+
 Object.assign(pages, {
+  '/turn.html': turnPage,
   '/ready.html': page(
     grid([
       embed('id="a" src="/data/hike.itb" poster="/data/poster.png" aspect="wide"'),
@@ -476,6 +557,21 @@ try {
   const madeAfter = await cdp.evaluate('__gpu.made');
   check('playing creates no GPU objects', madeAfter === madeBefore, `${madeBefore} -> ${madeAfter}`);
   check('the route is still playing after 4s', await cdp.evaluate(`${el('a')}.playing`));
+  await cdp.evaluate(`${el('a')}.pause()`);
+  const across = await cdp.evaluate(`(() => { const r = ${el('a')}.getBoundingClientRect(); return { x: r.x + r.width / 4, y: r.y + r.height / 2, width: r.width / 2 }; })()`);
+  const dragged = await cdp.evaluate('__gpu.made');
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: across.x, y: across.y, button: 'left', clickCount: 1 });
+  for (let i = 1; i <= 30; i++) {
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: across.x + (across.width * i) / 30, y: across.y, button: 'left', buttons: 1 });
+    await sleep(30);
+  }
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: across.x + across.width, y: across.y, button: 'left', clickCount: 1 });
+  await sleep(600);
+  check('turning by hand creates no GPU objects', (await cdp.evaluate('__gpu.made')) === dragged, `${dragged} -> ${await cdp.evaluate('__gpu.made')}`);
+  const canvasBox = await cdp.evaluate(`(() => { const r = ${el('a')}.shadowRoot.querySelector('canvas').getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, scale: 1 }; })()`);
+  const settledShot = await cdp.screenshot(canvasBox);
+  await sleep(400);
+  check('a view left turned stops drawing once it is sharp', settledShot === (await cdp.screenshot(canvasBox)));
   check('no uncaught errors', cdp.exceptions.length === 0, cdp.exceptions.join(' | '));
 
   // A lost GPU: one restart, then the poster
@@ -1112,6 +1208,16 @@ try {
     }
     console.log(`     ${((differing / (liveFrame.width * liveFrame.height)) * 100).toFixed(2)}% of the pixels differ between the poster and the first live frame`);
   }
+
+  // A turn in small steps, and a pan at an angle
+  await go('/turn.html');
+  await cdp.waitFor('window.turnReady === true');
+  const turn = await cdp.evaluate(`turnCheck(${JSON.stringify(WEBGL ? 'webgl' : 'auto')}, ${JSON.stringify(TURN)})`);
+  const turnDetail = JSON.stringify(turn);
+  check("turning in 0.1° steps moves the slab's edges a pixel a step at most", turn.largest <= 1, turnDetail);
+  check('and never back and forth', turn.back === 0, turnDetail);
+  check('a pan at an angle moves the picture by whole pixels', turn.differing <= turn.compared / 1000, turnDetail);
+  check('no uncaught errors while turning', cdp.exceptions.length === 0, cdp.exceptions.join(' | '));
 
   // The snippet's poster, with and without the script
   await go('/noscript.html');

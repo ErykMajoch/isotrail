@@ -106,7 +106,7 @@ Stars fade in once the sun is 6° below the horizon. They are scattered from the
 
 ## Animation
 
-An animation renders the same scene once per frame. The mesh, trees and route are built once. The camera keeps one scale for the whole clip, wide enough to fit the slab from every angle of its turn, so the diorama never grows or shrinks. Its position is rounded to whole pixels, so the terrain doesn't shimmer as it moves.
+An animation renders the same scene once per frame. The mesh, trees and route are built once. At each angle of the turn, the diorama is drawn as large as fits there, so it grows and shrinks a little. The camera isn't rounded to whole pixels while it turns. Rounding at a size that keeps changing would make the picture jiggle.
 
 Each frame draws the route up to a point: by distance, or by the recorded time with long stops cut short (`--pace time`). Stops of 6 hours or more are nights instead. The head waits for a set share of the drawing while the clock runs through the gap.
 
@@ -118,7 +118,7 @@ The finished frames are written to the GIF one by one, each keeping only the are
 
 The same renderer compiles to WebAssembly and draws into a web page's canvas. It uses WebGPU where the browser has it, and WebGL2 otherwise. It loads a scene bundle, builds the mesh once, and redraws when the route's progress or the viewing angle changes. While rain or snow is falling, it redraws all the time.
 
-Its pixels are as large as keep the frame's long side within 640 pixels, matching a still at `--scale 3`. One scale fits the slab from every angle, so the diorama can be turned all the way round. [`web/README.md`](../web/README.md) describes how to build it.
+Its pixels are as large as keep the frame's long side within 640 pixels, matching a still at `--scale 3`. The diorama turns as an animation does, as large as it fits at each angle. A pan moves it by whole pixels, so the terrain doesn't shimmer. [`web/README.md`](../web/README.md) describes how to build it.
 
 ## Styles
 

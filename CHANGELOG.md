@@ -4,6 +4,11 @@ All notable changes to `isotrail` are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- The web embed's diorama no longer jiggles while it turns. GIF and MP4 animations with a turning camera are steadier too.
+- Zooming the web embed at an angle keeps the ground under the pointer, to within a pixel.
+
 ## [1.5.0] - 2026-11-14
 
 Built for websites: loading on a press, privacy options for scene files, more for scripts and a batch command. The scene file format is unchanged, so scene files made by 1.4.1 still work.

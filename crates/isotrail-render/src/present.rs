@@ -38,6 +38,12 @@ pub fn canvas_within(width: u32, height: u32, max_side: u32) -> (u32, u32) {
     (shrink(width), shrink(height))
 }
 
+/// Where a frame `frame` pixels long, each `scale` screen pixels across,
+/// starts on a screen `screen` pixels long, centred
+pub fn frame_origin(screen: u32, frame: u32, scale: u32) -> i32 {
+    (screen as i32 - (frame * scale.max(1)) as i32) / 2
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Uniforms {
@@ -132,11 +138,10 @@ impl Present {
     ) {
         let device = gpu.device();
         let scale = scale.max(1);
-        let origin = |screen: u32, frame: u32| (screen as i32 - (frame * scale) as i32) / 2;
         let uniforms = Uniforms {
             placement: [
-                origin(width, frame.width()),
-                origin(height, frame.height()),
+                frame_origin(width, frame.width(), scale),
+                frame_origin(height, frame.height(), scale),
                 scale as i32,
                 i32::from(self.format.is_srgb()),
             ],
@@ -184,6 +189,19 @@ impl Present {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frames_centre_on_whole_pixels() {
+        assert_eq!(frame_origin(270, 90, 3), 0);
+        assert_eq!(frame_origin(268, 90, 3), -1);
+        assert_eq!(frame_origin(182, 60, 3), 1);
+        assert_eq!(frame_origin(1281, 427, 3), 0);
+        assert_eq!(frame_origin(1279, 427, 3), -1);
+        // An odd overflow crops the extra pixel on the right
+        assert_eq!(frame_origin(1278, 427, 3), -1);
+        // Scale 0 counts as 1
+        assert_eq!(frame_origin(100, 50, 0), 25);
+    }
 
     #[test]
     fn canvas_pixels_match_the_stills() {
