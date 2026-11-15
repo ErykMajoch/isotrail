@@ -145,12 +145,6 @@ impl Gpu {
         self.device.limits().max_buffer_size
     }
 
-    /// The longest side of a texture the device takes, which caps a turning
-    /// diorama's layer
-    pub fn max_texture_side(&self) -> u32 {
-        self.device.limits().max_texture_dimension_2d
-    }
-
     pub fn adapter_info(&self) -> &wgpu::AdapterInfo {
         &self.adapter_info
     }

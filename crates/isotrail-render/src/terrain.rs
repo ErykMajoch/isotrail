@@ -2,15 +2,13 @@ use glam::{IVec2, Vec3};
 use wgpu::util::DeviceExt;
 
 use crate::occlusion::sky_view;
-use crate::post::{
-    DEPTH_FORMAT, ID_FORMAT, NORMAL_FORMAT, PostPass, Sky, TERRAIN_ID, light_travel,
-};
+use crate::post::{DEPTH_FORMAT, ID_FORMAT, NORMAL_FORMAT, PostPass, Sky, TERRAIN_ID};
 use crate::route::{RoutePass, to_pixel};
 use crate::sprite::Sprite;
 use crate::weather::cloud_threshold;
 use crate::{
-    Background, Camera, Gpu, Look, OffscreenTarget, RenderError, RouteLine, SunState,
-    TARGET_FORMAT, TerrainMesh, Vertex,
+    Camera, Gpu, Look, OffscreenTarget, RenderError, RouteLine, SunState, TARGET_FORMAT,
+    TerrainMesh, Vertex,
 };
 
 /// Texels along each side of the square shadow map, the most WebGL2 allows
@@ -58,21 +56,6 @@ impl<'a> Scene<'a> {
             time_s: 0.0,
         }
     }
-}
-
-/// How much of a frame one draw makes
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Part {
-    Whole,
-    Sky,
-    Slab,
-}
-
-/// The target a draw fills, and with what
-#[derive(Clone, Copy)]
-struct Pass<'a> {
-    target: &'a OffscreenTarget,
-    part: Part,
 }
 
 #[repr(C)]
@@ -412,50 +395,6 @@ impl TerrainRenderer {
         sun: &SunState,
         look: &Look,
     ) {
-        let part = Part::Whole;
-        self.draw_part(gpu, Pass { target, part }, scene, camera, sun, look);
-    }
-
-    /// Draws the sky alone, as [`TerrainRenderer::draw`] shows it behind the
-    /// scene
-    pub fn draw_sky(
-        &self,
-        gpu: &Gpu,
-        target: &OffscreenTarget,
-        scene: &Scene,
-        camera: &Camera,
-        sun: &SunState,
-        look: &Look,
-    ) {
-        let part = Part::Sky;
-        self.draw_part(gpu, Pass { target, part }, scene, camera, sun, look);
-    }
-
-    /// Draws the scene without its sky, see-through where the sky would
-    /// show. Laid over [`TerrainRenderer::draw_sky`]'s frame at the target's
-    /// margins, it makes the picture [`TerrainRenderer::draw`] does
-    pub fn draw_slab(
-        &self,
-        gpu: &Gpu,
-        target: &OffscreenTarget,
-        scene: &Scene,
-        camera: &Camera,
-        sun: &SunState,
-        look: &Look,
-    ) {
-        let part = Part::Slab;
-        self.draw_part(gpu, Pass { target, part }, scene, camera, sun, look);
-    }
-
-    fn draw_part(
-        &self,
-        gpu: &Gpu,
-        Pass { target, part }: Pass,
-        scene: &Scene,
-        camera: &Camera,
-        sun: &SunState,
-        look: &Look,
-    ) {
         let device = gpu.device();
         let mesh = scene.mesh;
         let light_view_proj = if mesh.count == 0 {
@@ -469,23 +408,15 @@ impl TerrainRenderer {
         let texel_m = 2.0 / (row_scale(0).min(row_scale(1)) * SHADOW_MAP_SIZE as f32);
         let towards_camera = (-camera.forward * Vec3::new(1.0, 1.0, 0.0)).normalize_or_zero();
         let (clouds, cloud_origin) = cloud_shadows(mesh, sun, scene.time_s);
-        // The sky is laid out over the frame, whatever margins the target has
-        let (frame_width, frame_height) = target.frame_size();
         let mut sky = Sky::new(
             camera,
             sun,
             scene.star_seed,
             scene.time_s,
-            frame_width,
-            frame_height,
+            target.width(),
+            target.height(),
         );
-        sky.rays.direction =
-            light_travel(camera, sun, target.width() as f32, target.height() as f32);
         sky.rays.fit(mesh.corners, look.god_rays);
-        sky.background = match part {
-            Part::Slab => Background::Transparent,
-            Part::Whole | Part::Sky => look.background,
-        };
         if !look.night_sky {
             sky.stars = 0.0;
             sky.moon = None;
@@ -524,8 +455,7 @@ impl TerrainRenderer {
 
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        // The sky alone looks nothing up in the shadow map
-        if part != Part::Sky {
+        {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("terrain shadow"),
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
@@ -570,17 +500,13 @@ impl TerrainRenderer {
                 }),
                 ..Default::default()
             });
-            if part != Part::Sky {
-                pass.set_pipeline(&self.pipeline);
-                pass.set_bind_group(0, &self.bind_group, &[]);
-                pass.set_bind_group(1, &mesh.bind_group, &[]);
-                pass.set_vertex_buffer(0, mesh.vertices.slice(..));
-                pass.draw(0..mesh.count, 0..1);
-            }
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &self.bind_group, &[]);
+            pass.set_bind_group(1, &mesh.bind_group, &[]);
+            pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+            pass.draw(0..mesh.count, 0..1);
         }
-        let route = scene
-            .route
-            .filter(|line| !line.pieces().is_empty() && part != Part::Sky);
+        let route = scene.route.filter(|line| !line.pieces().is_empty());
         let distance_m = route.map_or(0.0, |line| line.distance_at(scene.progress));
         self.route.encode(
             &mut encoder,

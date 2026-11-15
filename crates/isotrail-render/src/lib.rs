@@ -30,7 +30,6 @@ macro_rules! shader {
 }
 
 mod camera;
-mod compose;
 mod diorama;
 mod error;
 mod frame;
@@ -55,12 +54,10 @@ mod timeline;
 mod weather;
 
 pub use camera::{
-    Aim, Aspect, Camera, Canvas, DEFAULT_YAW_OFFSET_DEG, FULL_TURN, Framing, Insets,
-    LIVE_SAFE_AREA, MAX_ZOOM, MAX_ZOOM_RANGE, Margins, PITCH_DEG, Placement, Turning, Turntable,
-    View, route_heading, view_heading,
+    Aim, Aspect, Camera, Canvas, DEFAULT_YAW_OFFSET_DEG, Framing, Insets, LIVE_SAFE_AREA, MAX_ZOOM,
+    MAX_ZOOM_RANGE, PITCH_DEG, Turntable, View, route_heading, view_heading,
 };
-pub use compose::{Fill, Resample, compose};
-pub use diorama::{Diorama, Layers};
+pub use diorama::Diorama;
 pub use error::RenderError;
 pub use frame::Frame;
 pub use gpu::{ADAPTER_ENV, AdapterMode, Gpu};

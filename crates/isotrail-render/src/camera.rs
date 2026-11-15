@@ -254,7 +254,6 @@ impl Camera {
 }
 
 /// Points seen from a heading, in view space
-#[derive(Clone, Debug)]
 struct Projected {
     view: Mat4,
     forward: Vec3,
@@ -314,19 +313,11 @@ impl Projected {
     }
 
     fn camera(&self, framing: &Framing, per_pixel: f32, shift: Vec2) -> Camera {
-        let corner = self.corner(framing, per_pixel, shift);
-        self.camera_from(framing, per_pixel, corner, Margins::default())
+        self.camera_at(framing, per_pixel, self.corner(framing, per_pixel, shift))
     }
 
-    /// The frame's top-left corner sits at view-space `corner`, and the
-    /// camera sees `margins` more pixels round the frame
-    fn camera_from(
-        &self,
-        framing: &Framing,
-        per_pixel: f32,
-        corner: Vec2,
-        margins: Margins,
-    ) -> Camera {
+    /// The frame's top-left corner sits at view-space `corner`
+    fn camera_at(&self, framing: &Framing, per_pixel: f32, corner: Vec2) -> Camera {
         let (min, max) = (self.min, self.max);
         let (width, height) = (framing.width as f32, framing.height as f32);
         let extent = max - min;
@@ -334,10 +325,10 @@ impl Projected {
         let depth_pad = extent.z * 0.01 + 1.0;
         // wgpu's clip space has y up and depth in [0, 1], like Direct3D
         let projection = proj::directx::orthographic(
-            left - margins.left as f32 * per_pixel,
-            left + (width + margins.right as f32) * per_pixel,
-            top - (height + margins.bottom as f32) * per_pixel,
-            top + margins.top as f32 * per_pixel,
+            left,
+            left + width * per_pixel,
+            top - height * per_pixel,
+            top,
             -max.z - depth_pad,
             -min.z + depth_pad,
         );
@@ -398,54 +389,6 @@ impl View {
     }
 }
 
-/// Whole pixels round a frame, per side
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Margins {
-    pub left: u32,
-    pub top: u32,
-    pub right: u32,
-    pub bottom: u32,
-}
-
-/// Where a layer drawn at the still's pixel size lands in the frame
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Placement {
-    /// Frame pixels per layer pixel
-    pub scale: f32,
-    /// Where the layer's top-left corner lands, in frame pixels
-    pub offset: Vec2,
-}
-
-/// A turned view drawn at the still's pixel size: the slab into a layer
-/// larger than the frame, the sky into the frame, and where the layer goes
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Turning {
-    /// Spans the layer, on the still's pixel grid
-    pub layer: Camera,
-    /// Spans the frame, as large as the slab fits at this heading
-    pub backdrop: Camera,
-    pub placement: Placement,
-}
-
-/// The yaw offsets of a whole turn, in degrees
-pub const FULL_TURN: std::ops::RangeInclusive<f32> = -180.0..=180.0;
-/// How far apart the headings are that size a layer
-const SWEEP_STEP_DEG: f32 = 2.0;
-/// Room past the largest heading sampled, for those in between
-const REACH_SLACK: f32 = 1.01;
-/// Pixels past each margin for the snap and the resampling
-const MARGIN_PAD_PX: u32 = 2;
-/// The most pixels a layer may have for each pixel of its frame
-const LAYER_BUDGET: f32 = 4.0;
-
-/// The room a turntable keeps round the frame for turned views
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Layer {
-    margins: Margins,
-    /// The coarsest heading it holds, in the still's metres per pixel
-    reach: f32,
-}
-
 /// A slab seen from any heading, as a viewer turns, zooms and pans it
 /// without ever seeing past the whole-slab view. Each heading shows the slab
 /// as large as fits there, so the still's view is the still
@@ -457,10 +400,6 @@ pub struct Turntable {
     points: Vec<Vec3>,
     framing: Framing,
     max_zoom: f32,
-    still: Projected,
-    /// Size of an internal pixel at 1x in the still's view
-    rest: f32,
-    layer: Option<Layer>,
 }
 
 impl Turntable {
@@ -473,108 +412,14 @@ impl Turntable {
         points: Vec<Vec3>,
         framing: &Framing,
     ) -> Turntable {
-        let zoom = zoom.max(f32::EPSILON);
-        let still = Projected::new(heading, pitch_deg, points.iter().copied());
-        let rest = still.scale(framing) / zoom;
         Turntable {
             heading,
             pitch_deg,
-            zoom,
+            zoom: zoom.max(f32::EPSILON),
             points,
             framing: *framing,
             max_zoom: MAX_ZOOM,
-            still,
-            rest,
-            layer: None,
         }
-    }
-
-    pub fn framing(&self) -> &Framing {
-        &self.framing
-    }
-
-    /// Keeps room to draw every view turned within `sweep`, in degrees of
-    /// yaw offset, at the still's pixel size. A layer with a side over
-    /// `max_side`, or with too many pixels for its frame, gets no room, and
-    /// turned views are then drawn at their own size
-    pub fn make_room(&mut self, sweep: std::ops::RangeInclusive<f32>, max_side: u32) {
-        self.layer = self.room(sweep, max_side);
-    }
-
-    fn room(&self, sweep: std::ops::RangeInclusive<f32>, max_side: u32) -> Option<Layer> {
-        let (from, to) = (*sweep.start(), *sweep.end());
-        if !(from.is_finite() && to.is_finite() && from <= to) {
-            return None;
-        }
-        let steps = ((to - from) / SWEEP_STEP_DEG).ceil().max(1.0) as u32;
-        let reach = (0..=steps)
-            .map(|i| from + (to - from) * i as f32 / steps as f32)
-            .map(|yaw| self.whole(&self.fit(&View::turned(yaw))) / self.rest)
-            .fold(1.0, f32::max)
-            * REACH_SLACK;
-        let (width, height) = (self.framing.width, self.framing.height);
-        let centre = safe_centre(&self.framing);
-        let margin = |from_edge: f32| (from_edge * (reach - 1.0)).ceil() as u32 + MARGIN_PAD_PX;
-        let margins = Margins {
-            left: margin(centre.x),
-            top: margin(centre.y),
-            right: margin(width as f32 - centre.x),
-            bottom: margin(height as f32 - centre.y),
-        };
-        let (wide, tall) = (
-            u64::from(margins.left) + u64::from(width) + u64::from(margins.right),
-            u64::from(margins.top) + u64::from(height) + u64::from(margins.bottom),
-        );
-        let fits = reach.is_finite()
-            && wide.max(tall) <= u64::from(max_side)
-            && (wide * tall) as f32 <= LAYER_BUDGET * width as f32 * height as f32;
-        fits.then_some(Layer { margins, reach })
-    }
-
-    /// The layer's size in pixels, if there is room for one
-    pub fn layer_size(&self) -> Option<(u32, u32)> {
-        let margins = self.layer?.margins;
-        Some((
-            margins.left + self.framing.width + margins.right,
-            margins.top + self.framing.height + margins.bottom,
-        ))
-    }
-
-    /// The pixels the layer has round the frame, if there is room for one
-    pub fn margins(&self) -> Option<Margins> {
-        self.layer.map(|layer| layer.margins)
-    }
-
-    /// How to draw `view` at the still's pixel size, so that nothing changes
-    /// size while it turns. `None` without room for it
-    pub fn turning(&self, view: &View) -> Option<Turning> {
-        let layer = self.layer?;
-        let fit = self.fit(view);
-        let whole = self.whole(&fit);
-        if whole.is_nan() || whole > self.rest * layer.reach {
-            return None;
-        }
-        let zoom = view.zoom.max(1.0);
-        let shift = fit.to_screen(view.focus);
-        let per_pixel = self.rest / zoom;
-        let exact = fit.corner(&self.framing, per_pixel, shift);
-        // Whole pixels from the still's corner, so a turn lands on the still
-        let still = self.still.corner(&self.framing, per_pixel, Vec2::ZERO);
-        let corner = still + ((exact - still) / per_pixel).round() * per_pixel;
-        let moved = (corner - exact) / per_pixel;
-        let margins = layer.margins;
-        let scale = self.rest / whole;
-        let centre = safe_centre(&self.framing);
-        // The point shown at the safe area's centre keeps its place
-        let anchor = Vec2::new(margins.left as f32 - moved.x, margins.top as f32 + moved.y);
-        Some(Turning {
-            layer: fit.camera_from(&self.framing, per_pixel, corner, margins),
-            backdrop: fit.camera(&self.framing, whole / zoom, shift),
-            placement: Placement {
-                scale,
-                offset: centre * (1.0 - scale) - anchor * scale,
-            },
-        })
     }
 
     pub fn max_zoom(&self) -> f32 {
@@ -603,7 +448,7 @@ impl Turntable {
         let per_pixel = self.whole(&fit) / view.zoom.max(1.0);
         let shift = fit.to_screen(view.focus);
         let corner = fit.corner(&self.framing, per_pixel, shift) + self.rounding(&fit, view);
-        fit.camera_from(&self.framing, per_pixel, corner, Margins::default())
+        fit.camera_at(&self.framing, per_pixel, corner)
     }
 
     /// How far [`Turntable::camera`] moves the frame's corner from where
@@ -1014,228 +859,6 @@ mod tests {
             let safe_y = h * (safe.top + (1.0 - safe.top - safe.bottom) / 2.0);
             assert!((centre.x - safe_x).abs() < 1e-3, "{centre}");
             assert!((centre.y - safe_y).abs() < 1e-3, "{centre}");
-        }
-    }
-
-    /// A turntable with room for a whole turn
-    fn roomy(heading: f32, zoom: f32, points: Vec<Vec3>, framing: &Framing) -> Turntable {
-        let mut turntable = Turntable::new(heading, PITCH_DEG, zoom, points, framing);
-        turntable.make_room(FULL_TURN, 8192);
-        turntable
-    }
-
-    fn layer_framing(turntable: &Turntable) -> Framing {
-        let (width, height) = turntable.layer_size().unwrap();
-        Framing {
-            width,
-            height,
-            safe: Insets::even(0.0),
-        }
-    }
-
-    /// Where the frame shows a point drawn into the layer
-    fn placed(turntable: &Turntable, turning: &Turning, point: Vec3) -> Vec2 {
-        let in_layer = to_pixels(&turning.layer, &layer_framing(turntable), point).truncate();
-        turning.placement.offset + in_layer * turning.placement.scale
-    }
-
-    /// Frames whose safe areas are centred, high, low and to one side
-    fn framings() -> [Framing; 4] {
-        let column = Framing {
-            safe: Insets {
-                left: 0.45,
-                ..Insets::even(0.05)
-            },
-            ..Aspect::Wide.framing(3).unwrap()
-        };
-        [
-            Aspect::Wide.framing(3).unwrap(),
-            Aspect::Story.framing(3).unwrap(),
-            Aspect::Video.framing(3).unwrap(),
-            column,
-        ]
-    }
-
-    #[test]
-    fn turned_views_draw_at_the_stills_scale() {
-        let points = slab_corners(&grid(200, 100, 30.0), 800.0);
-        for framing in framings() {
-            let turntable = roomy(0.4, 1.0, points.clone(), &framing);
-            let still = Camera::diorama(0.4, points.clone(), &framing).metres_per_px;
-            for yaw in [0.0, 12.5, 90.0, -147.0] {
-                for zoom in [1.0, 2.5] {
-                    let view = View {
-                        zoom,
-                        ..View::turned(yaw)
-                    };
-                    let turning = turntable.turning(&view).unwrap();
-                    assert_eq!(turning.layer.metres_per_px, still / zoom, "{yaw}° x{zoom}");
-                    // The frame still shows the slab as large as fits there
-                    let shown = turning.layer.metres_per_px / turning.placement.scale;
-                    let fits = turntable.metres_per_px(&view);
-                    assert!((shown / fits - 1.0).abs() < 1e-5, "{yaw}° x{zoom}");
-                    assert_eq!(turning.backdrop.metres_per_px, fits);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn the_still_is_placed_as_drawn() {
-        let points = slab_corners(&grid(200, 100, 30.0), 800.0);
-        for framing in framings() {
-            for (fitted, zoom) in [(1.0, 1.0), (1.0, 1.5), (0.6, 1.0)] {
-                let turntable = roomy(0.4, fitted, points.clone(), &framing);
-                let view = View {
-                    zoom,
-                    ..View::default()
-                };
-                let turning = turntable.turning(&view).unwrap();
-                let margins = turntable.margins().unwrap();
-                assert_eq!(turning.placement.scale, 1.0);
-                assert_eq!(
-                    turning.placement.offset,
-                    -Vec2::new(margins.left as f32, margins.top as f32)
-                );
-                assert_eq!(turning.backdrop, turntable.camera(&view));
-                // The layer holds the still, the margins further in
-                let still = turntable.camera(&view);
-                let layer = layer_framing(&turntable);
-                for &point in &points {
-                    let in_frame = to_pixels(&still, &framing, point);
-                    let in_layer = to_pixels(&turning.layer, &layer, point);
-                    let apart = in_layer.truncate() - in_frame.truncate();
-                    let margin = Vec2::new(margins.left as f32, margins.top as f32);
-                    assert!(apart.distance(margin) < 1e-3, "{apart}");
-                    assert!((in_layer.z - in_frame.z).abs() < 1e-6);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn placement_moves_smoothly() {
-        let points = slab_corners(&grid(200, 100, 30.0), 800.0);
-        let framing = Aspect::Story.framing(3).unwrap();
-        let turntable = roomy(0.4, 1.0, points.clone(), &framing);
-        let unsnapped =
-            |yaw: f32| Camera::diorama(0.4 + yaw.to_radians(), points.clone(), &framing);
-        let mut previous: Option<Turning> = None;
-        for step in 0..=3600 {
-            let yaw = step as f32 * 0.1 - 180.0;
-            let turning = turntable.turning(&View::turned(yaw)).unwrap();
-            // A snap that leaked into the placement would show as half a
-            // pixel between the picture and the camera that never snaps
-            let pivot = placed(&turntable, &turning, Vec3::ZERO);
-            let exact = to_pixels(&unsnapped(yaw), &framing, Vec3::ZERO).truncate();
-            assert!(pivot.distance(exact) < 1e-3, "{yaw}°: {pivot} vs {exact}");
-            if let Some(before) = previous {
-                let grown = turning.placement.scale / before.placement.scale;
-                assert!((grown - 1.0).abs() < 0.01, "{yaw}°: {grown}");
-            }
-            previous = Some(turning);
-        }
-    }
-
-    #[test]
-    fn display_matches_the_per_angle_fit() {
-        let points = slab_corners(&grid(200, 100, 30.0), 800.0);
-        for framing in framings() {
-            let turntable = roomy(0.4, 1.0, points.clone(), &framing);
-            for yaw in [0.0, 0.01, 7.3, 30.0, 90.0, -61.9, 179.0] {
-                for (zoom, drag) in [(1.0, Vec2::ZERO), (2.0, Vec2::new(31.0, -12.0))] {
-                    let view = turntable.zoom_at(View::turned(yaw), zoom, safe_centre(&framing));
-                    let view = turntable.pan(view, drag);
-                    let turning = turntable.turning(&view).unwrap();
-                    for &point in &points {
-                        let shown = placed(&turntable, &turning, point);
-                        let fits = to_pixels(&turning.backdrop, &framing, point).truncate();
-                        assert!(
-                            shown.distance(fits) < 1e-3,
-                            "{yaw}° x{zoom}: {shown} vs {fits}"
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn the_target_holds_every_angle() {
-        for (cols, rows, top) in [(200, 100, 800.0), (100, 100, 50.0), (240, 60, 2000.0)] {
-            let points = slab_corners(&grid(cols, rows, 30.0), top);
-            for framing in framings() {
-                let turntable = roomy(1.1, 1.0, points.clone(), &framing);
-                let (width, height) = turntable.layer_size().unwrap();
-                let layer = Vec2::new(width as f32, height as f32);
-                let frame = Vec2::new(framing.width as f32, framing.height as f32);
-                for yaw in -180..=180 {
-                    for zoom in [1.0, 3.0] {
-                        let view = View {
-                            zoom,
-                            ..View::turned(yaw as f32)
-                        };
-                        let turning = turntable
-                            .turning(&view)
-                            .unwrap_or_else(|| panic!("{yaw}° has no room"));
-                        let Placement { scale, offset } = turning.placement;
-                        // The frame's corners, in layer pixels, with half a
-                        // pixel to spare for the resampling
-                        let (low, high) = (-offset / scale, (frame - offset) / scale);
-                        assert!(low.min_element() >= 0.5, "{yaw}°: {low}");
-                        assert!((layer - high).min_element() >= 0.5, "{yaw}°: {high}");
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn a_turn_lands_on_the_stills_pixels() {
-        let points = slab_corners(&grid(200, 100, 30.0), 800.0);
-        let framing = Aspect::Story.framing(3).unwrap();
-        let turntable = roomy(0.4, 1.0, points.clone(), &framing);
-        let layer = layer_framing(&turntable);
-        let rest = turntable.turning(&View::default()).unwrap();
-        let home = to_pixels(&rest.layer, &layer, Vec3::ZERO);
-        for yaw in [5.7, 21.2, 74.5, -0.3] {
-            let turning = turntable.turning(&View::turned(yaw)).unwrap();
-            let apart = to_pixels(&turning.layer, &layer, Vec3::ZERO) - home;
-            assert!((apart.x - apart.x.round()).abs() < 1e-3, "{yaw}°: {apart}");
-            assert!((apart.y - apart.y.round()).abs() < 1e-3, "{yaw}°: {apart}");
-        }
-        // The last step of a turn moves nothing by a visible amount
-        let near = turntable.turning(&View::turned(1e-3)).unwrap();
-        for &point in &points {
-            let apart = placed(&turntable, &near, point) - placed(&turntable, &rest, point);
-            assert!(apart.length() < 0.02, "{apart}");
-        }
-    }
-
-    #[test]
-    fn a_layer_too_large_leaves_turned_views_as_they_were() {
-        let points = slab_corners(&grid(200, 100, 30.0), 800.0);
-        let framing = Aspect::Story.framing(3).unwrap();
-        let mut turntable = Turntable::new(0.4, PITCH_DEG, 1.0, points, &framing);
-        assert_eq!(turntable.turning(&View::turned(30.0)), None);
-        assert_eq!(turntable.layer_size(), None);
-
-        turntable.make_room(FULL_TURN, 8192);
-        let (width, height) = turntable.layer_size().unwrap();
-        assert!(width > framing.width && height > framing.height);
-        turntable.make_room(FULL_TURN, height - 1);
-        assert_eq!(turntable.layer_size(), None);
-        assert_eq!(turntable.turning(&View::turned(30.0)), None);
-
-        // Room for a short sweep holds that sweep and no more
-        turntable.make_room(-5.0..=0.0, 8192);
-        let short = turntable.layer_size().unwrap();
-        assert!(short.0 < width && short.1 < height, "{short:?}");
-        assert!(turntable.turning(&View::turned(-5.0)).is_some());
-        assert_eq!(turntable.turning(&View::turned(90.0)), None);
-        for bad in [f32::NAN..=0.0, 0.0..=f32::INFINITY, 10.0..=-10.0] {
-            turntable.make_room(bad, 8192);
-            assert_eq!(turntable.layer_size(), None);
         }
     }
 

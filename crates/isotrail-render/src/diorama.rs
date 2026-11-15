@@ -1,22 +1,12 @@
 use std::collections::HashMap;
-use std::ops::RangeInclusive;
 
 use glam::Vec3;
 use isotrail_bundle::SceneBundle;
 
 use crate::{
-    Aim, Background, Framing, Gpu, GpuMesh, Look, MAX_ZOOM_RANGE, OffscreenTarget, Placement,
-    RenderError, RouteLine, Scene, SunState, TerrainMesh, TerrainRenderer, Turntable, View,
+    Aim, Framing, Gpu, GpuMesh, Look, MAX_ZOOM_RANGE, OffscreenTarget, RenderError, RouteLine,
+    Scene, SunState, TerrainMesh, TerrainRenderer, Turntable, View,
 };
-
-/// The two targets a turning diorama is drawn into
-#[derive(Clone, Copy)]
-pub struct Layers<'a> {
-    /// Of the framing's size, for the sky
-    pub backdrop: &'a OffscreenTarget,
-    /// From [`Diorama::layer_target`], for the slab
-    pub slab: &'a OffscreenTarget,
-}
 
 /// A bundle's terrain and route on the GPU, on a turntable. Its starting
 /// view is the still with the same aim and framing
@@ -100,67 +90,14 @@ impl Diorama {
         look: &Look,
     ) {
         let camera = self.turntable.camera(view);
-        renderer.draw(gpu, target, &self.scene(progress), &camera, &self.sun, look);
-    }
-
-    /// Keeps room to turn within `sweep`, in degrees of yaw offset, without
-    /// anything changing size, in a layer no larger than `max_side` pixels
-    /// a side. See [`Turntable::make_room`]
-    pub fn make_room(&mut self, sweep: RangeInclusive<f32>, max_side: u32) {
-        self.turntable.make_room(sweep, max_side);
-    }
-
-    /// A target for [`Layers::slab`], if there is room to turn. Make one and
-    /// reuse it
-    pub fn layer_target(&self, gpu: &Gpu) -> Option<OffscreenTarget> {
-        let margins = self.turntable.margins()?;
-        let framing = self.turntable.framing();
-        Some(OffscreenTarget::with_margins(
-            gpu,
-            framing.width,
-            framing.height,
-            margins,
-        ))
-    }
-
-    /// Whether `view` is turned from the still's and there is room to draw
-    /// it with [`Diorama::draw_turning`]
-    pub fn turns(&self, view: &View) -> bool {
-        view.yaw_offset_deg != 0.0 && self.turntable.margins().is_some()
-    }
-
-    /// Draws `view` at the still's pixel size: the slab into its layer and,
-    /// under a sky, the sky into the backdrop. The layer goes over the
-    /// backdrop where the returned placement says, which shows the slab as
-    /// [`Diorama::draw`] frames it. `None`, with nothing drawn, when the
-    /// layer has no room for this view
-    pub fn draw_turning(
-        &self,
-        gpu: &Gpu,
-        renderer: &TerrainRenderer,
-        layers: Layers,
-        view: &View,
-        progress: f32,
-        look: &Look,
-    ) -> Option<Placement> {
-        let turning = self.turntable.turning(view)?;
-        let scene = self.scene(progress);
-        if look.background == Background::Sky {
-            let camera = &turning.backdrop;
-            renderer.draw_sky(gpu, layers.backdrop, &scene, camera, &self.sun, look);
-        }
-        renderer.draw_slab(gpu, layers.slab, &scene, &turning.layer, &self.sun, look);
-        Some(turning.placement)
-    }
-
-    fn scene(&self, progress: f32) -> Scene<'_> {
-        Scene {
+        let scene = Scene {
             mesh: &self.mesh,
             route: Some(&self.route),
             progress,
             star_seed: self.star_seed,
             time_s: self.time_s,
-        }
+        };
+        renderer.draw(gpu, target, &scene, &camera, &self.sun, look);
     }
 }
 

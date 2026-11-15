@@ -1,7 +1,7 @@
+use crate::Gpu;
 use crate::post::GBuffer;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::{Frame, RenderError};
-use crate::{Gpu, Margins};
 
 /// Not sRGB, so the bytes read back are exactly what the shaders wrote
 pub const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -13,19 +13,10 @@ pub struct OffscreenTarget {
     texture: wgpu::Texture,
     view: wgpu::TextureView,
     gbuffer: GBuffer,
-    margins: Margins,
 }
 
 impl OffscreenTarget {
     pub fn new(gpu: &Gpu, width: u32, height: u32) -> Self {
-        Self::with_margins(gpu, width, height, Margins::default())
-    }
-
-    /// A target for a `width` x `height` frame with `margins` more pixels
-    /// round it
-    pub fn with_margins(gpu: &Gpu, width: u32, height: u32, margins: Margins) -> Self {
-        let width = margins.left + width + margins.right;
-        let height = margins.top + height + margins.bottom;
         let texture = gpu.device().create_texture(&wgpu::TextureDescriptor {
             label: Some("offscreen target"),
             size: wgpu::Extent3d {
@@ -47,21 +38,7 @@ impl OffscreenTarget {
             texture,
             view,
             gbuffer: GBuffer::new(gpu, width, height),
-            margins,
         }
-    }
-
-    pub fn margins(&self) -> Margins {
-        self.margins
-    }
-
-    /// Size of the frame inside the margins
-    pub fn frame_size(&self) -> (u32, u32) {
-        let margins = self.margins;
-        (
-            self.width() - margins.left - margins.right,
-            self.height() - margins.top - margins.bottom,
-        )
     }
 
     pub fn width(&self) -> u32 {
