@@ -13,6 +13,9 @@ struct Uniforms {
     // x the route's width in pixels, y the sprite count, z the background:
     // 0 sky, 1 a flat colour kept as it is, 2 transparent, w the stars' seed
     counts: vec4<u32>,
+    // xy the frame's top-left pixel in the target, zw the frame's size. The
+    // sky, the weather and the dither are laid out over the frame
+    frame: vec4<i32>,
     // x how brightly the stars show, y how far they have moved in pixels,
     // z the moon's opacity, w its radius in pixels
     night: vec4<f32>,
@@ -198,7 +201,7 @@ fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
             colour *= 1.0 - uniforms.look.w;
         }
     }
-    return vec4<f32>(quantise(falling(pixel, colour)), 1.0);
+    return vec4<f32>(quantise(falling(pixel - uniforms.frame.xy, colour)), 1.0);
 }
 
 fn hash(x: u32, y: u32, seed: u32) -> u32 {
@@ -229,7 +232,7 @@ fn wrapped_noise(p: vec2<f32>, period: i32, seed: u32) -> f32 {
 
 // The clouds wrap after a whole turn of the view, like the stars
 fn cloud_noise(x: f32, y: f32) -> f32 {
-    let cell = 2.0 * f32(textureDimensions(id_map).x) / 10.0;
+    let cell = 2.0 * f32(uniforms.frame.z) / 10.0;
     let p = vec2<f32>(x / cell, y / (cell * 0.3));
     let seed = uniforms.counts.w + 101u;
     return 0.65 * wrapped_noise(p, 10, seed) + 0.35 * wrapped_noise(p * 2.0 + vec2<f32>(0.0, 7.0), 20, seed + 1u);
@@ -278,12 +281,13 @@ fn particle(pixel: vec2<i32>, cell: vec2<i32>, width: i32, length: i32, fallen: 
     return all(local >= at) && all(local < at + vec2<i32>(width, length));
 }
 
-// Rain streaks and snowflakes in front of everything, the far layer fainter
+// Rain streaks and snowflakes in front of everything, the far layer fainter.
+// `pixel` counts from the frame's corner
 fn falling(pixel: vec2<i32>, colour: vec3<f32>) -> vec3<f32> {
     var out = colour;
     let rain = uniforms.falling.x;
     let snow = uniforms.falling.y;
-    let height = f32(textureDimensions(id_map).y);
+    let height = f32(uniforms.frame.w);
     let time = uniforms.weather.w;
     let lit = uniforms.cloud_lit.rgb;
     if rain > 0.0 {
@@ -317,13 +321,14 @@ fn hazed(colour: vec3<f32>, distance: f32) -> vec3<f32> {
     return mix(colour, uniforms.haze_colour.rgb, uniforms.weather.z * distance);
 }
 
-// The stars and the moon over the sky's colour, `t` down from the top
+// The stars and the moon over the sky's colour, `t` down from the top.
+// `pixel` counts from the frame's corner
 fn night_sky(pixel: vec2<i32>, sky: vec3<f32>, t: f32) -> vec3<f32> {
     var colour = sky;
     let stars = uniforms.night.x;
     if stars > 0.0 {
         // The stars repeat after a whole turn of the view
-        let turn = 2 * i32(textureDimensions(id_map).x);
+        let turn = 2 * uniforms.frame.z;
         let x = ((pixel.x - i32(uniforms.night.y)) % turn + turn) % turn;
         let h = hash(u32(x), u32(pixel.y), uniforms.counts.w);
         let density = 0.007 * (1.0 - smoothstep(0.5, 0.85, t));
@@ -353,12 +358,12 @@ fn night_sky(pixel: vec2<i32>, sky: vec3<f32>, t: f32) -> vec3<f32> {
 fn scene(pixel: vec2<i32>) -> vec3<f32> {
     let centre = load(pixel);
     if centre.id == 0u {
-        let size = textureDimensions(id_map);
-        let t = (f32(pixel.y) + 0.5) / f32(size.y);
+        let framed = pixel - uniforms.frame.xy;
+        let t = (f32(framed.y) + 0.5) / f32(uniforms.frame.w);
         // Rounded like the terrain's colour target, so both quantise the same way
         let sky = round(mix(uniforms.sky_top.rgb, uniforms.sky_bottom.rgb, t) * 255.0) / 255.0;
-        let night = night_sky(pixel, sky + bayer(pixel) * uniforms.look.y, t);
-        return hazed(clouds(pixel, night, t), smoothstep(0.15, 0.6, t));
+        let night = night_sky(framed, sky + bayer(framed) * uniforms.look.y, t);
+        return hazed(clouds(framed, night, t), smoothstep(0.15, 0.6, t));
     }
 
     var silhouette = false;
@@ -426,9 +431,11 @@ fn god_rays(pixel: vec2<i32>, colour: vec3<f32>) -> vec3<f32> {
         return colour;
     }
     let size = vec2<f32>(textureDimensions(id_map));
+    let frame = vec2<f32>(uniforms.frame.zw);
     let travel = uniforms.rays.zw;
     let p = vec2<f32>(pixel) + 0.5;
-    let corners = array<vec2<f32>, 4>(vec2<f32>(0.0), vec2<f32>(size.x, 0.0), vec2<f32>(0.0, size.y), size);
+    let framed = pixel - uniforms.frame.xy;
+    let corners = array<vec2<f32>, 4>(vec2<f32>(0.0), vec2<f32>(frame.x, 0.0), vec2<f32>(0.0, frame.y), frame);
     var first = 1e9;
     var last = -1e9;
     for (var i = 0; i < 4; i++) {
@@ -436,13 +443,13 @@ fn god_rays(pixel: vec2<i32>, colour: vec3<f32>) -> vec3<f32> {
         first = min(first, d);
         last = max(last, d);
     }
-    let along = (dot(p, travel) - first) / max(last - first, 1.0);
+    let along = (dot(vec2<f32>(framed) + 0.5, travel) - first) / max(last - first, 1.0);
     // Any point on the pixel's view ray lies in the same sheet
     let ndc = vec2<f32>(p.x / size.x * 2.0 - 1.0, 1.0 - p.y / size.y * 2.0);
     let near = uniforms.inv_view_proj * vec4<f32>(ndc, 0.0, 1.0);
     let across = (dot(near.xyz / near.w, uniforms.ray_axis.xyz) + uniforms.ray_axis.w) / uniforms.rays.y;
     let shown = beam(across) * strength * 0.6 * (1.0 - smoothstep(0.2, 0.95, along));
-    if shown <= bayer(pixel) + 0.5 {
+    if shown <= bayer(framed) + 0.5 {
         return colour;
     }
     return mix(colour, max(colour, uniforms.ray_colour.rgb), 0.3);

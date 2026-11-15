@@ -249,6 +249,9 @@ impl Default for Look {
 /// sits a little above the middle with the zenith near the top
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Sky {
+    /// What shows where there is no terrain: the look's, or see-through for
+    /// a layer that goes over a sky drawn apart
+    pub background: Background,
     pub gradient: [[u8; 3]; 2],
     pub stars: f32,
     pub star_seed: u32,
@@ -422,8 +425,7 @@ impl Sky {
             smoothstep(0.15, 0.35, cover) * smoothstep(0.95, 0.7, cover) * (1.0 - weather.dimming())
         });
         let light = (-sun.direction).normalize_or(Vec3::NEG_Z);
-        let travel = camera.view_proj * light.extend(0.0);
-        let direction = Vec2::new(travel.x * width, -travel.y * height).normalize_or(Vec2::Y);
+        let direction = light_travel(camera, sun, width, height);
         // The sheets hold both the light's direction and the view's, so a
         // view ray never crosses from one to the next
         let viewed = (camera.forward - camera.forward.dot(light) * light).normalize_or(right);
@@ -441,6 +443,7 @@ impl Sky {
             drift_m: wind.dot(axis.truncate()) * time_s * RAY_DRIFT,
         };
         Sky {
+            background: Background::Sky,
             gradient: sun.sky,
             stars: sun.stars,
             star_seed,
@@ -450,6 +453,14 @@ impl Sky {
             rays,
         }
     }
+}
+
+/// Which way the sun's light travels across a `width` x `height` target that
+/// `camera` spans, in pixels
+pub(crate) fn light_travel(camera: &Camera, sun: &SunState, width: f32, height: f32) -> Vec2 {
+    let light = (-sun.direction).normalize_or(Vec3::NEG_Z);
+    let travel = camera.view_proj * light.extend(0.0);
+    Vec2::new(travel.x * width, -travel.y * height).normalize_or(Vec2::Y)
 }
 
 #[repr(C)]
@@ -462,6 +473,7 @@ struct Uniforms {
     look: [f32; 4],
     route: [f32; 4],
     counts: [u32; 4],
+    frame: [i32; 4],
     night: [f32; 4],
     moon: [f32; 4],
     moon_phase: [f32; 4],
@@ -658,7 +670,9 @@ impl PostPass {
         let metres_per_px = 2.0 * inv_view_proj.x_axis.truncate().length() / target.width() as f32;
         let colour =
             |rgb: [u8; 3]| Vec4::new(rgb[0].into(), rgb[1].into(), rgb[2].into(), 255.0) / 255.0;
-        let ([sky_top, sky_bottom], background) = match look.background {
+        let margins = target.margins();
+        let (frame_width, frame_height) = target.frame_size();
+        let ([sky_top, sky_bottom], background) = match sky.background {
             Background::Sky => (sky.gradient, 0),
             Background::Colour(rgb) => ([rgb, rgb], 1),
             Background::Transparent => (sky.gradient, 2),
@@ -696,6 +710,12 @@ impl PostPass {
                 sprites.len().min(MAX_SPRITES) as u32,
                 background,
                 sky.star_seed,
+            ],
+            frame: [
+                margins.left as i32,
+                margins.top as i32,
+                frame_width as i32,
+                frame_height as i32,
             ],
             night: [sky.stars, sky.star_shift_px, moon.opacity, moon.radius],
             moon: [

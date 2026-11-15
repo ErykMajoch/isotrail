@@ -1,3 +1,4 @@
+use glam::Vec2;
 use isotrail_bundle::{
     MoonSample, SceneBundle, Season, SunSample, Units, Weather, WeatherDataset, WeatherSample,
 };
@@ -5,12 +6,12 @@ use isotrail_export::{
     ExportError, GifOptions, GifWriter, Plays, render_clip, render_still, upscale,
 };
 use isotrail_render::{
-    Aim, Aspect, Background, Canvas, Conditions, DEFAULT_PALETTE, DEFAULT_STATS, DateFormat,
-    Diorama, Edges, Frame, Framing, GodRays, Gpu, HiddenRoute, LIVE_SAFE_AREA, Look, MAX_ZOOM,
-    Markers, Mesher, Motion, OffscreenTarget, Orbit, OverlayStyle, OverlayText, Overlays, Pace,
-    Palette, PixelGrid, RouteStyle, Shaped, SmoothMesher, StatKind, SunState, Terrain,
-    TerrainRenderer, Theme, Timeline, View, VoxelMesher, Walk, WeatherEffects, When,
-    draw_test_scene, mesh_within,
+    Aim, Aspect, Background, Camera, Canvas, Conditions, DEFAULT_PALETTE, DEFAULT_STATS,
+    DateFormat, Diorama, Edges, FULL_TURN, Fill, Frame, Framing, GodRays, Gpu, HiddenRoute,
+    LIVE_SAFE_AREA, Layers, Look, MAX_ZOOM, Markers, Mesher, Motion, OffscreenTarget, Orbit,
+    OverlayStyle, OverlayText, Overlays, Pace, Palette, PixelGrid, Placement, Resample, RouteLine,
+    RouteStyle, Scene, Shaped, SmoothMesher, StatKind, SunState, Terrain, TerrainRenderer, Theme,
+    Timeline, View, VoxelMesher, Walk, WeatherEffects, When, compose, draw_test_scene, mesh_within,
 };
 use isotrail_testkit::{
     Tolerance, assert_golden, decode_gif, differing_share, diorama_bundle, hike_bundle,
@@ -902,6 +903,250 @@ fn a_turned_diorama_shrinks_only_as_far_as_its_heading_needs() {
         sizes.push((right - left + 1) * (bottom - top + 1));
     }
     assert!(sizes.windows(2).any(|w| w[0] != w[1]), "{sizes:?}");
+}
+
+/// The hike under a low sun and broken cloud, with the moon up, as rain
+/// falls: everything the sky and the weather can draw at once
+fn busy_sky_bundle() -> SceneBundle {
+    let mut bundle = hike_bundle();
+    bundle.sun = vec![SunSample {
+        time: NOON,
+        azimuth_deg: 290.0,
+        elevation_deg: 6.0,
+    }];
+    bundle.moon = vec![MoonSample {
+        time: NOON,
+        azimuth_deg: 50.0,
+        elevation_deg: 35.0,
+        illuminated: 1.0,
+    }];
+    bundle.weather = Some(Weather {
+        dataset: WeatherDataset::Archive,
+        samples: [NOON - 1_800, NOON + 1_800]
+            .map(|time| WeatherSample {
+                time,
+                precipitation_mm: 3.0,
+                rain_mm: 3.0,
+                ..sky(63, 55.0, 40.0)
+            })
+            .to_vec(),
+    });
+    bundle
+}
+
+/// The sky drawn alone and the slab drawn alone, laid together, are the
+/// picture drawn in one go, to the byte
+#[test]
+fn the_sky_and_the_slab_drawn_apart_make_the_whole_picture() {
+    let gpu = isotrail_testkit::gpu();
+    let framing = Aspect::Square.framing(6).unwrap();
+    let size = (framing.width, framing.height);
+    let renderer = TerrainRenderer::new(&gpu);
+    let targets = [(); 3].map(|()| OffscreenTarget::new(&gpu, size.0, size.1));
+    let placement = Placement {
+        scale: 1.0,
+        offset: Vec2::ZERO,
+    };
+    for bundle in [hike_bundle(), busy_sky_bundle()] {
+        let mut mesh =
+            mesh_within(&VoxelMesher::default(), &bundle, gpu.max_buffer_size()).unwrap();
+        let heading = Aim::default().heading(&bundle) + 0.4;
+        let camera = Camera::diorama(heading, mesh.positions(), &framing);
+        mesh.add_props(&bundle, camera.metres_per_px);
+        let route = RouteLine::drape(&bundle, &mesh.surface, camera.metres_per_px / 2.0);
+        let mesh = renderer.upload(&gpu, &mesh).unwrap();
+        let sun = SunState::for_hike(&bundle);
+        for background in [
+            Background::Sky,
+            Background::Colour([12, 200, 99]),
+            Background::Transparent,
+        ] {
+            let look = Look {
+                background,
+                god_rays: GodRays::On,
+                ..Look::default()
+            };
+            for progress in [0.6, 1.0] {
+                let scene = Scene {
+                    mesh: &mesh,
+                    route: Some(&route),
+                    progress,
+                    star_seed: bundle.prop_seed as u32,
+                    time_s: 0.25,
+                };
+                let [whole, backdrop, slab] = &targets;
+                renderer.draw(&gpu, whole, &scene, &camera, &sun, &look);
+                renderer.draw_sky(&gpu, backdrop, &scene, &camera, &sun, &look);
+                renderer.draw_slab(&gpu, slab, &scene, &camera, &sun, &look);
+                let [whole, backdrop, slab] =
+                    [whole, backdrop, slab].map(|target| target.read_back(&gpu).unwrap());
+                // The slab leaves the sky see-through, and the sky has no slab
+                assert_eq!(slab.pixel(0, 0), [0, 0, 0, 0]);
+                assert!(mean(&slab) > 20.0, "{}", mean(&slab));
+                for (scale, resample) in [(1, Resample::Sharp), (2, Resample::Nearest)] {
+                    let laid = compose(
+                        Fill::behind(background, &backdrop),
+                        &slab,
+                        &placement,
+                        size,
+                        scale,
+                        resample,
+                    );
+                    let expected = upscale(&whole, scale).unwrap();
+                    assert!(
+                        laid.rgba() == expected.rgba(),
+                        "{background:?} at {progress}, {scale}x: {} of the pixels differ",
+                        differing_share(laid.rgba(), expected.rgba(), Tolerance::default())
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// A turning diorama's two targets, read back
+fn turning_layers(
+    gpu: &Gpu,
+    renderer: &TerrainRenderer,
+    diorama: &Diorama,
+    view: &View,
+    look: &Look,
+) -> (Frame, Frame, Placement) {
+    let framing = *diorama.turntable().framing();
+    let backdrop = OffscreenTarget::new(gpu, framing.width, framing.height);
+    let slab = diorama.layer_target(gpu).unwrap();
+    let layers = Layers {
+        backdrop: &backdrop,
+        slab: &slab,
+    };
+    let placement = diorama
+        .draw_turning(gpu, renderer, layers, view, 1.0, look)
+        .unwrap();
+    (
+        backdrop.read_back(gpu).unwrap(),
+        slab.read_back(gpu).unwrap(),
+        placement,
+    )
+}
+
+/// At the still's view the layers are the still, wider. Its camera spans
+/// the layer and not the frame, so a few edge pixels may fall the other way
+#[test]
+fn a_turning_dioramas_layers_at_rest_are_the_still() {
+    let gpu = isotrail_testkit::gpu();
+    let renderer = TerrainRenderer::new(&gpu);
+    let framing = Aspect::Story.framing(6).unwrap();
+    let size = (framing.width, framing.height);
+    let aim = Aim::default();
+    for bundle in [hike_bundle(), busy_sky_bundle()] {
+        let mesh = mesh_within(&VoxelMesher::default(), &bundle, gpu.max_buffer_size()).unwrap();
+        let sun = SunState::for_hike(&bundle);
+        let mut diorama =
+            Diorama::new(&gpu, &renderer, &bundle, mesh, &framing, &aim, sun).unwrap();
+        diorama.make_room(FULL_TURN, gpu.max_texture_side());
+        diorama.set_time(0.25);
+        let view = diorama.start_view(&aim);
+        assert!(!diorama.turns(&view) && diorama.turns(&View::turned(-30.0)));
+        for background in [Background::Sky, Background::Transparent] {
+            let look = Look {
+                background,
+                ..Look::default()
+            };
+            let target = OffscreenTarget::new(&gpu, size.0, size.1);
+            diorama.draw(&gpu, &renderer, &target, &view, 1.0, &look);
+            let still = target.read_back(&gpu).unwrap();
+            let (backdrop, slab, placement) =
+                turning_layers(&gpu, &renderer, &diorama, &view, &look);
+            assert!(slab.width() > size.0 && slab.height() > size.1);
+            assert_eq!(placement.scale, 1.0);
+            let laid = compose(
+                Fill::behind(background, &backdrop),
+                &slab,
+                &placement,
+                size,
+                1,
+                Resample::Sharp,
+            );
+            let exact = Tolerance {
+                max_diff_fraction: 0.0,
+                channel_epsilon: 0,
+            };
+            let differing = differing_share(laid.rgba(), still.rgba(), exact);
+            assert!(differing < 0.001, "{background:?}: {differing}");
+        }
+    }
+}
+
+/// Turned, the layers show the slab where the picture drawn at that
+/// heading's own size has it, and the sky stays as that picture has it
+#[test]
+fn a_turning_dioramas_layers_show_what_each_heading_fits() {
+    let gpu = isotrail_testkit::gpu();
+    let renderer = TerrainRenderer::new(&gpu);
+    let bundle = busy_sky_bundle();
+    let framing = Aspect::Story.framing(6).unwrap();
+    let size = (framing.width, framing.height);
+    let mesh = mesh_within(&VoxelMesher::default(), &bundle, gpu.max_buffer_size()).unwrap();
+    let sun = SunState::for_hike(&bundle);
+    let mut diorama = Diorama::new(
+        &gpu,
+        &renderer,
+        &bundle,
+        mesh,
+        &framing,
+        &Aim::default(),
+        sun,
+    )
+    .unwrap();
+    assert!(diorama.layer_target(&gpu).is_none());
+    diorama.make_room(FULL_TURN, gpu.max_texture_side());
+    let target = OffscreenTarget::new(&gpu, size.0, size.1);
+    let see_through = Look {
+        background: Background::Transparent,
+        ..Look::default()
+    };
+    let mut scales = Vec::new();
+    for yaw in [30.0, 90.0, -147.0] {
+        let view = View::turned(yaw);
+        diorama.draw(&gpu, &renderer, &target, &view, 1.0, &see_through);
+        let fitted = drawn_box(&target.read_back(&gpu).unwrap());
+        let (_, slab, placement) = turning_layers(&gpu, &renderer, &diorama, &view, &see_through);
+        let laid = compose(Fill::Clear, &slab, &placement, size, 1, Resample::Nearest);
+        let shown = drawn_box(&laid);
+        let apart = [
+            shown.0.abs_diff(fitted.0),
+            shown.1.abs_diff(fitted.1),
+            shown.2.abs_diff(fitted.2),
+            shown.3.abs_diff(fitted.3),
+        ];
+        assert!(
+            apart.iter().all(|&d| d <= 2),
+            "{yaw}°: {shown:?} vs {fitted:?}"
+        );
+        scales.push(placement.scale);
+
+        // The sky behind is the one the heading's own picture has. Beams of
+        // sunlight are left out: they follow the camera, which that picture
+        // moves to whole pixels and the backdrop doesn't
+        let look = Look {
+            god_rays: GodRays::Off,
+            ..Look::default()
+        };
+        diorama.draw(&gpu, &renderer, &target, &view, 1.0, &look);
+        let whole = target.read_back(&gpu).unwrap();
+        let (backdrop, _, _) = turning_layers(&gpu, &renderer, &diorama, &view, &look);
+        let mut sky = 0;
+        for y in 0..size.1 {
+            for x in 0..size.0 {
+                if laid.pixel(x, y)[3] == 0 && (x < shown.0 || x > shown.2) {
+                    assert_eq!(backdrop.pixel(x, y), whole.pixel(x, y), "{yaw}°: {x},{y}");
+                    sky += 1;
+                }
+            }
+        }
+        assert!(sky > 1000, "{yaw}°: {sky}");
+    }
+    assert!(scales.iter().any(|&s| (s - 1.0).abs() > 0.05), "{scales:?}");
 }
 
 #[test]
