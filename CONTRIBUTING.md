@@ -25,7 +25,7 @@ The workspace is split into crates:
 | --- | --- |
 | `isotrail-track` | GPX parsing, cleaning and statistics |
 | `isotrail-bundle` | The scene bundle (`.itb`) types and file format |
-| `isotrail-geo` | Projection, slab and grid, elevation and OpenStreetMap sources, landcover, caching |
+| `isotrail-geo` | Projection, slab and grid, elevation, map and weather sources, landcover, caching, scene building |
 | `isotrail-render` | The wgpu renderer: meshers, camera, lighting, post-processing, text and overlays |
 | `isotrail-export` | Rendering frames without a window, and PNG, GIF and MP4 output |
 | `isotrail-cli` | The `isotrail` command |
@@ -33,6 +33,8 @@ The workspace is split into crates:
 | `isotrail-testkit` | Synthetic scenes, golden-image, GIF and video helpers for tests |
 
 `isotrail-track`, `isotrail-bundle` and `isotrail-render` must stay WebAssembly-safe. They can't use the filesystem, the network or threads. `isotrail-geo` builds for WebAssembly too, without its HTTP client and disk cache.
+
+The steps from a track to a scene bundle live in `isotrail-geo`. The command adds the disk cache, the server options and its own messages.
 
 Please don't add real recordings to the repository. Tests use synthetic routes only.
 

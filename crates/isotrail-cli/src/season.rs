@@ -1,12 +1,8 @@
 use clap::ValueEnum;
 use isotrail_bundle::{SceneBundle, Season};
-use isotrail_geo::{
-    Fetcher, OpenMeteoSource, SeasonKind, WeatherError, WeatherRequest, WeatherServer,
-    WeatherSource, forced_season, ice_line, snow_line, snow_readings,
-};
+pub use isotrail_geo::without_weather;
+use isotrail_geo::{SeasonKind, forced_season};
 use isotrail_render::foliage;
-use isotrail_track::Track;
-use tracing::warn;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
 pub enum SeasonArg {
@@ -18,70 +14,24 @@ pub enum SeasonArg {
     Winter,
 }
 
-/// Snow from the weather during the hike, and lakes frozen by the frost of
-/// the days before; when the days before can't be found, it warns and
-/// leaves the lakes open
-pub fn estimate(
-    bundle: &mut SceneBundle,
-    track: &Track,
-    fetcher: impl Fetcher,
-    server: &WeatherServer,
-) {
-    let Some(weather) = &bundle.weather else {
-        return;
-    };
-    let Ok(request) = WeatherRequest::from_track(track, crate::weather::now()) else {
-        return;
-    };
-    let before = OpenMeteoSource::new(fetcher)
-        .server(server)
-        .days_before(&request)
-        .unwrap_or_else(|err| {
-            if matches!(err, WeatherError::Offline { .. }) {
-                warn!(
-                    "the weather before the hike isn't in the cache, so lakes are left open; run once without --offline to add it"
-                );
-            } else {
-                warn!(
-                    "can't get the weather before the hike, so lakes are left open: {}",
-                    crate::describe(&err.into())
-                );
-            }
-            Vec::new()
-        });
-    let route = &bundle.route.points;
-    let walked = route.iter().map(|p| p.draped_m).sum::<f32>() / route.len().max(1) as f32;
-    let readings = snow_readings(weather, &request, &before, walked);
-    let terrain = &bundle.terrain;
-    let top = (0..terrain.heights.len())
-        .map(|cell| terrain.height_m(cell))
-        .fold(f32::MIN, f32::max);
-    let highest_lake = bundle
-        .water
-        .iter()
-        .filter(|body| !body.sea)
-        .map(|body| body.level_m)
-        .fold(f32::MIN, f32::max);
-    bundle.season.snow_line_m = snow_line(&readings, &before).filter(|&line| line < top);
-    bundle.season.ice_line_m = ice_line(&before).filter(|&line| line <= highest_lake);
+impl SeasonArg {
+    /// The season to force, or none for the hike's own
+    pub fn kind(self) -> Option<SeasonKind> {
+        match self {
+            SeasonArg::Auto => None,
+            SeasonArg::Spring => Some(SeasonKind::Spring),
+            SeasonArg::Summer => Some(SeasonKind::Summer),
+            SeasonArg::Autumn => Some(SeasonKind::Autumn),
+            SeasonArg::Winter => Some(SeasonKind::Winter),
+        }
+    }
 }
 
 /// Shows the season `--season` asks for in place of the hike's own
 pub fn apply(bundle: &mut SceneBundle, season: SeasonArg) {
-    let kind = match season {
-        SeasonArg::Auto => return,
-        SeasonArg::Spring => SeasonKind::Spring,
-        SeasonArg::Summer => SeasonKind::Summer,
-        SeasonArg::Autumn => SeasonKind::Autumn,
-        SeasonArg::Winter => SeasonKind::Winter,
-    };
-    bundle.season = forced_season(kind, bundle);
-}
-
-/// Snow and ice come from the weather, so they go with it
-pub fn without_weather(season: &mut Season) {
-    season.snow_line_m = None;
-    season.ice_line_m = None;
+    if let Some(kind) = season.kind() {
+        bundle.season = forced_season(kind, bundle);
+    }
 }
 
 /// One line for the `bundle` report

@@ -5,13 +5,12 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use isotrail_bundle::{
     Units, WEATHER_ATTRIBUTION, Weather, WeatherDataset, WeatherSample, weather_condition,
 };
-use isotrail_geo::{
-    Fetcher, MAX_TIMED_SPAN_DAYS, OpenMeteoSource, RequestError, WeatherError, WeatherRequest,
-    WeatherServer, WeatherSource,
-};
+pub use isotrail_geo::dataset_name;
+use isotrail_geo::{Fetcher, WeatherServer, look_up_weather};
 use isotrail_track::{Track, Tz};
 use serde::Serialize;
-use tracing::warn;
+
+use crate::bundle::Warnings;
 
 const MISSING: &str = "—";
 const HOUR_S: i64 = 3600;
@@ -23,46 +22,7 @@ pub fn look_up(
     fetcher: impl Fetcher,
     server: &WeatherServer,
 ) -> Option<(Weather, String)> {
-    let request = match WeatherRequest::from_track(track, now()) {
-        Ok(request) => request,
-        Err(RequestError::Untimed) => {
-            warn!("the track has no times, so the weather is left out");
-            return None;
-        }
-        Err(RequestError::TooLong { days }) => {
-            warn!(
-                "the hike spans {days} days, more than {MAX_TIMED_SPAN_DAYS}, so the weather is left out"
-            );
-            return None;
-        }
-    };
-    match OpenMeteoSource::new(fetcher)
-        .server(server)
-        .weather(&request)
-    {
-        Ok(weather) => {
-            let places = request.locations.len();
-            let provenance = format!(
-                "Open-Meteo {} at {places} location{}",
-                dataset_name(weather.dataset),
-                if places == 1 { "" } else { "s" }
-            );
-            Some((weather, provenance))
-        }
-        Err(WeatherError::Offline { .. }) => {
-            warn!(
-                "the weather for this hike isn't in the cache, so it is left out; run once without --offline to add it"
-            );
-            None
-        }
-        Err(err) => {
-            warn!(
-                "can't get the weather, so it is left out: {}",
-                crate::describe(&err.into())
-            );
-            None
-        }
-    }
+    look_up_weather(track, fetcher, server, now(), &mut Warnings)
 }
 
 /// Unix seconds, for choosing between the archive and the forecast
@@ -70,13 +30,6 @@ pub fn now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as i64)
-}
-
-pub fn dataset_name(dataset: WeatherDataset) -> &'static str {
-    match dataset {
-        WeatherDataset::Archive => "archive",
-        WeatherDataset::Forecast => "forecast",
-    }
 }
 
 /// The hours whose values describe the hike: on the hour from the one at or

@@ -1,23 +1,20 @@
-use std::borrow::Cow;
 use std::fmt::Write as _;
 use std::io::Write as _;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
-use anyhow::Context;
 use clap::{Args, ValueEnum};
-use isotrail_bundle::{BundleError, Route};
+use isotrail_bundle::Route;
 use isotrail_geo::{
-    Cache, CachedFetcher, DEFAULT_DETAIL, DemSource, FeatureSource, FetchError, Fetcher, Footprint,
-    FootprintOptions, GeoError, Grid, Heightmap, HttpFetcher, Landcover, LandcoverMap,
-    MIN_PADDING_M, OSM_ATTRIBUTION, OVERPASS_URL, Orientation, OsmFeatures, OverpassSource,
-    PADDING_FRACTION, Provenance, RetryPolicy, SceneBundle, TERRARIUM_URL, TerrariumSource,
-    line_mask, origin, redact, retime, scene_bundle, untime,
+    Cache, CachedFetcher, DEFAULT_DETAIL, FetchError, Fetcher, Fetchers, FootprintOptions, Grid,
+    Heightmap, HttpFetcher, Landcover, LandcoverMap, MAX_TIMED_SPAN_DAYS, MIN_PADDING_M,
+    OVERPASS_URL, Orientation, PADDING_FRACTION, Prepared, Progress, RequestError, RetryPolicy,
+    SceneBundle, SceneError, SceneOptions, TERRARIUM_URL, Times, Warning, WeatherError, origin,
 };
 use isotrail_render::parse_count;
 use isotrail_track::Track;
 use png::ColorType;
-use tracing::{info, warn};
+use tracing::warn;
 
 use crate::config::Typed;
 use crate::output;
@@ -223,28 +220,6 @@ fn distance_text(metres: f64) -> String {
 }
 
 impl DataArgs {
-    /// The track with --trim-start and --trim-end cut off, or a usage error
-    /// naming its length when nothing is left
-    fn trim<'a>(&self, track: &'a Track) -> anyhow::Result<Cow<'a, Track>> {
-        let (start, end) = (self.trim_start.unwrap_or(0.0), self.trim_end.unwrap_or(0.0));
-        if start == 0.0 && end == 0.0 {
-            return Ok(Cow::Borrowed(track));
-        }
-        track.trimmed(start, end).map(Cow::Owned).ok_or_else(|| {
-            let cuts: Vec<String> = [(start, "start"), (end, "end")]
-                .into_iter()
-                .filter(|&(metres, _)| metres > 0.0)
-                .map(|(metres, from)| format!("{} from the {from}", distance_text(metres)))
-                .collect();
-            let length = track.stats().map_or(0.0, |stats| stats.distance_m);
-            usage(format!(
-                "trimming {} leaves none of the route, which is {} long; trim less",
-                cuts.join(" and "),
-                distance_text(length)
-            ))
-        })
-    }
-
     /// The padding as `--padding` takes it, such as 15,500
     fn padding_text(&self) -> String {
         let padding = self.padding.unwrap_or(Padding {
@@ -259,18 +234,35 @@ impl DataArgs {
         )
     }
 
-    fn footprint(&self) -> FootprintOptions {
+    /// The library's options, with the weather server and its key
+    fn options(&self) -> SceneOptions {
         let padding = self.padding.unwrap_or(Padding {
             fraction: PADDING_FRACTION,
             min_m: MIN_PADDING_M,
         });
-        FootprintOptions {
-            padding_fraction: padding.fraction,
-            min_padding_m: padding.min_m,
-            orientation: match self.footprint {
-                FootprintArg::Route => Orientation::Route,
-                FootprintArg::North => Orientation::North,
+        SceneOptions {
+            detail: NonZeroU32::new(self.detail).unwrap_or(DEFAULT_DETAIL),
+            footprint: FootprintOptions {
+                padding_fraction: padding.fraction,
+                min_padding_m: padding.min_m,
+                orientation: match self.footprint {
+                    FootprintArg::Route => Orientation::Route,
+                    FootprintArg::North => Orientation::North,
+                },
             },
+            map_data: !self.no_map_data,
+            weather: !self.no_weather,
+            season: self.season.kind(),
+            times: match self.times {
+                TimesArg::Recorded => Times::Recorded,
+                TimesArg::Coarse => Times::Coarse,
+                TimesArg::None => Times::None,
+            },
+            trim_start_m: self.trim_start.unwrap_or(0.0),
+            trim_end_m: self.trim_end.unwrap_or(0.0),
+            terrain_url: self.terrain_url.clone(),
+            overpass_url: self.overpass_url.clone(),
+            weather_server: self.weather_url.server(),
         }
     }
 
@@ -339,18 +331,6 @@ impl DataArgs {
     }
 }
 
-/// A scene bundle and what went into it
-pub struct Prepared {
-    pub bundle: SceneBundle,
-    grid: Grid,
-    heightmap: Heightmap,
-    landcover: LandcoverMap,
-    /// None with --no-map-data
-    features: Option<OsmFeatures>,
-    tiles: usize,
-    elevation_range: (f32, f32),
-}
-
 /// Fetches through the shared cache, or the one in `cache_dir`
 pub fn fetcher(
     offline: bool,
@@ -398,37 +378,6 @@ impl DataArgs {
     }
 }
 
-/// Map features from Overpass, which retries by itself, or none with
-/// --no-map-data
-fn map_data(grid: &Grid, data: &DataArgs) -> anyhow::Result<Option<OsmFeatures>> {
-    if data.no_map_data {
-        warn!(
-            "--no-map-data: building the diorama from the elevation alone, without lakes, woods or paths"
-        );
-        return Ok(None);
-    }
-    let fetcher = data.cached(HttpFetcher::new()?.with_retry(RetryPolicy::once()))?;
-    let features = OverpassSource::new(&fetcher)
-        .endpoint(&data.overpass_url)
-        .features(grid)
-        .map_err(|err| {
-            if err.is_offline() {
-                not_cached(
-                    "map data",
-                    &data.overpass_url,
-                    OVERPASS_URL,
-                    ", or add --no-map-data",
-                )
-            } else {
-                anyhow::Error::new(err).context(MAP_DATA_WAYS_OUT)
-            }
-        })?;
-    for (tag, count) in features.counts() {
-        info!("{count:>6}  {tag}");
-    }
-    Ok(Some(features))
-}
-
 /// The next step when --offline finds nothing cached; a server other than
 /// the usual one is named, without any key in its address
 fn not_cached(what: &str, url: &str, usual: &str, more: &str) -> anyhow::Error {
@@ -468,122 +417,104 @@ fn is_offline(error: &(dyn std::error::Error + 'static)) -> bool {
     false
 }
 
+/// Prints the pipeline's warnings as the command line words them
+pub struct Warnings;
+
+impl Progress for Warnings {
+    fn warn(&mut self, warning: Warning) {
+        match warning {
+            Warning::MapDataSkipped => warn!(
+                "--no-map-data: building the diorama from the elevation alone, without lakes, woods or paths"
+            ),
+            Warning::TimesLeftOut => warn!(
+                "--times none: leaving out the date and times, with the light, weather and season that follow from them"
+            ),
+            Warning::NoWeatherRequest(RequestError::Untimed) => {
+                warn!("the track has no times, so the weather is left out");
+            }
+            Warning::NoWeatherRequest(RequestError::TooLong { days }) => warn!(
+                "the hike spans {days} days, more than {MAX_TIMED_SPAN_DAYS}, so the weather is left out"
+            ),
+            Warning::Weather(WeatherError::Offline { .. }) => warn!(
+                "the weather for this hike isn't in the cache, so it is left out; run once without --offline to add it"
+            ),
+            Warning::Weather(error) => warn!(
+                "can't get the weather, so it is left out: {}",
+                crate::describe(&error.into())
+            ),
+            Warning::DaysBefore(WeatherError::Offline { .. }) => warn!(
+                "the weather before the hike isn't in the cache, so lakes are left open; run once without --offline to add it"
+            ),
+            Warning::DaysBefore(error) => warn!(
+                "can't get the weather before the hike, so lakes are left open: {}",
+                crate::describe(&error.into())
+            ),
+        }
+    }
+}
+
 /// Fetches terrain, map data and weather around the track read from `file`
 /// and packs them into a bundle
 pub fn prepare(track: &Track, file: &Path, data: &DataArgs) -> anyhow::Result<Prepared> {
-    let trimmed = data.trim(track)?;
-    let track = trimmed.as_ref();
-    let footprint = Footprint::from_track_with(track, &data.footprint()).map_err(|error| {
-        if matches!(error, GeoError::NoGround) {
-            usage(format!(
-                "the route stays on one spot, so --padding {} leaves no ground to draw; \
-                 give it some metres, such as --padding 15,500",
-                data.padding_text()
-            ))
-        } else {
-            error.into()
-        }
-    })?;
-    let detail = NonZeroU32::new(data.detail).context("--detail must be positive")?;
-    let grid = Grid::new(&footprint, detail);
-
+    let options = data.options();
     let fetcher = data.cached(HttpFetcher::new()?)?;
-    let tiles = TerrariumSource::<HttpFetcher>::tiles(&grid).len();
-    let mut heightmap = TerrariumSource::new(&fetcher)
-        .template(&data.terrain_url)
-        .heightmap(&grid)
-        .map_err(|err| {
-            if is_offline(&err) {
+    let map_fetcher = data.cached(HttpFetcher::new()?.with_retry(RetryPolicy::once()))?;
+    let fetchers = Fetchers {
+        data: &fetcher,
+        map_data: &map_fetcher,
+    };
+    let title = crate::title(track, file);
+    isotrail_geo::prepare(
+        track,
+        &title,
+        &options,
+        fetchers,
+        weather::now(),
+        &mut Warnings,
+    )
+    .map_err(|error| match error {
+        SceneError::TrimmedAway { length_m } => {
+            let cuts: Vec<String> = [(options.trim_start_m, "start"), (options.trim_end_m, "end")]
+                .into_iter()
+                .filter(|&(metres, _)| metres > 0.0)
+                .map(|(metres, from)| format!("{} from the {from}", distance_text(metres)))
+                .collect();
+            usage(format!(
+                "trimming {} leaves none of the route, which is {} long; trim less",
+                cuts.join(" and "),
+                distance_text(length_m)
+            ))
+        }
+        SceneError::NoGround => usage(format!(
+            "the route stays on one spot, so --padding {} leaves no ground to draw; \
+             give it some metres, such as --padding 15,500",
+            data.padding_text()
+        )),
+        SceneError::Footprint(error) | SceneError::Scene(error) => error.into(),
+        SceneError::Elevation(error) => {
+            if is_offline(&error) {
                 not_cached("elevation data", &data.terrain_url, TERRARIUM_URL, "")
             } else {
-                anyhow::Error::new(err)
+                anyhow::Error::new(error)
             }
-        })?;
-    let features = map_data(&grid, data)?;
-    let elevation_range = heightmap.range();
-    let landcover = LandcoverMap::classify(
-        &grid,
-        features.as_ref().unwrap_or(&OsmFeatures::default()),
-        &mut heightmap,
-    );
-    for (bit, cells) in landcover.line_counts() {
-        let name = match bit {
-            line_mask::PATH => "path",
-            line_mask::ROAD => "road",
-            _ => "stream",
-        };
-        info!("{cells:>6}  cells with a {name}");
-    }
-
-    // Weather is asked for the hours the scene will hold
-    let timed = match data.times {
-        TimesArg::Recorded => Some(Cow::Borrowed(track)),
-        TimesArg::Coarse => Some(Cow::Owned(track.coarse_times())),
-        TimesArg::None => {
-            warn!(
-                "--times none: leaving out the date and times, with the light, weather and season that follow from them"
-            );
-            None
         }
-    };
-    let server = data.weather_url.server();
-    let weather = match &timed {
-        Some(timed) if !data.no_weather => weather::look_up(timed, &fetcher, &server),
-        _ => None,
-    };
-
-    let provenance = Provenance {
-        generator: format!("isotrail {}", env!("CARGO_PKG_VERSION")),
-        elevation: format!("{} at zoom {}", redact(&data.terrain_url), grid.dem_zoom()),
-        map_data: match features {
-            Some(_) => format!("OpenStreetMap via {}", origin(&data.overpass_url)),
-            None => "none".to_owned(),
-        },
-        weather: weather.as_ref().map(|(_, provenance)| provenance.clone()),
-    };
-    let mut bundle = scene_bundle(
-        track,
-        &crate::title(track, file),
-        &grid,
-        &heightmap,
-        &landcover,
-        provenance,
-    )?;
-    if features.is_none() {
-        bundle
-            .meta
-            .attribution
-            .retain(|credit| credit != OSM_ATTRIBUTION);
-    }
-    // Built from the recorded times first, so the seed and the trees it
-    // places don't depend on --times
-    match &timed {
-        Some(Cow::Owned(timed)) => retime(&mut bundle, timed),
-        Some(Cow::Borrowed(_)) => {}
-        None => untime(&mut bundle),
-    }
-    bundle.weather = weather.map(|(weather, _)| weather);
-    if let Some(timed) = &timed {
-        season::estimate(&mut bundle, timed, &fetcher, &server);
-    }
-    season::apply(&mut bundle, data.season);
-    bundle.validate().map_err(|error| match error {
-        BundleError::Invalid(reason) => {
-            anyhow::anyhow!(
-                "the scene made from {} can't be drawn: {reason}",
-                file.display()
-            )
+        SceneError::MapData(error) => {
+            if error.is_offline() {
+                not_cached(
+                    "map data",
+                    &data.overpass_url,
+                    OVERPASS_URL,
+                    ", or add --no-map-data",
+                )
+            } else {
+                anyhow::Error::new(error).context(MAP_DATA_WAYS_OUT)
+            }
         }
-        error => error.into(),
-    })?;
-    Ok(Prepared {
-        bundle,
-        grid,
-        heightmap,
-        landcover,
-        features,
-        tiles,
-        elevation_range,
+        SceneError::Invalid(reason) => anyhow::anyhow!(
+            "the scene made from {} can't be drawn: {reason}",
+            file.display()
+        ),
+        SceneError::Bundle(error) => error.into(),
     })
 }
 

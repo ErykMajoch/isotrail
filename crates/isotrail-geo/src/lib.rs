@@ -1,6 +1,6 @@
 //! Geographic preparation for isotrail: local projection, the terrain grid,
-//! elevation and map data sources, the on-disk cache that keeps them
-//! offline-friendly and assembly of the scene bundle
+//! elevation, map and weather sources, the on-disk cache that keeps them
+//! offline-friendly, and the pipeline that turns a track into a scene bundle
 //!
 //! ```
 //! use isotrail_geo::{DEFAULT_DETAIL, Footprint, Grid};
@@ -26,6 +26,7 @@ mod footprint;
 mod grid;
 mod landcover;
 mod osm;
+mod prepare;
 mod projection;
 mod relief;
 mod scene;
@@ -56,6 +57,10 @@ pub use landcover::{
 pub use osm::{
     Area, BoundingBox, FEATURE_KEYS, FeatureSource, Line, MINOR_WAY_MAX_CELL_M, OVERPASS_URL,
     OsmError, OsmFeatures, OsmId, OsmKind, OverpassSource, Polygon, Ring, Tags, overpass_query,
+};
+pub use prepare::{
+    Fetchers, Prepared, Progress, SceneError, SceneOptions, Step, Times, Warning, dataset_name,
+    look_up_weather, prepare, without_weather,
 };
 pub use projection::LocalProjection;
 pub use relief::{EXAGGERATION_FACTOR, MAX_EXAGGERATION, MIN_EXAGGERATION, vertical_exaggeration};
