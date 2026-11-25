@@ -205,7 +205,7 @@ pub fn prepare(track: &Track, file: &Path, data: &DataArgs) -> anyhow::Result<Pr
         data: &fetcher,
         map_data: &map_fetcher,
     };
-    let title = crate::title(track, file);
+    let title = track.title(file);
     isotrail_geo::prepare(
         track,
         &title,

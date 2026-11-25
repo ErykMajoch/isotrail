@@ -5,6 +5,7 @@ mod error;
 mod http;
 #[cfg(not(target_arch = "wasm32"))]
 mod recorded;
+mod replay;
 mod retry;
 
 use std::borrow::Cow;
@@ -21,7 +22,11 @@ pub use error::RequestFailure;
 pub use http::{HttpFetcher, MAX_RESPONSE_BYTES, USER_AGENT};
 #[cfg(not(target_arch = "wasm32"))]
 pub use recorded::RecordedFetcher;
+pub use replay::{Answer, ReplayFetcher, Request};
 pub use retry::RetryPolicy;
+
+/// How much of an error answer is kept, which is enough for the reason it gives
+const ERROR_BODY_BYTES: u64 = 4096;
 
 // For tests that need nothing listening. Port 1 lies below every system's ephemeral range, so no test server or
 // connection is ever given it, and with no socket on it every system refuses at once. A freed port can be handed
@@ -103,6 +108,17 @@ pub fn origin(url: &str) -> String {
         Ok(parsed) if parsed.has_host() => parsed.origin().ascii_serialization(),
         _ => "an unreadable address".to_owned(),
     }
+}
+
+/// A stored answer's key: a SHA-256 of method, URL (secrets masked) and body
+fn cache_key(method: &str, url: &str, body: &[u8]) -> String {
+    sha256_hex(&[
+        method.as_bytes(),
+        b"\n",
+        redact(url).as_bytes(),
+        b"\n",
+        body,
+    ])
 }
 
 pub fn sha256_hex(parts: &[&[u8]]) -> String {

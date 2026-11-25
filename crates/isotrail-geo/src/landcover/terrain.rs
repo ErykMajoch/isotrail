@@ -56,7 +56,7 @@ pub fn slope_deg(heightmap: &Heightmap, cell_size_m: f64, col: u32, row: u32) ->
     let (up, down) = (row.saturating_sub(1), (row + 1).min(heightmap.rows - 1));
     let dx = gradient((left, row), (right, row), right - left);
     let dy = gradient((col, up), (col, down), down - up);
-    dx.hypot(dy).atan().to_degrees()
+    libm::atan(libm::hypot(dx, dy)).to_degrees()
 }
 
 /// The class of a cell no map feature covers
@@ -95,7 +95,7 @@ mod tests {
         for (col, row) in [(0, 0), (1, 1), (3, 2)] {
             assert!((slope_deg(&ramp, 30.0, col, row) - 45.0).abs() < 1e-9);
         }
-        assert!((slope_deg(&ramp, 60.0, 1, 1) - 0.5f64.atan().to_degrees()).abs() < 1e-9);
+        assert!((slope_deg(&ramp, 60.0, 1, 1) - libm::atan(0.5).to_degrees()).abs() < 1e-9);
         let single = Heightmap {
             cols: 1,
             rows: 1,

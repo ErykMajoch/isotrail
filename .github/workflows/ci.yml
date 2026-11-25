@@ -56,7 +56,7 @@ jobs:
       # Clippy rather than check, as the web crate's code only exists on wasm32
       - name: Check wasm32 build of the crates that run in a browser
         if: runner.os == 'Linux'
-        run: cargo clippy --target wasm32-unknown-unknown -p isotrail-track -p isotrail-bundle -p isotrail-geo -p isotrail-render -p isotrail-export -p isotrail-options -p isotrail-web -- -D warnings
+        run: cargo clippy --target wasm32-unknown-unknown -p isotrail-track -p isotrail-bundle -p isotrail-geo -p isotrail-render -p isotrail-export -p isotrail-options -p isotrail-web -p isotrail-scene -- -D warnings
 
   deny:
     name: dependencies
@@ -125,3 +125,18 @@ jobs:
         env:
           ISOTRAIL_GPU: software
         run: node web/test/check.mjs chrome --webgl
+
+      # A page loads the scene worker once a GPX file is chosen, so its size is reported but not limited
+      - name: Build the scene worker
+        run: |
+          sh web/build-scene.sh
+          {
+            echo "| Scene worker file | Bytes | Gzipped bytes |"
+            echo "|---|---|---|"
+            for file in web/scene/worker.js web/scene/pkg/isotrail_scene.js web/scene/pkg/isotrail_scene_bg.wasm web/scene/pkg/lite.tzb; do
+              echo "| \`$file\` | $(wc -c < "$file") | $(gzip -9c "$file" | wc -c) |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Browser check of a scene built from a GPX file
+        run: node web/test/scene.mjs chrome --webgl

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>isotrail: a scene built in the browser</title>
+<script type="module" src="../isotrail-embed.js"></script>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; max-width: 52rem; margin: 2rem auto; padding: 0 1rem; }
+  label { display: block; margin: 1rem 0; }
+  textarea { display: block; width: 100%; font: 13px ui-monospace, monospace; }
+  isotrail-hike { display: block; max-width: 100%; }
+</style>
+</head>
+<body>
+<h1>A scene built in the browser</h1>
+<p>Choose a GPX file. The scene is built on this page. Only the elevation, map and weather services are asked for data. The file itself is never sent.</p>
+<label>Options, as <code>isotrail render</code> flag names
+  <textarea id="options" rows="3" spellcheck="false">{}</textarea>
+</label>
+<label>GPX file <input type="file" id="file" accept=".gpx"></label>
+<p id="status" role="status">No file yet.</p>
+<p><a id="download" hidden>Download the scene file</a></p>
+<isotrail-hike id="hike" aspect="wide"></isotrail-hike>
+<script type="module">
+  const worker = new Worker(new URL('../scene/worker.js', import.meta.url), { type: 'module' });
+  const $ = (id) => document.getElementById(id);
+  let last;
+
+  // The browser check reads the result here
+  window.__scene = { state: 'idle' };
+
+  $('file').addEventListener('change', async () => {
+    const file = $('file').files[0];
+    if (!file) return;
+    window.__scene = { state: 'building' };
+    $('status').textContent = `Building ${file.name}…`;
+    $('download').hidden = true;
+    const gpx = await file.arrayBuffer();
+    worker.postMessage({ gpx, name: file.name, options: $('options').value }, [gpx]);
+  });
+
+  worker.addEventListener('message', ({ data }) => {
+    if (data.error) {
+      window.__scene = { state: 'failed', error: data.error };
+      $('status').textContent = `Can't build the scene: ${data.error}`;
+      return;
+    }
+    const { scene, warnings, passes, ms } = data;
+    window.__scene = { state: 'built', scene, warnings, passes, ms };
+    const left = warnings.length ? ` Left out: ${warnings.join(', ')}.` : '';
+    $('status').textContent = `Built in ${(ms / 1000).toFixed(1)}s, ${scene.length} bytes.${left}`;
+    if (last) URL.revokeObjectURL(last);
+    last = URL.createObjectURL(new Blob([scene], { type: 'application/octet-stream' }));
+    $('download').href = last;
+    $('download').download = $('file').files[0].name.replace(/\.gpx$/i, '') + '.itb';
+    $('download').hidden = false;
+    $('hike').setAttribute('src', last);
+  });
+</script>
+</body>
+</html>

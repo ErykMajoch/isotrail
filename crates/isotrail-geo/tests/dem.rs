@@ -51,7 +51,7 @@ fn recorded_tiles_give_a_plausible_mountain() {
     let (lat, lon) = grid.cell_center_lat_lon(summit.0, summit.1);
     let (x, y) = grid.footprint.projection.project(lat, lon);
     let (sx, sy) = grid.footprint.projection.project(53.0685, -4.0763);
-    let off = (x - sx).hypot(y - sy);
+    let off = libm::hypot(x - sx, y - sy);
     assert!(
         off < 2.0 * grid.cell_size_m,
         "highest cell {off:.0}m from the summit"

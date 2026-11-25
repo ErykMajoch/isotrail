@@ -1,10 +1,13 @@
+use std::cell::RefCell;
+use std::collections::HashSet;
 use std::fs::File;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
 use isotrail_geo::{
-    FetchError, Fetcher, Fetchers, OSM_ATTRIBUTION, Prepared, Progress, RecordedFetcher,
-    SceneError, SceneOptions, SeasonKind, Step, Times, Warning, prepare,
+    Answer, FetchError, Fetcher, Fetchers, OSM_ATTRIBUTION, Prepared, Progress, RecordedFetcher,
+    ReplayFetcher, Request, SceneError, SceneOptions, SeasonKind, Step, Times, Warning, prepare,
+    requests,
 };
 use isotrail_track::{GpxReader, Track, TrackReader};
 
@@ -148,6 +151,158 @@ fn trimming_everything_away_names_the_length() {
         Err(SceneError::TrimmedAway { length_m }) => assert!(length_m > 100.0),
         _ => panic!("expected the route to be trimmed away"),
     }
+}
+
+/// Notes every request on its way to the recordings
+struct Noting<'a> {
+    inner: &'a dyn Fetcher,
+    asked: &'a RefCell<HashSet<Request>>,
+}
+
+impl Fetcher for Noting<'_> {
+    fn get(&self, url: &str) -> Result<Vec<u8>, FetchError> {
+        self.asked.borrow_mut().insert(Request::get(url));
+        self.inner.get(url)
+    }
+
+    fn post(&self, url: &str, body: &[u8]) -> Result<Vec<u8>, FetchError> {
+        self.asked
+            .borrow_mut()
+            .insert(Request::post(url, body.to_vec()));
+        self.inner.post(url, body)
+    }
+}
+
+fn variants() -> [SceneOptions; 4] {
+    [
+        options(),
+        SceneOptions {
+            times: Times::Coarse,
+            ..options()
+        },
+        SceneOptions {
+            map_data: false,
+            ..options()
+        },
+        SceneOptions {
+            trim_start_m: 300.0,
+            trim_end_m: 200.0,
+            map_data: false,
+            ..options()
+        },
+    ]
+}
+
+#[test]
+fn the_plan_is_what_a_build_asks_for() {
+    for options in variants() {
+        let asked = RefCell::new(HashSet::new());
+        let data = Data::new();
+        let osm = RecordedFetcher::new(fixtures().join("osm"));
+        let fetchers = Fetchers {
+            data: &Noting {
+                inner: &data,
+                asked: &asked,
+            },
+            map_data: &Noting {
+                inner: &osm,
+                asked: &asked,
+            },
+        };
+        prepare(
+            &snowdon(),
+            "Snowdon",
+            &options,
+            fetchers,
+            LATER,
+            &mut Heard::default(),
+        )
+        .unwrap();
+        let planned: HashSet<Request> = requests(&snowdon(), &options, LATER)
+            .unwrap()
+            .into_iter()
+            .collect();
+        assert_eq!(planned, asked.into_inner(), "{options:?}");
+    }
+}
+
+/// Fetches each request from the recordings, as a page fetches them
+fn fetch_into(replay: &ReplayFetcher, wanted: Vec<Request>) {
+    let data = Data::new();
+    let osm = RecordedFetcher::new(fixtures().join("osm"));
+    for request in wanted {
+        let fetched = match &request.body {
+            None => data.get(&request.url),
+            Some(body) => osm.post(&request.url, body),
+        };
+        let answer = match fetched {
+            Ok(body) => Answer::Body(body),
+            Err(_) => Answer::Status {
+                status: 404,
+                body: Vec::new(),
+            },
+        };
+        replay.hold(request.key(), answer);
+    }
+}
+
+#[test]
+fn replayed_answers_build_the_same_scene() {
+    for options in variants() {
+        let replay = ReplayFetcher::new();
+        fetch_into(&replay, requests(&snowdon(), &options, LATER).unwrap());
+        let fetchers = Fetchers {
+            data: &replay,
+            map_data: &replay,
+        };
+        let replayed = prepare(
+            &snowdon(),
+            "Snowdon",
+            &options,
+            fetchers,
+            LATER,
+            &mut Heard::default(),
+        )
+        .unwrap();
+        assert!(replay.take_missed().is_empty(), "{options:?}");
+        let (direct, _) = build(&options);
+        assert_eq!(
+            replayed.bundle.to_bytes().unwrap(),
+            direct.unwrap().bundle.to_bytes().unwrap(),
+            "{options:?}"
+        );
+    }
+}
+
+#[test]
+fn without_the_plan_a_replay_stops_at_each_missing_tile() {
+    let replay = ReplayFetcher::new();
+    let fetchers = Fetchers {
+        data: &replay,
+        map_data: &replay,
+    };
+    let built = prepare(
+        &snowdon(),
+        "Snowdon",
+        &options(),
+        fetchers,
+        LATER,
+        &mut Heard::default(),
+    );
+    assert!(matches!(built, Err(SceneError::Elevation(_))));
+    let missed = replay.take_missed();
+    assert_eq!(missed.len(), 1);
+    fetch_into(&replay, missed);
+    let built = prepare(
+        &snowdon(),
+        "Snowdon",
+        &options(),
+        fetchers,
+        LATER,
+        &mut Heard::default(),
+    );
+    assert!(built.is_err());
+    assert_eq!(replay.take_missed().len(), 1);
 }
 
 #[test]

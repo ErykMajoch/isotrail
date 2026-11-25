@@ -81,7 +81,7 @@ impl Footprint {
             Orientation::Route => principal_angle(&segments),
             Orientation::North => 0.0,
         };
-        let (cos, sin) = (angle.cos(), angle.sin());
+        let (cos, sin) = (libm::cos(angle), libm::sin(angle));
         let (min, max) = bounds(
             segments
                 .iter()
@@ -133,7 +133,7 @@ impl Footprint {
 
     /// Slab coordinates (u along the long side, v across, from the centre) to local metres
     pub fn to_local(&self, u: f64, v: f64) -> (f64, f64) {
-        let (sin, cos) = self.rotation_rad.sin_cos();
+        let (sin, cos) = (libm::sin(self.rotation_rad), libm::cos(self.rotation_rad));
         (
             self.center.0 + u * cos - v * sin,
             self.center.1 + u * sin + v * cos,
@@ -141,7 +141,7 @@ impl Footprint {
     }
 
     pub fn from_local(&self, x: f64, y: f64) -> (f64, f64) {
-        let (sin, cos) = self.rotation_rad.sin_cos();
+        let (sin, cos) = (libm::sin(self.rotation_rad), libm::cos(self.rotation_rad));
         let (dx, dy) = (x - self.center.0, y - self.center.1);
         (dx * cos + dy * sin, -dx * sin + dy * cos)
     }
@@ -170,7 +170,7 @@ fn principal_angle(segments: &[Vec<(f64, f64)>]) -> f64 {
     for segment in segments {
         for pair in segment.windows(2) {
             let (a, b) = (pair[0], pair[1]);
-            let length = (b.0 - a.0).hypot(b.1 - a.1);
+            let length = libm::hypot(b.0 - a.0, b.1 - a.1);
             if length > 0.0 {
                 lines.push((a, b, length));
             }
@@ -197,7 +197,7 @@ fn principal_angle(segments: &[Vec<(f64, f64)>]) -> f64 {
         syy += w * (cy * cy + dy * dy / 12.0);
         sxy += w * (cx * cy + dx * dy / 12.0);
     }
-    0.5 * (2.0 * sxy).atan2(sxx - syy)
+    0.5 * libm::atan2(2.0 * sxy, sxx - syy)
 }
 
 #[cfg(test)]
@@ -269,7 +269,7 @@ mod tests {
         assert!(close(footprint.length_m, 13_000.0, 1e-3), "{footprint:?}");
         assert!(close(footprint.width_m, 6_500.0, 1e-3));
         assert_eq!(footprint.length_m / footprint.width_m, MAX_ASPECT);
-        assert!(footprint.center.0.hypot(footprint.center.1) < 1e-3);
+        assert!(libm::hypot(footprint.center.0, footprint.center.1) < 1e-3);
         assert_contains(&track, &footprint);
     }
 
@@ -383,7 +383,10 @@ mod tests {
                 (0..200)
                     .map(|i| {
                         let a = f64::from(i) * 0.1;
-                        (a.cos() * 3_000.0 + f64::from(i) * 40.0, a.sin() * 1_500.0)
+                        (
+                            libm::cos(a) * 3_000.0 + f64::from(i) * 40.0,
+                            libm::sin(a) * 1_500.0,
+                        )
                     })
                     .collect(),
             ],
@@ -486,7 +489,7 @@ mod tests {
         let track = track(&[line((-3_000.0, -1_000.0), (3_000.0, 2_000.0), 30)]);
         let footprint = Footprint::from_track(&track).unwrap();
         let [a, b, c, d] = footprint.corners();
-        let side = |p: (f64, f64), q: (f64, f64)| (q.0 - p.0).hypot(q.1 - p.1);
+        let side = |p: (f64, f64), q: (f64, f64)| libm::hypot(q.0 - p.0, q.1 - p.1);
         assert!(close(side(a, b), footprint.length_m, 1e-6));
         assert!(close(side(b, c), footprint.width_m, 1e-6));
         assert!(close(side(c, d), footprint.length_m, 1e-6));

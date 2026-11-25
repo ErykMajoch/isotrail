@@ -8,9 +8,10 @@ use tracing::info;
 use crate::{
     DEFAULT_DETAIL, DemError, DemSource, FeatureSource, Fetcher, Footprint, FootprintOptions,
     GeoError, Grid, Heightmap, LandcoverMap, OSM_ATTRIBUTION, OVERPASS_URL, OpenMeteoSource,
-    OsmError, OsmFeatures, OverpassSource, Provenance, RequestError, SeasonKind, TERRARIUM_URL,
-    TerrariumSource, WeatherError, WeatherRequest, WeatherServer, WeatherSource, forced_season,
-    ice_line, line_mask, origin, redact, retime, scene_bundle, snow_line, snow_readings, untime,
+    OsmError, OsmFeatures, OverpassSource, Provenance, Request, RequestError, SeasonKind,
+    TERRARIUM_URL, TerrariumSource, WeatherError, WeatherRequest, WeatherServer, WeatherSource,
+    forced_season, ice_line, line_mask, origin, redact, retime, scene_bundle, snow_line,
+    snow_readings, untime,
 };
 
 /// What a scene is made with, besides the track
@@ -150,14 +151,8 @@ pub fn prepare(
     now: i64,
     progress: &mut dyn Progress,
 ) -> Result<Prepared, SceneError> {
-    let trimmed = trim(track, options)?;
+    let (trimmed, grid) = slab(track, options)?;
     let track = trimmed.as_ref();
-    let footprint =
-        Footprint::from_track_with(track, &options.footprint).map_err(|error| match error {
-            GeoError::NoGround => SceneError::NoGround,
-            error => SceneError::Footprint(error),
-        })?;
-    let grid = Grid::new(&footprint, options.detail);
 
     let tiles = TerrariumSource::<&dyn Fetcher>::tiles(&grid).len();
     progress.step(Step::Elevation { tiles });
@@ -195,14 +190,10 @@ pub fn prepare(
     }
 
     // Weather is asked for the hours the scene will hold
-    let timed = match options.times {
-        Times::Recorded => Some(Cow::Borrowed(track)),
-        Times::Coarse => Some(Cow::Owned(track.coarse_times())),
-        Times::None => {
-            progress.warn(Warning::TimesLeftOut);
-            None
-        }
-    };
+    let timed = timed(track, options.times);
+    if timed.is_none() {
+        progress.warn(Warning::TimesLeftOut);
+    }
     let server = &options.weather_server;
     let weather = match &timed {
         Some(timed) if options.weather => {
@@ -263,6 +254,64 @@ pub fn prepare(
         tiles,
         elevation_range,
     })
+}
+
+/// What [`prepare`] fetches first, so it can all be fetched at once
+/// beforehand. A run may still ask for more: the forecast where the archive
+/// has gaps, or an answer that couldn't be read
+pub fn requests(
+    track: &Track,
+    options: &SceneOptions,
+    now: i64,
+) -> Result<Vec<Request>, SceneError> {
+    let (trimmed, grid) = slab(track, options)?;
+    let mut requests: Vec<Request> = TerrariumSource::<&dyn Fetcher>::tiles(&grid)
+        .into_iter()
+        .map(|tile| {
+            Request::get(TerrariumSource::<&dyn Fetcher>::url_from(
+                &options.terrain_url,
+                tile,
+            ))
+        })
+        .collect();
+    if options.map_data {
+        requests.push(Request::post(
+            options.overpass_url.clone(),
+            OverpassSource::<&dyn Fetcher>::request_body(&grid),
+        ));
+    }
+    if options.weather
+        && let Some(timed) = timed(&trimmed, options.times)
+        && let Ok(request) = WeatherRequest::from_track(&timed, now)
+    {
+        let urls = options.weather_server.first_urls(&request);
+        requests.extend(urls.into_iter().map(Request::get));
+    }
+    Ok(requests)
+}
+
+/// The kept part of the track and the grid around it
+fn slab<'a>(
+    track: &'a Track,
+    options: &SceneOptions,
+) -> Result<(Cow<'a, Track>, Grid), SceneError> {
+    let trimmed = trim(track, options)?;
+    let footprint =
+        Footprint::from_track_with(&trimmed, &options.footprint).map_err(|error| match error {
+            GeoError::NoGround => SceneError::NoGround,
+            error => SceneError::Footprint(error),
+        })?;
+    let grid = Grid::new(&footprint, options.detail);
+    Ok((trimmed, grid))
+}
+
+/// The track with the times the scene keeps, if it keeps any
+fn timed(track: &Track, times: Times) -> Option<Cow<'_, Track>> {
+    match times {
+        Times::Recorded => Some(Cow::Borrowed(track)),
+        Times::Coarse => Some(Cow::Owned(track.coarse_times())),
+        Times::None => None,
+    }
 }
 
 fn trim<'a>(track: &'a Track, options: &SceneOptions) -> Result<Cow<'a, Track>, SceneError> {

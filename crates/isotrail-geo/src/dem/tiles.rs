@@ -39,14 +39,14 @@ pub fn lat_lon_to_pixel(lat: f64, lon: f64, z: u8) -> (f64, f64) {
     let world = world_px(z);
     let lat = lat.clamp(-MAX_MERCATOR_LAT, MAX_MERCATOR_LAT).to_radians();
     let x = (lon + 180.0) / 360.0 * world;
-    let y = (1.0 - lat.tan().asinh() / PI) / 2.0 * world;
+    let y = (1.0 - libm::asinh(libm::tan(lat)) / PI) / 2.0 * world;
     (x, y)
 }
 
 pub fn pixel_to_lat_lon(px: f64, py: f64, z: u8) -> (f64, f64) {
     let world = world_px(z);
     let lon = px / world * 360.0 - 180.0;
-    let lat = (PI * (1.0 - 2.0 * py / world)).sinh().atan().to_degrees();
+    let lat = libm::atan(libm::sinh(PI * (1.0 - 2.0 * py / world))).to_degrees();
     (lat, lon)
 }
 

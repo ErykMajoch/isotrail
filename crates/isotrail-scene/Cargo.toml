@@ -1,0 +1,27 @@
+[package]
+name = "isotrail-scene"
+description = "WebAssembly entry point that builds an isotrail scene from a GPX file in a browser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook.workspace = true
+isotrail-geo = { path = "../isotrail-geo" }
+isotrail-options = { path = "../isotrail-options" }
+isotrail-track = { path = "../isotrail-track" }
+wasm-bindgen.workspace = true
+
+# `custom` is what wasm-pack reads for `--profile web`
+[package.metadata.wasm-pack.profile.custom]
+wasm-opt = ["-Oz", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-Oz", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
+
+[lints]
+workspace = true

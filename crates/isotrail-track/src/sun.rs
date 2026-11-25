@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use libm::{acos, asin, atan2, cos, sin, tan};
 
 /// Where the sun stands as seen from the ground, with atmospheric refraction
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -18,12 +19,13 @@ pub fn sun_position(lat: f64, lon: f64, time: DateTime<Utc>) -> SunPosition {
     let solar_minutes = day_minutes + sun.equation_of_time_min + 4.0 * lon;
     let hour_angle = (solar_minutes / 4.0 - 180.0).to_radians();
     let (lat, decl) = (lat.to_radians(), sun.declination_deg.to_radians());
-    let cos_zenith = lat.sin() * decl.sin() + lat.cos() * decl.cos() * hour_angle.cos();
-    let elevation = 90.0 - cos_zenith.clamp(-1.0, 1.0).acos().to_degrees();
-    let azimuth = hour_angle
-        .sin()
-        .atan2(hour_angle.cos() * lat.sin() - decl.tan() * lat.cos())
-        .to_degrees()
+    let cos_zenith = sin(lat) * sin(decl) + cos(lat) * cos(decl) * cos(hour_angle);
+    let elevation = 90.0 - acos(cos_zenith.clamp(-1.0, 1.0)).to_degrees();
+    let azimuth = atan2(
+        sin(hour_angle),
+        cos(hour_angle) * sin(lat) - tan(decl) * cos(lat),
+    )
+    .to_degrees()
         + 180.0;
     SunPosition {
         azimuth_deg: azimuth.rem_euclid(360.0),
@@ -53,22 +55,22 @@ impl Solar {
         let mean_anomaly = 357.52911 + t * (35999.05029 - t * 0.0001537);
         let eccentricity = 0.016708634 - t * (0.000042037 + t * 0.0000001267);
         let m = mean_anomaly.to_radians();
-        let centre = m.sin() * (1.914602 - t * (0.004817 + t * 0.000014))
-            + (2.0 * m).sin() * (0.019993 - t * 0.000101)
-            + (3.0 * m).sin() * 0.000289;
+        let centre = sin(m) * (1.914602 - t * (0.004817 + t * 0.000014))
+            + sin(2.0 * m) * (0.019993 - t * 0.000101)
+            + sin(3.0 * m) * 0.000289;
         let omega = (125.04 - 1934.136 * t).to_radians();
-        let apparent_longitude = mean_longitude + centre - 0.00569 - 0.00478 * omega.sin();
+        let apparent_longitude = mean_longitude + centre - 0.00569 - 0.00478 * sin(omega);
         let mean_obliquity =
             23.0 + (26.0 + (21.448 - t * (46.815 + t * (0.00059 - t * 0.001813))) / 60.0) / 60.0;
-        let obliquity = (mean_obliquity + 0.00256 * omega.cos()).to_radians();
-        let declination = (obliquity.sin() * apparent_longitude.to_radians().sin()).asin();
-        let y = (obliquity / 2.0).tan().powi(2);
+        let obliquity = (mean_obliquity + 0.00256 * cos(omega)).to_radians();
+        let declination = asin(sin(obliquity) * sin(apparent_longitude.to_radians()));
+        let y = tan(obliquity / 2.0).powi(2);
         let l0 = mean_longitude.to_radians();
         let e = eccentricity;
-        let equation_of_time = y * (2.0 * l0).sin() - 2.0 * e * m.sin()
-            + 4.0 * e * y * m.sin() * (2.0 * l0).cos()
-            - 0.5 * y * y * (4.0 * l0).sin()
-            - 1.25 * e * e * (2.0 * m).sin();
+        let equation_of_time = y * sin(2.0 * l0) - 2.0 * e * sin(m)
+            + 4.0 * e * y * sin(m) * cos(2.0 * l0)
+            - 0.5 * y * y * sin(4.0 * l0)
+            - 1.25 * e * e * sin(2.0 * m);
         Solar {
             declination_deg: declination.to_degrees(),
             equation_of_time_min: 4.0 * equation_of_time.to_degrees(),
@@ -81,7 +83,7 @@ impl Solar {
 /// NOAA's approximation for a standard atmosphere
 pub(crate) fn refraction_deg(elevation_deg: f64) -> f64 {
     let e = elevation_deg;
-    let tan = e.to_radians().tan();
+    let tan = tan(e.to_radians());
     let arcsec = if e > 85.0 {
         0.0
     } else if e > 5.0 {

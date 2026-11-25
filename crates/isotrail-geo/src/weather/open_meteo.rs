@@ -86,6 +86,51 @@ impl WeatherServer {
             (None, None) => free.to_owned(),
         }
     }
+
+    /// The addresses a lookup asks first, for the hours of the hike and for
+    /// the days before. Gaps in the archive may lead on to the forecast's
+    pub fn first_urls(&self, request: &WeatherRequest) -> Vec<String> {
+        let endpoint = |dataset| match dataset {
+            WeatherDataset::Archive => self.archive_url(),
+            WeatherDataset::Forecast => self.forecast_url(),
+        };
+        let first = request.hours.first().copied().unwrap_or_default();
+        let hourly = first_dataset(request, first)
+            .map(|dataset| OpenMeteoSource::<&dyn Fetcher>::url(&endpoint(dataset), request));
+        let daily = first_dataset(request, days_before(request).0)
+            .map(|dataset| OpenMeteoSource::<&dyn Fetcher>::days_url(&endpoint(dataset), request));
+        [hourly, daily]
+            .into_iter()
+            .flatten()
+            .map(|url| with_key(self.key.as_ref(), url))
+            .collect()
+    }
+}
+
+/// The archive for hikes it has caught up with, else the forecast. `first`
+/// is the earliest time asked for
+fn first_dataset(request: &WeatherRequest, first: i64) -> Result<WeatherDataset, WeatherError> {
+    if first < ARCHIVE_START {
+        return Err(WeatherError::BeforeArchive);
+    }
+    if request.last_hour() - request.now > FORECAST_DAYS * DAY_S {
+        return Err(WeatherError::BeyondForecast);
+    }
+    if request.now - request.last_hour() >= ARCHIVE_LAG_S {
+        Ok(WeatherDataset::Archive)
+    } else {
+        Ok(WeatherDataset::Forecast)
+    }
+}
+
+fn with_key(key: Option<&ApiKey>, url: String) -> String {
+    match (key, Url::parse(&url)) {
+        (Some(ApiKey(key)), Ok(mut parsed)) => {
+            parsed.query_pairs_mut().append_pair("apikey", key);
+            parsed.into()
+        }
+        _ => url,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -117,13 +162,7 @@ impl<F: Fetcher> OpenMeteoSource<F> {
 
     /// `url` with the API key added, if there is one
     pub fn keyed(&self, url: String) -> String {
-        match (&self.key, Url::parse(&url)) {
-            (Some(ApiKey(key)), Ok(mut parsed)) => {
-                parsed.query_pairs_mut().append_pair("apikey", key);
-                parsed.into()
-            }
-            _ => url,
-        }
+        with_key(self.key.as_ref(), url)
     }
 
     /// The GET for a request at an archive or forecast endpoint
@@ -176,13 +215,7 @@ impl<F: Fetcher> OpenMeteoSource<F> {
         first: i64,
         lookup: impl Fn(&str, WeatherDataset) -> Result<T, WeatherError>,
     ) -> Result<T, WeatherError> {
-        if first < ARCHIVE_START {
-            return Err(WeatherError::BeforeArchive);
-        }
-        if request.last_hour() - request.now > FORECAST_DAYS * DAY_S {
-            return Err(WeatherError::BeyondForecast);
-        }
-        if request.now - request.last_hour() >= ARCHIVE_LAG_S {
+        if first_dataset(request, first)? == WeatherDataset::Archive {
             match lookup(&self.archive_url, WeatherDataset::Archive) {
                 Err(
                     err @ (WeatherError::Incomplete { .. } | WeatherError::IncompleteDays { .. }),

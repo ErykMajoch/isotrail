@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use libm::{acos, asin, atan2, cos, sin, tan};
 
 use crate::sun::{Solar, julian_day, refraction_deg, unix_seconds};
 
@@ -28,10 +29,11 @@ pub fn moon_position(lat: f64, lon: f64, time: DateTime<Utc>) -> MoonPosition {
         moon.latitude_deg.to_radians(),
     );
     let obliquity = sun.obliquity_deg.to_radians();
-    let right_ascension =
-        (lambda.sin() * obliquity.cos() - beta.tan() * obliquity.sin()).atan2(lambda.cos());
-    let declination =
-        (beta.sin() * obliquity.cos() + beta.cos() * obliquity.sin() * lambda.sin()).asin();
+    let right_ascension = atan2(
+        sin(lambda) * cos(obliquity) - tan(beta) * sin(obliquity),
+        cos(lambda),
+    );
+    let declination = asin(sin(beta) * cos(obliquity) + cos(beta) * sin(obliquity) * sin(lambda));
 
     let t = (day - 2_451_545.0) / 36_525.0;
     let sidereal_deg = 280.46061837
@@ -39,30 +41,30 @@ pub fn moon_position(lat: f64, lon: f64, time: DateTime<Utc>) -> MoonPosition {
         + t * t * (0.000387933 - t / 38_710_000.0);
     let hour_angle = (sidereal_deg + lon).to_radians() - right_ascension;
     let lat = lat.to_radians();
-    let sin_elevation =
-        lat.sin() * declination.sin() + lat.cos() * declination.cos() * hour_angle.cos();
-    let geocentric = sin_elevation.clamp(-1.0, 1.0).asin().to_degrees();
+    let sin_elevation = sin(lat) * sin(declination) + cos(lat) * cos(declination) * cos(hour_angle);
+    let geocentric = asin(sin_elevation.clamp(-1.0, 1.0)).to_degrees();
     let parallax =
-        (EARTH_RADIUS_KM / moon.distance_km).asin().to_degrees() * geocentric.to_radians().cos();
+        asin(EARTH_RADIUS_KM / moon.distance_km).to_degrees() * cos(geocentric.to_radians());
     let elevation = geocentric - parallax;
-    let azimuth = hour_angle
-        .sin()
-        .atan2(hour_angle.cos() * lat.sin() - declination.tan() * lat.cos())
-        .to_degrees()
+    let azimuth = atan2(
+        sin(hour_angle),
+        cos(hour_angle) * sin(lat) - tan(declination) * cos(lat),
+    )
+    .to_degrees()
         + 180.0;
 
-    let elongation = (beta.cos()
-        * (moon.longitude_deg - sun.apparent_longitude_deg)
-            .to_radians()
-            .cos())
-    .clamp(-1.0, 1.0)
-    .acos();
-    let phase_angle = (SUN_DISTANCE_KM * elongation.sin())
-        .atan2(moon.distance_km - SUN_DISTANCE_KM * elongation.cos());
+    let elongation = acos(
+        (cos(beta) * cos((moon.longitude_deg - sun.apparent_longitude_deg).to_radians()))
+            .clamp(-1.0, 1.0),
+    );
+    let phase_angle = atan2(
+        SUN_DISTANCE_KM * sin(elongation),
+        moon.distance_km - SUN_DISTANCE_KM * cos(elongation),
+    );
     MoonPosition {
         azimuth_deg: azimuth.rem_euclid(360.0),
         elevation_deg: elevation + refraction_deg(elevation),
-        illuminated: (1.0 + phase_angle.cos()) / 2.0,
+        illuminated: (1.0 + cos(phase_angle)) / 2.0,
     }
 }
 
@@ -168,20 +170,18 @@ impl Lunar {
             node_distance.to_radians(),
             moon_anomaly.to_radians(),
         );
-        let longitude = sum(&LONGITUDE, f64::sin)
-            + 3958.0 * a1.sin()
-            + 1962.0 * (l - f).sin()
-            + 318.0 * a2.sin();
-        let latitude = sum(&LATITUDE, f64::sin) - 2235.0 * l.sin()
-            + 382.0 * a3.sin()
-            + 175.0 * (a1 - f).sin()
-            + 175.0 * (a1 + f).sin()
-            + 127.0 * (l - m).sin()
-            - 115.0 * (l + m).sin();
+        let longitude =
+            sum(&LONGITUDE, sin) + 3958.0 * sin(a1) + 1962.0 * sin(l - f) + 318.0 * sin(a2);
+        let latitude = sum(&LATITUDE, sin) - 2235.0 * sin(l)
+            + 382.0 * sin(a3)
+            + 175.0 * sin(a1 - f)
+            + 175.0 * sin(a1 + f)
+            + 127.0 * sin(l - m)
+            - 115.0 * sin(l + m);
         Lunar {
             longitude_deg: (mean_longitude + longitude / 1e6).rem_euclid(360.0),
             latitude_deg: latitude / 1e6,
-            distance_km: 385_000.56 + sum(&DISTANCE, f64::cos) / 1000.0,
+            distance_km: 385_000.56 + sum(&DISTANCE, cos) / 1000.0,
         }
     }
 }

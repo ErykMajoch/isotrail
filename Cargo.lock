@@ -1216,6 +1216,7 @@ dependencies = [
  "directories",
  "isotrail-bundle",
  "isotrail-track",
+ "libm",
  "png",
  "reqwest",
  "serde",
@@ -1271,6 +1272,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "isotrail-scene"
+version = "1.5.1"
+dependencies = [
+ "console_error_panic_hook",
+ "isotrail-geo",
+ "isotrail-options",
+ "isotrail-track",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "isotrail-testkit"
 version = "1.5.1"
 dependencies = [
@@ -1289,6 +1301,7 @@ dependencies = [
  "chrono-tz",
  "geo",
  "isotrail-bundle",
+ "libm",
  "quick-xml",
  "thiserror",
  "toml",

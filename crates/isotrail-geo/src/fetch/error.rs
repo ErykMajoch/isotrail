@@ -9,7 +9,7 @@ type ClientError = RequestFailure;
 
 /// What the browser reported when a request got no answer
 #[cfg(target_arch = "wasm32")]
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 #[error("{message}")]
 pub struct RequestFailure {
     pub message: String,

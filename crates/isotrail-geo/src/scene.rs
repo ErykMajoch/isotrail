@@ -386,7 +386,7 @@ mod tests {
             f64::from(point.col) * grid.cell_size_m - f64::from(grid.cols) * grid.cell_size_m / 2.0;
         let v =
             f64::from(grid.rows) * grid.cell_size_m / 2.0 - f64::from(point.row) * grid.cell_size_m;
-        let (sin, cos) = grid.rotation_rad.sin_cos();
+        let (sin, cos) = (libm::sin(grid.rotation_rad), libm::cos(grid.rotation_rad));
         let (x, y) = (
             grid.center_m.0 + u * cos - v * sin,
             grid.center_m.1 + u * sin + v * cos,

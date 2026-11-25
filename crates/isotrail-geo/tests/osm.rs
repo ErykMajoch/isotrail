@@ -97,7 +97,7 @@ fn recorded_response_gives_typed_mountain_features() {
         assert!(closed(ring), "{ring:?}");
         for &(lat, lon) in ring {
             let (x, y) = grid.footprint.projection.project(lat, lon);
-            assert!((x - cx).hypot(y - cy) < 5_000.0, "{lat},{lon}");
+            assert!(libm::hypot(x - cx, y - cy) < 5_000.0, "{lat},{lon}");
         }
     }
 }

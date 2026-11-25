@@ -139,7 +139,7 @@ impl Summary {
                 .profile
                 .and_then(|_| elevation_profile(&track, stats.distance_m)),
             stats,
-            title: crate::title(&track, path),
+            title: track.title(path),
             name: track.name,
             desc: track.desc,
             weather,

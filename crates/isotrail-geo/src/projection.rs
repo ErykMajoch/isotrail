@@ -13,7 +13,7 @@ impl LocalProjection {
         Self {
             lat0,
             lon0,
-            cos_lat0: lat0.to_radians().cos(),
+            cos_lat0: libm::cos(lat0.to_radians()),
         }
     }
 
@@ -60,7 +60,7 @@ mod tests {
             let r = radius_m * f64::from(ring) / 5.0;
             for step in 0..16 {
                 let a = f64::from(step) * std::f64::consts::TAU / 16.0;
-                offsets.push((r * a.cos(), r * a.sin()));
+                offsets.push((r * libm::cos(a), r * libm::sin(a)));
             }
         }
         offsets
@@ -76,7 +76,7 @@ mod tests {
                 let (lat2, lon2) = projection.unproject(bx, by);
                 let error = haversine_m(&at(lat, lon), &at(lat2, lon2));
                 assert!(error < 0.5, "{error}m at ({lat0}, {lon0}) + ({x}, {y})");
-                assert!((bx - x).hypot(by - y) < 0.5);
+                assert!(libm::hypot(bx - x, by - y) < 0.5);
                 assert!((-180.0..180.0).contains(&lon));
             }
         }
@@ -89,7 +89,7 @@ mod tests {
             for (x, y) in offsets_within(50_000.0) {
                 let (lat, lon) = projection.unproject(x, y);
                 let great_circle = haversine_m(&at(lat0, lon0), &at(lat, lon));
-                let flat = x.hypot(y);
+                let flat = libm::hypot(x, y);
                 assert!(
                     (flat - great_circle).abs() < 0.01 * great_circle,
                     "{flat} vs {great_circle} at ({lat0}, {lon0}) + ({x}, {y})"
@@ -102,7 +102,7 @@ mod tests {
     fn crossing_the_antimeridian_stays_local() {
         let projection = LocalProjection::new(-17.0, 179.95);
         let (x, _) = projection.project(-17.0, -179.95);
-        let expected = EARTH_RADIUS_M * 0.1_f64.to_radians() * 17.0_f64.to_radians().cos();
+        let expected = EARTH_RADIUS_M * 0.1_f64.to_radians() * libm::cos(17.0_f64.to_radians());
         assert!((x - expected).abs() < 1e-6, "{x} vs {expected}");
         let (_, lon) = projection.unproject(x, 0.0);
         assert!((lon + 179.95).abs() < 1e-9, "{lon}");

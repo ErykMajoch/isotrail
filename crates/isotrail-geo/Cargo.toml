@@ -10,6 +10,7 @@ repository.workspace = true
 chrono.workspace = true
 isotrail-bundle = { path = "../isotrail-bundle" }
 isotrail-track = { path = "../isotrail-track" }
+libm.workspace = true
 png.workspace = true
 serde.workspace = true
 serde_json.workspace = true

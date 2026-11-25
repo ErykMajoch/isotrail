@@ -61,7 +61,7 @@ impl Grid {
 }
 
 pub fn ground_resolution_m(zoom: u8, lat_deg: f64) -> f64 {
-    TAU * WEB_MERCATOR_RADIUS_M * lat_deg.to_radians().cos()
+    TAU * WEB_MERCATOR_RADIUS_M * libm::cos(lat_deg.to_radians())
         / (TILE_SIZE_PX * 2f64.powi(zoom.into()))
 }
 
@@ -176,7 +176,7 @@ mod tests {
             let (lat, lon) = grid.cell_center_lat_lon(col, row);
             let (x, y) = grid.footprint.projection.project(lat, lon);
             let (ex, ey) = grid.cell_center_local(col, row);
-            assert!((x - ex).hypot(y - ey) < 1e-6);
+            assert!(libm::hypot(x - ex, y - ey) < 1e-6);
         }
     }
 

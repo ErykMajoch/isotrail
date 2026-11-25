@@ -40,11 +40,13 @@ pub use dem::{
 pub use error::GeoError;
 #[cfg(target_arch = "wasm32")]
 pub use fetch::RequestFailure;
+pub use fetch::{
+    Answer, FetchError, Fetcher, ReplayFetcher, Request, RetryPolicy, origin, redact, sha256_hex,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub use fetch::{
     Cache, CacheStats, CachedFetcher, HttpFetcher, MAX_RESPONSE_BYTES, RecordedFetcher, USER_AGENT,
 };
-pub use fetch::{FetchError, Fetcher, RetryPolicy, origin, redact, sha256_hex};
 pub use footprint::{
     Footprint, FootprintOptions, MAX_ASPECT, MIN_PADDING_M, Orientation, PADDING_FRACTION,
 };
@@ -60,7 +62,7 @@ pub use osm::{
 };
 pub use prepare::{
     Fetchers, Prepared, Progress, SceneError, SceneOptions, Step, Times, Warning, dataset_name,
-    look_up_weather, prepare, without_weather,
+    look_up_weather, prepare, requests, without_weather,
 };
 pub use projection::LocalProjection;
 pub use relief::{EXAGGERATION_FACTOR, MAX_EXAGGERATION, MIN_EXAGGERATION, vertical_exaggeration};

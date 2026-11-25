@@ -380,15 +380,6 @@ fn parse_track(bytes: &[u8], path: &Path) -> anyhow::Result<Track> {
         .with_context(|| format!("can't read {}", path.display()))
 }
 
-/// The track's name, or the file name without its extension
-fn title(track: &Track, path: &Path) -> String {
-    track
-        .name
-        .clone()
-        .or_else(|| Some(path.file_stem()?.to_string_lossy().into_owned()))
-        .unwrap_or_default()
-}
-
 fn init_logging(verbose: u8, quiet: bool) {
     let level = match verbose {
         _ if quiet => LevelFilter::ERROR,

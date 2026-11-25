@@ -43,3 +43,5 @@ pub use reader::TrackReader;
 pub use stats::{Bounds, GAIN_THRESHOLD_M, MIN_PAUSE, SMOOTHING_WINDOW_M, TrackStats};
 pub use sun::{SunPosition, sun_position};
 pub use timezone::timezone_at;
+#[cfg(target_arch = "wasm32")]
+pub use timezone::{load_timezones, timezones_loaded};

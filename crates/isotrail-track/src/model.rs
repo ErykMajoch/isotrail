@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use chrono::{DateTime, Utc};
 use tracing::{debug, warn};
 
@@ -72,6 +74,14 @@ impl Track {
         Ok(self)
     }
 
+    /// The track's own name, else the file's name without its extension
+    pub fn title(&self, file: &Path) -> String {
+        self.name
+            .clone()
+            .or_else(|| Some(file.file_stem()?.to_string_lossy().into_owned()))
+            .unwrap_or_default()
+    }
+
     pub fn points(&self) -> impl Iterator<Item = &TrackPoint> {
         self.segments.iter().flat_map(|segment| &segment.points)
     }
@@ -117,6 +127,20 @@ mod tests {
         assert_eq!(clean.point_count(), 5);
         assert_eq!(clean.points().count(), 5);
         assert_eq!(clean.name.as_deref(), Some("Loop"));
+    }
+
+    #[test]
+    fn the_title_falls_back_to_the_file_name() {
+        let named = Track {
+            name: Some("Ridge".into()),
+            ..Track::default()
+        };
+        assert_eq!(named.title(Path::new("walk.gpx")), "Ridge");
+        assert_eq!(
+            Track::default().title(Path::new("dir/My walk.gpx")),
+            "My walk"
+        );
+        assert_eq!(Track::default().title(Path::new("")), "");
     }
 
     #[test]

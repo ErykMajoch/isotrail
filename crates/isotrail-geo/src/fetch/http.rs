@@ -7,7 +7,7 @@ use reqwest::blocking::{Client, RequestBuilder, Response};
 use reqwest::header::{CONTENT_TYPE, RETRY_AFTER};
 use tracing::warn;
 
-use super::{FetchError, Fetcher, RetryPolicy, origin, redact};
+use super::{ERROR_BODY_BYTES, FetchError, Fetcher, RetryPolicy, origin, redact};
 
 pub const USER_AGENT: &str = concat!(
     "isotrail/",
@@ -21,7 +21,6 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const TIMEOUT: Duration = Duration::from_secs(300);
 pub const MAX_RESPONSE_BYTES: u64 = 512_000_000;
 const SLOW_AFTER: Duration = Duration::from_secs(10);
-const ERROR_BODY_BYTES: u64 = 4096;
 
 /// Fetches over HTTPS with a descriptive User-Agent, timeouts and retries
 #[derive(Debug, Clone)]

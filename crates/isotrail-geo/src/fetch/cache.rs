@@ -7,7 +7,7 @@ use directories::ProjectDirs;
 use serde::Serialize;
 use tracing::{debug, warn};
 
-use super::{FetchError, Fetcher, redact, sha256_hex};
+use super::{FetchError, Fetcher, cache_key, redact, sha256_hex};
 
 const DATA_EXT: &str = "bin";
 const META_EXT: &str = "json";
@@ -36,13 +36,7 @@ struct Request<'a> {
 
 impl Request<'_> {
     fn key(&self) -> String {
-        sha256_hex(&[
-            self.method.as_bytes(),
-            b"\n",
-            self.url.as_bytes(),
-            b"\n",
-            self.body,
-        ])
+        cache_key(self.method, self.url, self.body)
     }
 }
 

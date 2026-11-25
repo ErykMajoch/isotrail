@@ -2,5 +2,6 @@
 /out/
 /input/
 /web/pkg/
+/web/scene/pkg/
 /web/demo/*.itb
 /web/demo/*.png

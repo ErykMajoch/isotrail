@@ -63,7 +63,7 @@ impl Heightmap {
         };
         let scale = exaggeration / (8.0 * cell_size_m);
         let light = {
-            let (sin, cos) = 45f64.to_radians().sin_cos();
+            let (sin, cos) = (libm::sin(45f64.to_radians()), libm::cos(45f64.to_radians()));
             let flat = cos / 2f64.sqrt();
             (-flat, flat, sin)
         };
