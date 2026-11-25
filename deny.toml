@@ -11,7 +11,11 @@ all-features = true
 
 [advisories]
 unmaintained = "workspace"
-ignore = []
+ignore = [
+    # Notices that chrono is no longer maintained, with no fixed release to move to
+    { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained and has no replacement release yet" },
+    { id = "RUSTSEC-2026-0555", reason = "chrono-tz is unmaintained and has no replacement release yet" },
+]
 
 [licenses]
 allow = [
