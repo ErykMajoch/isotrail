@@ -18,10 +18,10 @@
 
 ---
 
-isotrail turns a recorded hike into a small pixel-art model of the real landscape, with your route drawn on it.
+isotrail turns a GPX file from Strava, Garmin or AllTrails into a small 3D pixel-art model of the real landscape, with your route drawn on it.
 
 <p align="center">
-  <img src="docs/images/hero.png" alt="A diorama of a hike along Derwent Edge, with the title, stats and elevation profile in a panel on the left">
+  <img src="docs/images/hero.gif" alt="An animation of a hike along Derwent Edge: the route draws itself past the reservoir while the camera turns, and the stats count up in a panel on the left">
 </p>
 
 ## Features
@@ -80,9 +80,18 @@ isotrail draws on the graphics card through Vulkan, Metal or Direct3D 12. Withou
 
 MP4 videos need [ffmpeg](https://ffmpeg.org/download.html) on your `PATH`. Install it with `winget install Gyan.FFmpeg`, `brew install ffmpeg` or `sudo apt install ffmpeg`. PNG and GIF files don't need it.
 
+## Getting a GPX file
+
+isotrail reads GPX files. Most apps that record a walk can save one:
+
+- **AllTrails**: open the activity on the AllTrails website, open the three-dot menu and choose Download route, then GPX Track.
+- **Strava**: open the activity on the Strava website, open the More menu (three dots) and choose Export GPX. The phone app can't export.
+- **Garmin Connect**: open the activity on the Garmin Connect website, select the gear icon and choose Export to GPX.
+- **Komoot**: go to Profile, then Completed activities, open the activity and choose Download GPX file. This works in the app and on the website. The region where the walk starts must be unlocked.
+
 ## Quick start
 
-Export your hike as a GPX file and run:
+[Export your hike as a GPX file](#getting-a-gpx-file) and run:
 
 ```bash
 isotrail render hike.gpx
