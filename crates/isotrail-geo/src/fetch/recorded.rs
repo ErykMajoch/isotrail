@@ -2,7 +2,7 @@ use std::fs;
 use std::io;
 use std::path::PathBuf;
 
-use reqwest::Url;
+use url::Url;
 
 use super::{FetchError, Fetcher, sha256_hex};
 

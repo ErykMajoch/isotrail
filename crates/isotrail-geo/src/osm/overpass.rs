@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::thread;
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -16,11 +15,22 @@ use crate::{FetchError, Fetcher, Grid, RetryPolicy, origin};
 pub const OVERPASS_URL: &str = "https://overpass-api.de/api/interpreter";
 /// For a server that doesn't answer at all, which is more often a wrong
 /// address or no network than a busy server
+#[cfg(not(target_arch = "wasm32"))]
 pub const UNREACHABLE_RETRY: RetryPolicy = RetryPolicy {
     max_attempts: 3,
     base_delay: Duration::from_secs(2),
     max_delay: Duration::from_secs(4),
 };
+
+#[cfg(not(target_arch = "wasm32"))]
+const DEFAULT_BUSY: RetryPolicy = RetryPolicy::overpass();
+#[cfg(not(target_arch = "wasm32"))]
+const DEFAULT_UNREACHABLE: RetryPolicy = UNREACHABLE_RETRY;
+// A browser can't block while it waits, so the page retries by itself there
+#[cfg(target_arch = "wasm32")]
+const DEFAULT_BUSY: RetryPolicy = RetryPolicy::once();
+#[cfg(target_arch = "wasm32")]
+const DEFAULT_UNREACHABLE: RetryPolicy = RetryPolicy::once();
 
 /// Map features from an Overpass server. It retries by itself, so give it a
 /// fetcher that tries each request once
@@ -37,8 +47,8 @@ impl<F: Fetcher> OverpassSource<F> {
         OverpassSource {
             fetcher,
             endpoint: OVERPASS_URL.to_owned(),
-            busy: RetryPolicy::overpass(),
-            unreachable: UNREACHABLE_RETRY,
+            busy: DEFAULT_BUSY,
+            unreachable: DEFAULT_UNREACHABLE,
         }
     }
 
@@ -124,7 +134,7 @@ impl<F: Fetcher> FeatureSource for OverpassSource<F> {
                         delay.as_secs_f64(),
                         policy.max_attempts
                     );
-                    thread::sleep(delay);
+                    wait(delay);
                     attempt += 1;
                 }
                 _ if attempt > 1 => {
@@ -138,6 +148,14 @@ impl<F: Fetcher> FeatureSource for OverpassSource<F> {
         }
     }
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+fn wait(delay: Duration) {
+    std::thread::sleep(delay);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn wait(_delay: Duration) {}
 
 fn retry_after(error: &OsmError) -> Option<Duration> {
     match error {

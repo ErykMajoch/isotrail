@@ -37,10 +37,13 @@ pub use dem::{
     TileId, lat_lon_to_pixel, pixel_to_lat_lon,
 };
 pub use error::GeoError;
+#[cfg(target_arch = "wasm32")]
+pub use fetch::RequestFailure;
+#[cfg(not(target_arch = "wasm32"))]
 pub use fetch::{
-    Cache, CacheStats, CachedFetcher, FetchError, Fetcher, HttpFetcher, MAX_RESPONSE_BYTES,
-    RecordedFetcher, RetryPolicy, USER_AGENT, origin, redact, sha256_hex,
+    Cache, CacheStats, CachedFetcher, HttpFetcher, MAX_RESPONSE_BYTES, RecordedFetcher, USER_AGENT,
 };
+pub use fetch::{FetchError, Fetcher, RetryPolicy, origin, redact, sha256_hex};
 pub use footprint::{
     Footprint, FootprintOptions, MAX_ASPECT, MIN_PADDING_M, Orientation, PADDING_FRACTION,
 };

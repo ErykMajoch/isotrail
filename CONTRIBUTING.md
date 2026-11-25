@@ -32,7 +32,7 @@ The workspace is split into crates:
 | `isotrail-web` | The WebAssembly renderer behind the `<isotrail-hike>` element in `web/` ([`web/README.md`](web/README.md)) |
 | `isotrail-testkit` | Synthetic scenes, golden-image, GIF and video helpers for tests |
 
-`isotrail-track`, `isotrail-bundle` and `isotrail-render` must stay WebAssembly-safe. They can't use the filesystem, the network or threads.
+`isotrail-track`, `isotrail-bundle` and `isotrail-render` must stay WebAssembly-safe. They can't use the filesystem, the network or threads. `isotrail-geo` builds for WebAssembly too, without its HTTP client and disk cache.
 
 Please don't add real recordings to the repository. Tests use synthetic routes only.
 
@@ -45,7 +45,7 @@ Please don't add real recordings to the repository. Tests use synthetic routes o
    cargo fmt --all --check
    cargo clippy --workspace --all-targets -- -D warnings
    cargo test --workspace
-   cargo clippy --target wasm32-unknown-unknown -p isotrail-track -p isotrail-bundle -p isotrail-render -p isotrail-web -- -D warnings
+   cargo clippy --target wasm32-unknown-unknown -p isotrail-track -p isotrail-bundle -p isotrail-geo -p isotrail-render -p isotrail-web -- -D warnings
    cargo deny check
    ```
 

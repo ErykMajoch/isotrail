@@ -2,6 +2,32 @@ use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
 
+#[cfg(not(target_arch = "wasm32"))]
+type ClientError = reqwest::Error;
+#[cfg(target_arch = "wasm32")]
+type ClientError = RequestFailure;
+
+/// What the browser reported when a request got no answer
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, thiserror::Error)]
+#[error("{message}")]
+pub struct RequestFailure {
+    pub message: String,
+    pub timed_out: bool,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl RequestFailure {
+    pub fn is_timeout(&self) -> bool {
+        self.timed_out
+    }
+
+    // A browser doesn't say why a request failed, so anything but a time-out counts as nothing answering
+    pub fn is_connect(&self) -> bool {
+        !self.timed_out
+    }
+}
+
 /// Why a remote resource could not be fetched
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -19,14 +45,14 @@ pub enum FetchError {
 
     /// The HTTP client could not be set up
     #[error("could not set up the HTTP client")]
-    Client(#[source] reqwest::Error),
+    Client(#[source] ClientError),
 
     /// The request never got an answer
     #[error("could not fetch {url}")]
     Network {
         url: String,
         #[source]
-        source: reqwest::Error,
+        source: ClientError,
     },
 
     /// The connection broke while the answer was arriving

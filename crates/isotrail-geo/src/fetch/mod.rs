@@ -1,17 +1,27 @@
+#[cfg(not(target_arch = "wasm32"))]
 mod cache;
 mod error;
+#[cfg(not(target_arch = "wasm32"))]
 mod http;
+#[cfg(not(target_arch = "wasm32"))]
 mod recorded;
+mod retry;
 
 use std::borrow::Cow;
 
-use reqwest::Url;
 use sha2::{Digest, Sha256};
+use url::Url;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use cache::{Cache, CacheStats, CachedFetcher};
 pub use error::FetchError;
-pub use http::{HttpFetcher, MAX_RESPONSE_BYTES, RetryPolicy, USER_AGENT};
+#[cfg(target_arch = "wasm32")]
+pub use error::RequestFailure;
+#[cfg(not(target_arch = "wasm32"))]
+pub use http::{HttpFetcher, MAX_RESPONSE_BYTES, USER_AGENT};
+#[cfg(not(target_arch = "wasm32"))]
 pub use recorded::RecordedFetcher;
+pub use retry::RetryPolicy;
 
 // For tests that need nothing listening. Port 1 lies below every system's ephemeral range, so no test server or
 // connection is ever given it, and with no socket on it every system refuses at once. A freed port can be handed

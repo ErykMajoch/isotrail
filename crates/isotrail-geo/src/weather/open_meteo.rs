@@ -2,10 +2,10 @@ use std::fmt;
 
 use chrono::DateTime;
 use isotrail_bundle::{Weather, WeatherDataset, WeatherSample};
-use reqwest::Url;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use tracing::{debug, info, warn};
+use url::Url;
 
 use super::{WeatherError, WeatherRequest, WeatherSource};
 use crate::{FetchError, Fetcher};
