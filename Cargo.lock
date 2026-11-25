@@ -1180,6 +1180,7 @@ dependencies = [
  "isotrail-bundle",
  "isotrail-export",
  "isotrail-geo",
+ "isotrail-options",
  "isotrail-render",
  "isotrail-testkit",
  "isotrail-track",
@@ -1224,6 +1225,25 @@ dependencies = [
  "thiserror",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "isotrail-options"
+version = "1.5.1"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "isotrail-bundle",
+ "isotrail-export",
+ "isotrail-geo",
+ "isotrail-render",
+ "isotrail-testkit",
+ "isotrail-track",
+ "serde",
+ "serde_json",
+ "toml",
+ "tracing",
 ]
 
 [[package]]

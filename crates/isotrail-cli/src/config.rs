@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::env;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -6,13 +6,16 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, bail};
 use clap::error::{ContextKind, ContextValue, ErrorKind};
 use clap::parser::ValueSource;
-use clap::{Arg, ArgAction, ArgMatches, Command, CommandFactory, FromArgMatches};
+use clap::{Arg, ArgMatches, Command, CommandFactory, FromArgMatches};
 use directories::BaseDirs;
-use toml::value::Datetime;
+pub use isotrail_options::Typed;
+use isotrail_options::{
+    bad_value, conflicting, flag, long_name, not_both, reason_alone, same_setting, setting, unknown,
+};
 use toml::{Table, Value};
 use tracing::debug;
 
-use crate::Cli;
+use crate::{Cli, usage};
 
 const CONFIG_ENV: &str = "ISOTRAIL_CONFIG";
 /// The table every command reads, besides its own
@@ -39,19 +42,6 @@ const STYLE_LAB_FROM_RENDER: [&str; 16] = [
     "exaggeration",
     "theme",
 ];
-/// Flags that only make sense for one run
-const NOT_SETTINGS: [&str; 9] = [
-    "output",
-    "force",
-    "config",
-    "debug-dir",
-    "verbose",
-    "quiet",
-    "json",
-    "help",
-    "version",
-];
-
 /// The command line, with settings it leaves out taken from the user config
 /// file and `--config`, the latter winning, and what was typed; on failure,
 /// the error and what was typed
@@ -178,40 +168,6 @@ fn longer_option(typed: &str, command: String) -> Option<String> {
 
 fn parse_args(args: Vec<OsString>) -> Cli {
     Cli::from_arg_matches(&matches(&args)).unwrap_or_else(|e| crate::exit_with(e))
-}
-
-/// The command and the arguments typed for it on the command line, as
-/// opposed to those from config files, the environment or defaults
-#[derive(Debug, Default)]
-pub struct Typed {
-    command: Option<String>,
-    ids: HashSet<String>,
-}
-
-impl Typed {
-    fn new(matches: &ArgMatches) -> Typed {
-        let Some((command, given)) = matches.subcommand() else {
-            return Typed::default();
-        };
-        let ids = given
-            .ids()
-            .filter(|id| given.value_source(id.as_str()) == Some(ValueSource::CommandLine))
-            .map(|id| id.as_str().to_owned())
-            .collect();
-        Typed {
-            command: Some(command.to_owned()),
-            ids,
-        }
-    }
-
-    pub fn command(&self) -> Option<&str> {
-        self.command.as_deref()
-    }
-
-    /// By the argument's id, its field name, such as `block_height`
-    pub fn has(&self, id: &str) -> bool {
-        self.ids.contains(id)
-    }
 }
 
 /// The user config file, which must exist when `ISOTRAIL_CONFIG` names it
@@ -380,25 +336,15 @@ fn with_config(
     ) in settings
     {
         let arg = setting(command, &long).context("a checked setting went missing")?;
-        let in_file = || format!("{key} in {}", path.display());
-        let Some(flag) = flag(&long, &value, arg).with_context(in_file)? else {
+        let place = path.display().to_string();
+        let Some(flag) =
+            flag(&long, &value, arg).map_err(|error| usage(bad_value(&key, &place, error)))?
+        else {
             continue;
         };
         // Checked alone, so a bad value is blamed on its file
-        let alone = [name, "-", flag.as_str()];
-        if let Err(error) = command.clone().try_get_matches_from(alone)
-            && error.kind() != ErrorKind::MissingRequiredArgument
-        {
-            // A value our own parser refused says why; clap's text names the flag
-            let reason = match std::error::Error::source(&error) {
-                Some(reason) if error.kind() == ErrorKind::ValueValidation => reason.to_string(),
-                _ => {
-                    let message = error.to_string();
-                    let first = message.lines().next().unwrap_or_default();
-                    first.trim_start_matches("error: ").to_owned()
-                }
-            };
-            bail!("{}: {reason}", in_file());
+        if let Some(reason) = reason_alone(command, &flag) {
+            bail!(bad_value(&key, &path.display().to_string(), reason));
         }
         flags.push(OsString::from(flag));
     }
@@ -422,28 +368,6 @@ struct Found<'a> {
     rank: (usize, u8),
 }
 
-/// The command's flag a setting stands for, if it is one, by its name or
-/// an alias such as route-color
-fn setting<'a>(command: &'a Command, key: &str) -> Option<&'a Arg> {
-    command
-        .get_arguments()
-        .find(|arg| {
-            arg.get_long() == Some(key)
-                || arg
-                    .get_all_aliases()
-                    .is_some_and(|aliases| aliases.contains(&key))
-        })
-        .filter(|arg| {
-            !arg.get_long()
-                .is_some_and(|long| NOT_SETTINGS.contains(&long))
-        })
-}
-
-/// The flag's own name for a setting written with an alias
-fn long_name(command: &Command, key: &str) -> Option<String> {
-    setting(command, key)?.get_long().map(str::to_owned)
-}
-
 /// Settings that conflict with a setting from a file or table that comes
 /// later in the order of precedence; an error when both are in one table
 fn losers(command: &Command, settings: &BTreeMap<String, Found>) -> anyhow::Result<Vec<String>> {
@@ -460,12 +384,11 @@ fn losers(command: &Command, settings: &BTreeMap<String, Found>) -> anyhow::Resu
                 continue;
             };
             if found.rank == other_found.rank {
-                bail!(
-                    "{} and {} can't both be set in {}, so remove one of them",
-                    found.key,
-                    other_found.key,
-                    found.path.display()
-                );
+                bail!(not_both(
+                    &found.key,
+                    &other_found.key,
+                    &found.path.display().to_string()
+                ));
             }
             let loser = if found.rank < other_found.rank {
                 long
@@ -497,22 +420,6 @@ fn takes_from_render(name: &str, command: &Command, key: &str, value: &Value) ->
     }
 }
 
-/// The arguments that can't be given with `arg`, whichever of the two
-/// declares the conflict
-fn conflicting<'a>(command: &'a Command, arg: &Arg) -> Vec<&'a Arg> {
-    let mut found = command.get_arg_conflicts_with(arg);
-    for other in command.get_arguments() {
-        let declared = command
-            .get_arg_conflicts_with(other)
-            .iter()
-            .any(|conflict| conflict.get_id() == arg.get_id());
-        if declared && !found.iter().any(|f| f.get_id() == other.get_id()) {
-            found.push(other);
-        }
-    }
-    found
-}
-
 /// A config file's tables by command, each key checked against that
 /// command's flags
 fn read_tables(path: &Path, cli: &Command) -> anyhow::Result<BTreeMap<String, Table>> {
@@ -535,20 +442,15 @@ fn read_tables(path: &Path, cli: &Command) -> anyhow::Result<BTreeMap<String, Ta
         let Value::Table(table) = value else {
             bail!("{}: [{name}] must be a table", path.display());
         };
+        let place = format!("the [{name}] table of {}", path.display());
         if let Some(key) = table.keys().find(|key| setting(command, key).is_none()) {
-            bail!(
-                "unknown setting {key:?} in the [{name}] table of {}",
-                path.display()
-            );
+            bail!(unknown(key, &place));
         }
         let mut seen: BTreeMap<String, &str> = BTreeMap::new();
         for key in table.keys() {
             let long = long_name(command, key).unwrap_or_default();
             if let Some(first) = seen.insert(long, key) {
-                bail!(
-                    "{first} and {key} in the [{name}] table of {} are the same setting, so keep one",
-                    path.display()
-                );
+                bail!(same_setting(first, key, &place));
             }
         }
         tables.insert(name, table);
@@ -556,47 +458,8 @@ fn read_tables(path: &Path, cli: &Command) -> anyhow::Result<BTreeMap<String, Ta
     Ok(tables)
 }
 
-/// The flag a setting stands for, or none for a switch that is off
-fn flag(key: &str, value: &Value, arg: &Arg) -> anyhow::Result<Option<String>> {
-    let switch = matches!(arg.get_action(), ArgAction::SetTrue);
-    let scalar = |value: &Value| match value {
-        Value::String(text) => Some(text.clone()),
-        Value::Integer(number) => Some(number.to_string()),
-        Value::Float(number) => Some(number.to_string()),
-        Value::Datetime(datetime) => Some(clock_time(datetime)),
-        // For the options that take on or off
-        Value::Boolean(on) => Some(if *on { "on" } else { "off" }.to_owned()),
-        _ => None,
-    };
-    Ok(match value {
-        Value::Boolean(on) if switch => on.then(|| format!("--{key}")),
-        _ if switch => bail!("expected true or false"),
-        Value::Array(items) => {
-            let items: Option<Vec<String>> = items.iter().map(scalar).collect();
-            let items = items.context("expected a list of words or numbers")?;
-            Some(format!("--{key}={}", items.join(",")))
-        }
-        value => Some(format!(
-            "--{key}={}",
-            scalar(value).context("expected a word, number or list")?
-        )),
-    })
-}
-
-/// A TOML local time such as 07:30:00 as the HH:MM that `--time` takes, and
-/// anything else as TOML writes it
-fn clock_time(datetime: &Datetime) -> String {
-    match datetime {
-        Datetime {
-            date: None,
-            time: Some(time),
-            offset: None,
-        } if time.second.unwrap_or(0) == 0 && time.nanosecond.unwrap_or(0) == 0 => {
-            format!("{:02}:{:02}", time.hour, time.minute)
-        }
-        _ => datetime.to_string(),
-    }
-}
+#[cfg(test)]
+mod every_option;
 
 #[cfg(test)]
 mod tests {

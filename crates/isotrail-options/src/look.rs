@@ -4,12 +4,15 @@ use chrono::NaiveTime;
 use clap::{Args, ValueEnum};
 use isotrail_render::{
     BLOCK_HEIGHT_RANGE, Background, DEFAULT_OCCLUSION, DEFAULT_PALETTE, DEFAULT_SOFT_SHADOWS,
-    GodRays, Look, Mesher, MesherKind, OCCLUSION_RANGE, Palette, SOFT_SHADOWS_RANGE, Terrain,
-    Theme, VoxelMesher, parse_within,
+    GodRays, Mesher, MesherKind, OCCLUSION_RANGE, Palette, SOFT_SHADOWS_RANGE, Terrain,
+    VoxelMesher, parse_within,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use isotrail_render::{Look, Theme};
 use tracing::warn;
 
-use crate::config::Typed;
+use crate::Typed;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::usage;
 
 /// How the diorama looks, for `render` and `embed`
@@ -35,7 +38,7 @@ pub struct LookArgs {
     pub palette: String,
 
     /// Light the scene as at this local time on the day of the hike
-    #[arg(long, value_name = "HH:MM", value_parser = crate::sun::parse_time)]
+    #[arg(long, value_name = "HH:MM", value_parser = crate::parse_time)]
     pub time: Option<NaiveTime>,
 
     /// How much hollows and valley floors darken, from 0 (none) to 1
@@ -86,6 +89,7 @@ impl From<MesherArg> for MesherKind {
 
 impl LookArgs {
     /// The look these flags ask for, over `theme`'s
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn look(&self, theme: &Theme) -> anyhow::Result<Look> {
         Ok(Look {
             palette: read_palette(&self.palette)?,
@@ -157,6 +161,7 @@ pub fn palette_file(value: &str) -> Option<&Path> {
     (!builtin && !value.eq_ignore_ascii_case("none")).then(|| Path::new(value))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn read_palette(value: &str) -> anyhow::Result<Option<Palette>> {
     let Some(path) = palette_file(value) else {
         return Ok(Palette::builtin(value));

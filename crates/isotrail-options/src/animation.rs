@@ -8,7 +8,7 @@ use isotrail_render::{
 use crate::usage;
 
 const MAX_GIF_DURATION_S: f32 = 60.0;
-const MAX_MP4_DURATION_S: f32 = 180.0;
+pub(crate) const MAX_MP4_DURATION_S: f32 = 180.0;
 /// The longest the embed's undrawing before a play may take
 const MAX_REWIND_S: f32 = 10.0;
 
@@ -55,7 +55,7 @@ pub struct AnimationArgs {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub(crate) enum PaceArg {
+pub enum PaceArg {
     Distance,
     Time,
 }
@@ -128,7 +128,7 @@ fn seconds(value: &str) -> Result<f32, String> {
         .ok_or_else(|| "expected seconds, such as 10s or 2.5".to_owned())
 }
 
-pub(crate) fn parse_duration(value: &str) -> Result<f32, String> {
+pub fn parse_duration(value: &str) -> Result<f32, String> {
     seconds(value)
         .ok()
         .filter(|seconds| (1.0..=MAX_MP4_DURATION_S).contains(seconds))
@@ -137,21 +137,21 @@ pub(crate) fn parse_duration(value: &str) -> Result<f32, String> {
         })
 }
 
-pub(crate) fn parse_part(value: &str) -> Result<f32, String> {
+pub fn parse_part(value: &str) -> Result<f32, String> {
     seconds(value)
         .ok()
         .filter(|seconds| (0.0..=MAX_MP4_DURATION_S).contains(seconds))
         .ok_or_else(|| "expected seconds from 0 to 180, such as 2s".to_owned())
 }
 
-pub(crate) fn parse_rewind(value: &str) -> Result<f32, String> {
+pub fn parse_rewind(value: &str) -> Result<f32, String> {
     seconds(value)
         .ok()
         .filter(|seconds| (0.0..=MAX_REWIND_S).contains(seconds))
         .ok_or_else(|| format!("expected seconds from 0 to {MAX_REWIND_S}, such as 1s"))
 }
 
-pub(crate) fn parse_orbit(value: &str) -> Result<f32, String> {
+pub fn parse_orbit(value: &str) -> Result<f32, String> {
     parse_within(value, &(-360.0..=360.0))
 }
 

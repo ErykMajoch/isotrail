@@ -7,10 +7,10 @@ use isotrail_export::{DEFAULT_CRF, Ffmpeg, GifOptions, MAX_CRF, Mp4Options, Play
 use isotrail_render::parse_count;
 use tracing::warn;
 
-use crate::config::Typed;
+use crate::Typed;
 use crate::usage;
 
-const MAX_PLAYS: u16 = 1000;
+pub(crate) const MAX_PLAYS: u16 = 1000;
 
 /// How an animation is written to its file
 #[derive(Debug, Args)]
@@ -50,7 +50,7 @@ fn parse_crf(value: &str) -> Result<u8, String> {
     parse_count(value, &(0..=u32::from(MAX_CRF))).map(|crf| crf as u8)
 }
 
-pub(crate) fn parse_plays(value: &str) -> Result<Plays, String> {
+pub fn parse_plays(value: &str) -> Result<Plays, String> {
     match value.trim().to_ascii_lowercase().as_str() {
         "forever" => Ok(Plays::Forever),
         "once" => Ok(Plays::Times(NonZeroU16::MIN)),

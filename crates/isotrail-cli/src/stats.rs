@@ -124,7 +124,12 @@ impl Summary {
         let weather = match weather {
             Some(offline) => {
                 let fetcher = crate::bundle::fetcher(offline, args.cache_dir.get())?;
-                weather::look_up(&track, fetcher, &args.weather_url.server()).map(|(w, _)| w)
+                weather::look_up(
+                    &track,
+                    fetcher,
+                    &args.weather_url.server(crate::servers::key()),
+                )
+                .map(|(w, _)| w)
             }
             None => None,
         };

@@ -28,13 +28,14 @@ The workspace is split into crates:
 | `isotrail-geo` | Projection, slab and grid, elevation, map and weather sources, landcover, caching, scene building |
 | `isotrail-render` | The wgpu renderer: meshers, camera, lighting, post-processing, text and overlays |
 | `isotrail-export` | Finished stills and clips, and PNG, GIF and MP4 output |
+| `isotrail-options` | The render options, read from flags, config files or JSON |
 | `isotrail-cli` | The `isotrail` command |
 | `isotrail-web` | The WebAssembly renderer behind the `<isotrail-hike>` element in `web/` ([`web/README.md`](web/README.md)) |
 | `isotrail-testkit` | Synthetic scenes, golden-image, GIF and video helpers for tests |
 
-`isotrail-track`, `isotrail-bundle` and `isotrail-render` must stay WebAssembly-safe. They can't use the filesystem, the network or threads. `isotrail-geo` builds for WebAssembly too, without its HTTP client and disk cache. So does `isotrail-export`, without reading frames back from the GPU.
+`isotrail-track`, `isotrail-bundle` and `isotrail-render` must stay WebAssembly-safe. They can't use the filesystem, the network or threads. `isotrail-geo` builds for WebAssembly too, without its HTTP client and disk cache. So does `isotrail-export`, without reading frames back from the GPU. `isotrail-options` builds for WebAssembly without reading palette and theme files.
 
-The steps from a track to a scene bundle live in `isotrail-geo`. The command adds the disk cache, the server options and its own messages. The text over the diorama is chosen in `isotrail-render`, and `isotrail-export` draws the finished stills and clips. The command adds its flags and words the warnings.
+The steps from a track to a scene bundle live in `isotrail-geo`. The command adds the disk cache, the server options and its own messages. The text over the diorama is chosen in `isotrail-render`, and `isotrail-export` draws the finished stills and clips. The render options are defined once, in `isotrail-options`. Flags, config files and JSON go through the same checks there. The command adds its other flags and words the warnings.
 
 Please don't add real recordings to the repository. Tests use synthetic routes only.
 
@@ -47,7 +48,7 @@ Please don't add real recordings to the repository. Tests use synthetic routes o
    cargo fmt --all --check
    cargo clippy --workspace --all-targets -- -D warnings
    cargo test --workspace
-   cargo clippy --target wasm32-unknown-unknown -p isotrail-track -p isotrail-bundle -p isotrail-geo -p isotrail-render -p isotrail-export -p isotrail-web -- -D warnings
+   cargo clippy --target wasm32-unknown-unknown -p isotrail-track -p isotrail-bundle -p isotrail-geo -p isotrail-render -p isotrail-export -p isotrail-options -p isotrail-web -- -D warnings
    cargo deny check
    ```
 

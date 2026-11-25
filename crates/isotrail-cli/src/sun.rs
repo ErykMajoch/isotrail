@@ -8,11 +8,8 @@ use tracing::info;
 use crate::bundle::{DataArgs, TimesArg};
 use crate::render::Source;
 use crate::usage;
-
-pub fn parse_time(value: &str) -> Result<NaiveTime, String> {
-    NaiveTime::parse_from_str(value, "%H:%M")
-        .map_err(|_| "expected a local time such as 20:30".to_owned())
-}
+#[cfg(test)]
+use isotrail_options::parse_time;
 
 /// Refuses `--time` before any work when the scene will have no date
 pub(crate) fn check_time(

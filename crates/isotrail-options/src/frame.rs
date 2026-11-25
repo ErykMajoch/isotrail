@@ -8,12 +8,12 @@ use isotrail_render::{
 
 use crate::usage;
 
-pub(crate) const SCALE_RANGE: RangeInclusive<u32> = 1..=16;
-const SIDE_RANGE: RangeInclusive<u32> = 16..=8192;
-const MAX_SAFE_SHARE: f32 = 45.0;
+pub const SCALE_RANGE: RangeInclusive<u32> = 1..=16;
+pub(crate) const SIDE_RANGE: RangeInclusive<u32> = 16..=8192;
+pub(crate) const MAX_SAFE_SHARE: f32 = 45.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub(crate) enum AspectArg {
+pub enum AspectArg {
     Story,
     Video,
     Portrait,
@@ -70,7 +70,7 @@ pub struct FrameArgs {
 
 /// An aspect, or the size given instead
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum Shape {
+pub enum Shape {
     Aspect(Aspect),
     Size(u32, u32),
 }
@@ -173,7 +173,7 @@ impl FrameArgs {
 }
 
 /// Why `scale` can't make a `width` x `height` image, and the scales that can
-pub(crate) fn scale_mismatch(scale: u32, width: u32, height: u32, aspect: Option<&str>) -> String {
+pub fn scale_mismatch(scale: u32, width: u32, height: u32, aspect: Option<&str>) -> String {
     let fits: Vec<String> = SCALE_RANGE
         .filter(|s| width.is_multiple_of(*s) && height.is_multiple_of(*s))
         .map(|s| s.to_string())
@@ -198,7 +198,7 @@ pub(crate) fn scale_mismatch(scale: u32, width: u32, height: u32, aspect: Option
     }
 }
 
-pub(crate) fn parse_scale(value: &str) -> Result<u32, String> {
+pub fn parse_scale(value: &str) -> Result<u32, String> {
     parse_count(value, &SCALE_RANGE)
 }
 

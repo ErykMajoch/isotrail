@@ -1,21 +1,15 @@
 //! The `isotrail` command-line tool: turns a recorded hike into a pixel-art
 //! diorama render
 
-mod animation;
 mod batch;
 mod bundle;
 mod cache;
 mod config;
 mod embed;
-mod encoding;
-mod frame;
-mod look;
 mod output;
-mod overlay;
 mod playback;
 mod render;
 mod report;
-mod scene;
 mod season;
 mod servers;
 mod stats;
@@ -30,26 +24,22 @@ use std::io::{self, IsTerminal, Read};
 use std::path::Path;
 use std::process::ExitCode;
 
-use anyhow::{Context, anyhow};
+use anyhow::Context;
+#[cfg(test)]
+use anyhow::anyhow;
 use clap::error::ErrorKind;
-use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
-use isotrail_track::{GpxReader, Track, TrackReader, Units};
+use clap::{ArgAction, CommandFactory, Parser, Subcommand};
+use isotrail_track::{GpxReader, Track, TrackReader};
 use tracing::level_filters::LevelFilter;
 
-use crate::report::Reason;
+#[cfg(test)]
+use isotrail_options::{ANIMATION, CAMERA, ENCODING, SCENE};
+pub(crate) use isotrail_options::{
+    DATA, GENERAL, IMAGE, LOOK, OUTPUT, PLAYBACK, TEXT, UnitsArg, UsageError, animation, encoding,
+    frame, io_words, look, overlay, plain, read_named, read_text, scene, usage,
+};
 
-/// Help headings, in the order `--help` shows them
-const OUTPUT: &str = "Output";
-const IMAGE: &str = "Image";
-const CAMERA: &str = "Camera";
-const LOOK: &str = "Terrain and look";
-const SCENE: &str = "Scene, light and route";
-const TEXT: &str = "Text and overlays";
-const ANIMATION: &str = "Animation";
-const PLAYBACK: &str = "Playback and controls";
-const ENCODING: &str = "Encoding";
-const DATA: &str = "Data";
-const GENERAL: &str = "General";
+use crate::report::Reason;
 
 /// Turn a recorded hike (GPX) into a pixel-art 3D diorama
 #[derive(Debug, Parser)]
@@ -137,23 +127,6 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => report(&error, typed.command()),
     }
-}
-
-/// A mistake in how isotrail was called that only shows once the command line
-/// has been read; reported like clap's own, with exit code 2
-#[derive(Debug)]
-struct UsageError(String);
-
-impl fmt::Display for UsageError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for UsageError {}
-
-fn usage(message: impl Into<String>) -> anyhow::Error {
-    UsageError(message.into()).into()
 }
 
 /// A hike file that is missing, unreadable or not a hike
@@ -325,54 +298,6 @@ fn describe(error: &anyhow::Error) -> String {
     parts.join(": ")
 }
 
-/// What an I/O error means, in words
-fn io_words(error: &io::Error) -> String {
-    match error.kind() {
-        io::ErrorKind::NotFound => "the file doesn't exist".into(),
-        io::ErrorKind::PermissionDenied => "permission denied".into(),
-        io::ErrorKind::IsADirectory => "it is a folder".into(),
-        io::ErrorKind::NotADirectory => "part of the path is a file, not a folder".into(),
-        io::ErrorKind::StorageFull => "the disk is full".into(),
-        io::ErrorKind::ReadOnlyFilesystem => "the disk is read-only".into(),
-        io::ErrorKind::InvalidFilename => "the name can't be used for a file here".into(),
-        _ => plain(&error.to_string()),
-    }
-}
-
-/// A message without the operating system's error number, its full stop or
-/// a capital letter at the start of a sentence. A file name or path at the
-/// start, such as `Ridge.gpx`, keeps its capital
-fn plain(text: &str) -> String {
-    let text = match text.rfind(" (os error ") {
-        Some(at) if text.ends_with(')') => &text[..at],
-        _ => text,
-    };
-    let text = text.trim().trim_end_matches('.');
-    let word = text.split(' ').next().is_some_and(|word| {
-        word.chars()
-            .all(|c| c.is_alphabetic() || c == '\'' || c == '’')
-    });
-    let mut chars = text.chars();
-    match (chars.next(), chars.next()) {
-        (Some(first), Some(second)) if word && first.is_uppercase() && second.is_lowercase() => {
-            first
-                .to_lowercase()
-                .chain(text[first.len_utf8()..].chars())
-                .collect()
-        }
-        _ => text.to_owned(),
-    }
-}
-
-/// Why a file couldn't be read or written, in words
-fn file_problem(path: &Path, error: &io::Error) -> String {
-    if path.is_dir() {
-        "it is a folder".into()
-    } else {
-        io_words(error)
-    }
-}
-
 /// Checks the hike file given to a command before anything else: it must be
 /// a file, and not a picture or a video
 fn check_input(path: &Path) -> anyhow::Result<()> {
@@ -425,21 +350,6 @@ fn media(path: &Path) -> Option<&'static str> {
         .then_some("a video")
 }
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
-enum UnitsArg {
-    Metric,
-    Imperial,
-}
-
-impl From<UnitsArg> for Units {
-    fn from(units: UnitsArg) -> Self {
-        match units {
-            UnitsArg::Metric => Units::Metric,
-            UnitsArg::Imperial => Units::Imperial,
-        }
-    }
-}
-
 fn read_track(path: &Path) -> anyhow::Result<Track> {
     let bytes = read_file(path)?;
     if isotrail_bundle::is_bundle(&bytes) {
@@ -454,50 +364,6 @@ fn read_track(path: &Path) -> anyhow::Result<Track> {
 /// The hike file's bytes
 fn read_file(path: &Path) -> anyhow::Result<Vec<u8>> {
     read_named(path, "").map_err(|error| BadInput(error.to_string()).into())
-}
-
-/// The file's bytes, or one message naming `what` it is and the file, such
-/// as `can't open the theme dusk.toml: the file doesn't exist`
-fn read_named(path: &Path, what: &str) -> anyhow::Result<Vec<u8>> {
-    fs::read(path).map_err(|error| {
-        anyhow!(
-            "can't open {what}{}: {}",
-            path.display(),
-            file_problem(path, &error)
-        )
-    })
-}
-
-/// A settings file's text, or why it can't be read, naming `what` it is
-fn read_text(path: &Path, what: &str) -> Result<String, String> {
-    let bytes = read_named(path, what).map_err(|error| error.to_string())?;
-    let shown = path.display();
-    if bytes.starts_with(&[0xff, 0xfe])
-        || bytes.starts_with(&[0xfe, 0xff])
-        || utf16_unmarked(&bytes)
-    {
-        return Err(format!(
-            "{what}{shown} is saved as UTF-16 (as PowerShell's > writes it); save it as UTF-8"
-        ));
-    }
-    String::from_utf8(bytes).map_err(|_| format!("{what}{shown} isn't UTF-8 text"))
-}
-
-/// UTF-16 without a byte-order mark: mostly English text puts a zero in
-/// every other byte, and UTF-8 text has none
-fn utf16_unmarked(bytes: &[u8]) -> bool {
-    let start = &bytes[..bytes.len().min(256) & !1];
-    let zeros = |parity: usize| {
-        start
-            .iter()
-            .skip(parity)
-            .step_by(2)
-            .filter(|&&b| b == 0)
-            .count()
-    };
-    let pairs = start.len() / 2;
-    let (even, odd) = (zeros(0), zeros(1));
-    pairs > 0 && (even.min(odd) == 0) && even.max(odd) * 2 > pairs
 }
 
 /// A scene bundle by its extension or its first bytes, otherwise GPX

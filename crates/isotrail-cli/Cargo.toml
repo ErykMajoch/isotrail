@@ -13,12 +13,13 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
-clap.workspace = true
+clap = { workspace = true, features = ["wrap_help"] }
 ctrlc.workspace = true
 directories.workspace = true
 isotrail-bundle = { path = "../isotrail-bundle" }
 isotrail-export = { path = "../isotrail-export" }
 isotrail-geo = { path = "../isotrail-geo" }
+isotrail-options = { path = "../isotrail-options" }
 isotrail-render = { path = "../isotrail-render" }
 isotrail-track = { path = "../isotrail-track" }
 png.workspace = true

@@ -1,31 +1,8 @@
-use clap::ValueEnum;
 use isotrail_bundle::{SceneBundle, Season};
+use isotrail_geo::forced_season;
 pub use isotrail_geo::without_weather;
-use isotrail_geo::{SeasonKind, forced_season};
+pub use isotrail_options::data::SeasonArg;
 use isotrail_render::foliage;
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
-pub enum SeasonArg {
-    #[default]
-    Auto,
-    Spring,
-    Summer,
-    Autumn,
-    Winter,
-}
-
-impl SeasonArg {
-    /// The season to force, or none for the hike's own
-    pub fn kind(self) -> Option<SeasonKind> {
-        match self {
-            SeasonArg::Auto => None,
-            SeasonArg::Spring => Some(SeasonKind::Spring),
-            SeasonArg::Summer => Some(SeasonKind::Summer),
-            SeasonArg::Autumn => Some(SeasonKind::Autumn),
-            SeasonArg::Winter => Some(SeasonKind::Winter),
-        }
-    }
-}
 
 /// Shows the season `--season` asks for in place of the hike's own
 pub fn apply(bundle: &mut SceneBundle, season: SeasonArg) {

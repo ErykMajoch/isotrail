@@ -1,26 +1,22 @@
 use std::fmt::Write as _;
 use std::io::Write as _;
-use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
-use clap::{Args, ValueEnum};
+use clap::Args;
 use isotrail_bundle::Route;
 use isotrail_geo::{
-    Cache, CachedFetcher, DEFAULT_DETAIL, FetchError, Fetcher, Fetchers, FootprintOptions, Grid,
-    Heightmap, HttpFetcher, Landcover, LandcoverMap, MAX_TIMED_SPAN_DAYS, MIN_PADDING_M,
-    OVERPASS_URL, Orientation, PADDING_FRACTION, Prepared, Progress, RequestError, RetryPolicy,
-    SceneBundle, SceneError, SceneOptions, TERRARIUM_URL, Times, Warning, WeatherError, origin,
+    Cache, CachedFetcher, FetchError, Fetcher, Fetchers, Grid, Heightmap, HttpFetcher, Landcover,
+    LandcoverMap, MAX_TIMED_SPAN_DAYS, OVERPASS_URL, Prepared, Progress, RequestError, RetryPolicy,
+    SceneBundle, SceneError, TERRARIUM_URL, Warning, WeatherError, origin,
 };
-use isotrail_render::parse_count;
+pub use isotrail_options::data::{DataArgs, TimesArg, distance_text, parse_exaggeration};
 use isotrail_track::Track;
 use png::ColorType;
 use tracing::warn;
 
-use crate::config::Typed;
 use crate::output;
 use crate::report::{self, Report, ReportArgs, Written, say, shown};
-use crate::season::{self, SeasonArg};
-use crate::servers::{CacheDirArg, WeatherUrlArg, parse_template};
+use crate::season;
 use crate::usage;
 use crate::weather;
 
@@ -76,261 +72,6 @@ pub struct BundleArgs {
     config: Option<PathBuf>,
 }
 
-pub fn parse_exaggeration(value: &str) -> Result<f64, String> {
-    value
-        .trim()
-        .parse()
-        .ok()
-        .filter(|exaggeration| (0.1..=100.0).contains(exaggeration))
-        .ok_or_else(|| "expected a number from 0.1 to 100".to_owned())
-}
-
-fn parse_detail(value: &str) -> Result<u32, String> {
-    parse_count(value, &(8..=isotrail_bundle::MAX_GRID_SIDE))
-}
-
-/// How terrain and map data are fetched for a GPX file
-#[derive(Debug, Args)]
-#[command(next_help_heading = crate::DATA)]
-pub struct DataArgs {
-    /// Grid cells along the slab's long side, from 8 to 1024
-    #[arg(long, value_name = "N", default_value_t = DEFAULT_DETAIL.get(), value_parser = parse_detail)]
-    detail: u32,
-
-    /// Only use elevation, map and weather data already in the cache
-    #[arg(long)]
-    offline: bool,
-
-    /// Overpass API server for the OpenStreetMap data
-    #[arg(long, value_name = "URL", env = "ISOTRAIL_OVERPASS_URL", default_value = OVERPASS_URL)]
-    overpass_url: String,
-
-    /// Elevation tiles from a mirror, as an address with {z}, {x} and {y}
-    #[arg(long, value_name = "URL", env = "ISOTRAIL_TERRAIN_URL",
-          default_value = TERRARIUM_URL, value_parser = parse_template)]
-    terrain_url: String,
-
-    #[command(flatten)]
-    weather_url: WeatherUrlArg,
-
-    #[command(flatten)]
-    cache_dir: CacheDirArg,
-
-    /// Build the diorama from the elevation alone, without lakes, woods and paths
-    #[arg(long)]
-    no_map_data: bool,
-
-    /// Ground round the route: percent from 0 to 100, metres from 0 to 10000 [default: 15,500]
-    #[arg(long, value_name = "PERCENT[,METRES]", value_parser = parse_padding,
-          allow_hyphen_values = true)]
-    padding: Option<Padding>,
-
-    /// Which way the slab's sides run: along the route, or north-south and east-west
-    #[arg(long, value_enum, value_name = "route|north", default_value_t = FootprintArg::Route,
-          hide_possible_values = true)]
-    footprint: FootprintArg,
-
-    /// Leave out the weather, with the snow and ice it brings
-    #[arg(long)]
-    pub no_weather: bool,
-
-    /// Season to show: the hike's own (auto), or a season you choose
-    #[arg(long, value_enum, value_name = "auto|spring|summer|autumn|winter",
-          default_value_t = SeasonArg::Auto, hide_possible_values = true)]
-    pub season: SeasonArg,
-
-    /// Times to keep in the scene: as recorded, rounded, or none
-    #[arg(long, value_enum, value_name = "recorded|coarse|none",
-          default_value_t = TimesArg::Recorded, hide_possible_values = true)]
-    pub times: TimesArg,
-
-    /// Cut this far off the start of the route, such as 300m or 1.5km
-    #[arg(long, value_name = "DIST", value_parser = parse_distance)]
-    trim_start: Option<f64>,
-
-    /// Cut this far off the end of the route, such as 300m or 1.5km
-    #[arg(long, value_name = "DIST", value_parser = parse_distance)]
-    trim_end: Option<f64>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum TimesArg {
-    Recorded,
-    Coarse,
-    None,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Padding {
-    fraction: f64,
-    min_m: f64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub(crate) enum FootprintArg {
-    Route,
-    North,
-}
-
-fn parse_padding(value: &str) -> Result<Padding, String> {
-    let (percent, metres) = match value.split_once(',') {
-        Some((percent, metres)) => (percent, Some(metres)),
-        None => (value, None),
-    };
-    let number = |text: &str, max: f64, what: &str| -> Result<f64, String> {
-        text.trim()
-            .parse()
-            .ok()
-            .filter(|number| (0.0..=max).contains(number))
-            .ok_or_else(|| format!("expected the {what} as a number from 0 to {max}"))
-    };
-    Ok(Padding {
-        fraction: number(percent, 100.0, "percentage")? / 100.0,
-        min_m: match metres {
-            Some(metres) => number(metres, 10_000.0, "metres")?,
-            None => MIN_PADDING_M,
-        },
-    })
-}
-
-/// Metres, as a number alone or with `m`, or kilometres with `km`
-fn parse_distance(value: &str) -> Result<f64, String> {
-    let text = value.trim().to_ascii_lowercase();
-    let (number, metres) = match text.strip_suffix("km") {
-        Some(number) => (number, 1000.0),
-        None => (text.strip_suffix('m').unwrap_or(&text), 1.0),
-    };
-    number
-        .trim()
-        .parse::<f64>()
-        .ok()
-        .filter(|number| number.is_finite() && *number >= 0.0)
-        .map(|number| number * metres)
-        .ok_or_else(|| "expected a distance such as 300, 300m or 1.5km".to_owned())
-}
-
-/// A distance as the docs write it: 450m, 2.84km
-fn distance_text(metres: f64) -> String {
-    if metres < 999.5 {
-        format!("{metres:.0}m")
-    } else {
-        let km = format!("{:.2}", metres / 1000.0);
-        format!("{}km", km.trim_end_matches('0').trim_end_matches('.'))
-    }
-}
-
-impl DataArgs {
-    /// The padding as `--padding` takes it, such as 15,500
-    fn padding_text(&self) -> String {
-        let padding = self.padding.unwrap_or(Padding {
-            fraction: PADDING_FRACTION,
-            min_m: MIN_PADDING_M,
-        });
-        let round = |value: f64| (value * 1e6).round() / 1e6;
-        format!(
-            "{},{}",
-            round(padding.fraction * 100.0),
-            round(padding.min_m)
-        )
-    }
-
-    /// The library's options, with the weather server and its key
-    fn options(&self) -> SceneOptions {
-        let padding = self.padding.unwrap_or(Padding {
-            fraction: PADDING_FRACTION,
-            min_m: MIN_PADDING_M,
-        });
-        SceneOptions {
-            detail: NonZeroU32::new(self.detail).unwrap_or(DEFAULT_DETAIL),
-            footprint: FootprintOptions {
-                padding_fraction: padding.fraction,
-                min_padding_m: padding.min_m,
-                orientation: match self.footprint {
-                    FootprintArg::Route => Orientation::Route,
-                    FootprintArg::North => Orientation::North,
-                },
-            },
-            map_data: !self.no_map_data,
-            weather: !self.no_weather,
-            season: self.season.kind(),
-            times: match self.times {
-                TimesArg::Recorded => Times::Recorded,
-                TimesArg::Coarse => Times::Coarse,
-                TimesArg::None => Times::None,
-            },
-            trim_start_m: self.trim_start.unwrap_or(0.0),
-            trim_end_m: self.trim_end.unwrap_or(0.0),
-            terrain_url: self.terrain_url.clone(),
-            overpass_url: self.overpass_url.clone(),
-            weather_server: self.weather_url.server(),
-        }
-    }
-
-    /// The settings that change the scene made from a GPX file, leaving out
-    /// --offline, the cache and the servers, which only change where data
-    /// comes from
-    pub fn shaping(&self) -> String {
-        format!(
-            "{:?}",
-            (
-                self.detail,
-                self.no_map_data,
-                self.padding,
-                self.footprint,
-                self.no_weather,
-                self.season,
-                self.times,
-                self.trim_start,
-                self.trim_end,
-            )
-        )
-    }
-
-    /// Warns about flags typed for fetching data, which a bundle doesn't need
-    pub fn warn_unused_with_bundle(&self, typed: &Typed) {
-        for (id, flag) in [
-            ("detail", "--detail"),
-            ("offline", "--offline"),
-            ("overpass_url", "--overpass-url"),
-            ("terrain_url", "--terrain-url"),
-            ("weather_url", "--weather-url"),
-            ("cache_dir", "--cache-dir"),
-            ("no_map_data", "--no-map-data"),
-            ("padding", "--padding"),
-            ("footprint", "--footprint"),
-        ] {
-            if typed.has(id) {
-                warn!(
-                    "{flag} does nothing with a scene bundle, which already holds its terrain and map data"
-                );
-            }
-        }
-    }
-
-    /// A scene bundle keeps the times and route it was made with, so a
-    /// privacy option for them is refused rather than dropped
-    pub fn refuse_with_bundle(&self) -> anyhow::Result<()> {
-        for (trim, flag) in [
-            (self.trim_start, "--trim-start"),
-            (self.trim_end, "--trim-end"),
-        ] {
-            if trim.is_some_and(|metres| metres > 0.0) {
-                return Err(usage(format!(
-                    "{flag} can't cut the route a scene bundle holds; give the GPX file instead"
-                )));
-            }
-        }
-        let times = match self.times {
-            TimesArg::Recorded => return Ok(()),
-            TimesArg::Coarse => "coarse",
-            TimesArg::None => "none",
-        };
-        Err(usage(format!(
-            "--times {times} can't change the times a scene bundle holds; give the GPX file instead"
-        )))
-    }
-}
-
 /// Fetches through the shared cache, or the one in `cache_dir`
 pub fn fetcher(
     offline: bool,
@@ -363,19 +104,20 @@ impl<F: Fetcher> Fetcher for Announced<F> {
     }
 }
 
-impl DataArgs {
-    /// `http` behind the cache, announcing its first download
-    fn cached(&self, http: HttpFetcher) -> anyhow::Result<CachedFetcher<Announced<HttpFetcher>>> {
-        let cache = Cache::new(crate::cache::dir(self.cache_dir.get())?);
-        let announced = Announced {
-            inner: http,
-            line: report::download_line(
-                !self.no_map_data,
-                !self.no_weather && self.times != TimesArg::None,
-            ),
-        };
-        Ok(CachedFetcher::new(announced, cache).offline(self.offline))
-    }
+/// `http` behind the cache, announcing its first download
+fn cached(
+    data: &DataArgs,
+    http: HttpFetcher,
+) -> anyhow::Result<CachedFetcher<Announced<HttpFetcher>>> {
+    let cache = Cache::new(crate::cache::dir(data.cache_dir.get())?);
+    let announced = Announced {
+        inner: http,
+        line: report::download_line(
+            !data.no_map_data,
+            !data.no_weather && data.times != TimesArg::None,
+        ),
+    };
+    Ok(CachedFetcher::new(announced, cache).offline(data.offline))
 }
 
 /// The next step when --offline finds nothing cached; a server other than
@@ -456,9 +198,9 @@ impl Progress for Warnings {
 /// Fetches terrain, map data and weather around the track read from `file`
 /// and packs them into a bundle
 pub fn prepare(track: &Track, file: &Path, data: &DataArgs) -> anyhow::Result<Prepared> {
-    let options = data.options();
-    let fetcher = data.cached(HttpFetcher::new()?)?;
-    let map_fetcher = data.cached(HttpFetcher::new()?.with_retry(RetryPolicy::once()))?;
+    let options = data.options(crate::servers::key());
+    let fetcher = cached(data, HttpFetcher::new()?)?;
+    let map_fetcher = cached(data, HttpFetcher::new()?.with_retry(RetryPolicy::once()))?;
     let fetchers = Fetchers {
         data: &fetcher,
         map_data: &map_fetcher,
@@ -792,46 +534,5 @@ mod tests {
         assert_eq!(big[4 * 12], 4);
         assert_eq!(big[big.len() - 1], 6);
         assert_eq!(enlarge(&[9, 8, 7], 1, 3), [9, 8, 7].repeat(16));
-    }
-
-    #[test]
-    fn trims_are_metres_or_kilometres() {
-        for (text, metres) in [
-            ("300", 300.0),
-            ("300m", 300.0),
-            (" 1.5km", 1500.0),
-            ("2 KM", 2000.0),
-            ("0", 0.0),
-        ] {
-            assert_eq!(parse_distance(text), Ok(metres), "{text}");
-        }
-        for bad in ["", "-5", "km", "1.5mi", "nan", "inf", "300 metres"] {
-            assert!(parse_distance(bad).is_err(), "{bad}");
-        }
-        assert_eq!(distance_text(450.2), "450m");
-        assert_eq!(distance_text(999.7), "1km");
-        assert_eq!(distance_text(2836.0), "2.84km");
-        assert_eq!(distance_text(1500.0), "1.5km");
-    }
-
-    #[test]
-    fn padding_is_a_percentage_and_maybe_metres() {
-        assert_eq!(
-            parse_padding("10"),
-            Ok(Padding {
-                fraction: 0.1,
-                min_m: MIN_PADDING_M
-            })
-        );
-        assert_eq!(
-            parse_padding("0, 250"),
-            Ok(Padding {
-                fraction: 0.0,
-                min_m: 250.0
-            })
-        );
-        for bad in ["", "x", "101", "-1", "10,", "10,20000", "10,5,5"] {
-            assert!(parse_padding(bad).is_err(), "{bad}");
-        }
     }
 }

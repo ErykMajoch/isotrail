@@ -6,24 +6,20 @@ use anyhow::Context;
 use clap::Args;
 use isotrail_bundle::SceneBundle;
 use isotrail_export::{
-    Caption, DEFAULT_SCALE, ExportError, Ffmpeg, GifWriter, Mp4Writer, Still, check_gif_look,
-    encode_png, finished_clip,
+    Caption, ExportError, Ffmpeg, GifWriter, Mp4Writer, Still, check_gif_look, encode_png,
+    finished_clip,
 };
+use isotrail_options::RenderOptions;
 use isotrail_render::{Background, Fitted, Frame, Gpu, Look, Mesher, Motion, Pace, Walk};
 use isotrail_track::Track;
 use tracing::{info, warn};
 
-use crate::animation::AnimationArgs;
 use crate::bundle::{DataArgs, TimesArg};
 use crate::config::Typed;
 use crate::encoding::{Clip as ClipKind, EncodingArgs};
-use crate::frame::{AspectArg, FrameArgs, Shape, parse_scale};
-use crate::look::LookArgs;
+use crate::frame::Shape;
 use crate::output::{self, Pending};
-use crate::overlay::OverlayArgs;
 use crate::report::{Report, ReportArgs, Written, say};
-use crate::scene::SceneArgs;
-use crate::theme::ThemeFileArg;
 use crate::usage;
 
 #[derive(Debug, Args)]
@@ -35,51 +31,8 @@ pub struct RenderArgs {
     #[arg(short, long, value_name = "FILE", help_heading = crate::OUTPUT)]
     output: Option<PathBuf>,
 
-    /// Image shapes, separated by commas: story, video, portrait, feed, square or wide
-    #[arg(
-        long,
-        value_enum,
-        value_delimiter = ',',
-        value_name = "LIST",
-        default_value = "story",
-        hide_possible_values = true,
-        help_heading = crate::IMAGE
-    )]
-    aspect: Vec<AspectArg>,
-
-    /// Output pixels per drawn pixel, from 1 to 16, dividing both sides of the image
-    #[arg(long, value_name = "N", default_value_t = DEFAULT_SCALE, value_parser = parse_scale,
-          help_heading = crate::IMAGE)]
-    scale: u32,
-
     #[command(flatten)]
-    frame: FrameArgs,
-
-    #[command(flatten)]
-    look: LookArgs,
-
-    /// How many times taller than life to draw the terrain, from 0.1 to 100 [default: automatic]
-    #[arg(long, value_name = "X", value_parser = crate::bundle::parse_exaggeration,
-          help_heading = crate::LOOK)]
-    exaggeration: Option<f64>,
-
-    #[command(flatten)]
-    theme: ThemeFileArg,
-
-    #[command(flatten)]
-    scene: SceneArgs,
-
-    #[command(flatten)]
-    overlay: OverlayArgs,
-
-    #[command(flatten)]
-    animation: AnimationArgs,
-
-    #[command(flatten)]
-    encoding: EncodingArgs,
-
-    #[command(flatten)]
-    data: DataArgs,
+    pub(crate) options: RenderOptions,
 
     #[command(flatten)]
     report: ReportArgs,
@@ -98,7 +51,7 @@ pub(crate) enum Format {
 
 impl RenderArgs {
     fn shapes(&self) -> anyhow::Result<Vec<Shape>> {
-        self.frame.listed_shapes(&self.aspect)
+        self.options.frame.listed_shapes(&self.options.aspect)
     }
 }
 
@@ -106,29 +59,39 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
     crate::check_input(&args.file)?;
     let mut report = Report::new(&args.report);
     let shapes = args.shapes()?;
-    let framings = args.frame.framings(&shapes, args.scale)?;
+    let framings = args.options.frame.framings(&shapes, args.options.scale)?;
     let (outputs, format) = output_paths(&args.file, args.output.as_deref(), &shapes)?;
     let inputs: Vec<&Path> = [Some(args.file.as_path()), args.config.as_deref()]
         .into_iter()
         .flatten()
-        .chain(args.look.palette_file().filter(|path| path.is_file()))
-        .chain(args.theme.path().filter(|path| path.is_file()))
+        .chain(
+            args.options
+                .look
+                .palette_file()
+                .filter(|path| path.is_file()),
+        )
+        .chain(args.options.theme.path().filter(|path| path.is_file()))
         .collect();
     output::plan(outputs.iter().map(PathBuf::as_path), &inputs)?;
     let mut motion = match format {
         Format::Png => None,
-        Format::Gif | Format::Mp4 => Some(args.animation.motion(format == Format::Gif)?),
+        Format::Gif | Format::Mp4 => Some(args.options.animation.motion(format == Format::Gif)?),
     };
     let clip_kind = match format {
         Format::Png => None,
         Format::Gif => Some(ClipKind::Gif),
         Format::Mp4 => Some(ClipKind::Mp4),
     };
-    args.encoding.check(clip_kind, args.scale, typed)?;
-    args.overlay.check()?;
-    let theme = args.theme.read()?;
-    let mesher = args.look.mesher(typed, args.scene.terrain(&theme));
-    let look = args.scene.apply(args.look.look(&theme)?);
+    args.options
+        .encoding
+        .check(clip_kind, args.options.scale, typed)?;
+    args.options.overlay.check()?;
+    let theme = args.options.theme.read()?;
+    let mesher = args
+        .options
+        .look
+        .mesher(typed, args.options.scene.terrain(&theme));
+    let look = args.options.scene.apply(args.options.look.look(&theme)?);
     if format == Format::Gif {
         check_gif_look(&look).map_err(|error| usage(error.to_string()))?;
     }
@@ -137,51 +100,60 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
             return Err(usage(ExportError::Mp4Transparent.to_string()));
         }
         for framing in &framings {
-            let (width, height) = (framing.width * args.scale, framing.height * args.scale);
+            let (width, height) = (
+                framing.width * args.options.scale,
+                framing.height * args.options.scale,
+            );
             if width % 2 != 0 || height % 2 != 0 {
                 return Err(usage(ExportError::Mp4Size { width, height }.to_string()));
             }
         }
-        Some(args.encoding.ffmpeg()?)
+        Some(args.options.encoding.ffmpeg()?)
     } else {
         None
     };
     let source = Source::open(&args.file)?;
     if source.is_bundle() {
-        args.data.refuse_with_bundle()?;
-        args.data.warn_unused_with_bundle(typed);
+        args.options.data.refuse_with_bundle()?;
+        args.options.data.warn_unused_with_bundle(typed);
     }
-    crate::sun::check_time(args.look.time, &source, &args.data)?;
-    let mut bundle = source.into_bundle(&args.file, &args.data)?;
-    if let Some(exaggeration) = args.exaggeration {
+    crate::sun::check_time(args.options.look.time, &source, &args.options.data)?;
+    let mut bundle = source.into_bundle(&args.file, &args.options.data)?;
+    if let Some(exaggeration) = args.options.exaggeration {
         bundle.grid.exaggeration = exaggeration;
     }
     info!(exaggeration = bundle.grid.exaggeration, "terrain");
-    let conditions = args.scene.conditions(&theme);
-    let sun = crate::sun::hike_sun(&bundle, args.look.time, &conditions)?;
-    let aim = args.frame.aim();
+    let conditions = args.options.scene.conditions(&theme);
+    let sun = crate::sun::hike_sun(&bundle, args.options.look.time, &conditions)?;
+    let aim = args.options.frame.aim();
     if let Some(motion) = &mut motion {
-        let held = args.look.time.is_some() || args.scene.holds_sun();
+        let held = args.options.look.time.is_some() || args.options.scene.holds_sun();
         motion.sun = held.then_some(sun);
         motion.conditions = conditions;
         motion.aim = aim;
         motion.pacing = theme.pacing;
     }
-    let text = args.overlay.text(&bundle, &theme.labels)?;
-    let built_in = args.overlay.built_in_text(&bundle, &theme.labels);
-    let themed = built_in.as_ref().zip(args.theme.path());
-    let style = args.overlay.style(&theme, look.route.colour);
+    let text = args.options.overlay.text(&bundle, &theme.labels)?;
+    let built_in = args.options.overlay.built_in_text(&bundle, &theme.labels);
+    let themed = built_in.as_ref().zip(args.options.theme.path());
+    let style = args.options.overlay.style(&theme, look.route.colour);
     let fitted = shapes
         .iter()
         .zip(&framings)
         .map(|(shape, framing)| {
-            args.overlay
-                .fit(&text, themed, &shape.label(), framing, args.scale, &style)
+            args.options.overlay.fit(
+                &text,
+                themed,
+                &shape.label(),
+                framing,
+                args.options.scale,
+                &style,
+            )
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
     // --times none has said so already
     if motion.is_some_and(|motion| motion.pace == Pace::Time)
-        && args.data.times != TimesArg::None
+        && args.options.data.times != TimesArg::None
         && !Walk::paced(&bundle, theme.pacing).is_timed()
     {
         warn!("the track has no times to pace the route by, so it draws at an even speed");
@@ -190,10 +162,13 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
     let gpu = Gpu::headless()?;
     for ((framing, fit), output) in framings.iter().zip(&fitted).zip(&outputs) {
         let overlays = &fit.overlays;
-        let (width, height) = (framing.width * args.scale, framing.height * args.scale);
+        let (width, height) = (
+            framing.width * args.options.scale,
+            framing.height * args.options.scale,
+        );
         let drawn = (framing.width, framing.height);
         if let Some(motion) = &motion {
-            let options = args.overlay.options();
+            let options = args.options.overlay.options();
             let clip = Clip {
                 gpu: &gpu,
                 mesher: mesher.as_ref(),
@@ -220,14 +195,19 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
                 sun: &sun,
                 look: &look,
             }
-            .render(&gpu, args.scale)?;
+            .render(&gpu, args.options.scale)?;
             output::write(output, |file| Ok(encode_png(&image, file)?))?;
             say!("{}", rendered(None, (width, height), drawn));
             report.wrote(Written::image(output, (width, height)));
         }
     }
     let dropped = fitted.iter().any(Fitted::credit_dropped);
-    report.finish(args.overlay.caption_credit(&bundle, dropped).as_deref())
+    report.finish(
+        args.options
+            .overlay
+            .caption_credit(&bundle, dropped)
+            .as_deref(),
+    )
 }
 
 /// `Rendered 300 frames of 1080 x 1920 from 360 x 640 pixels`, without the
@@ -249,9 +229,12 @@ fn rendered(frames: Option<u32>, size: (u32, u32), drawn: (u32, u32)) -> String 
 /// Output pixels per drawn pixel in the clip: a GIF may be smaller
 fn clip_scale(args: &RenderArgs, motion: &Motion, mp4: bool) -> u32 {
     if mp4 {
-        args.scale
+        args.options.scale
     } else {
-        args.encoding.gif(args.scale, motion.timeline.fps).scale
+        args.options
+            .encoding
+            .gif(args.options.scale, motion.timeline.fps)
+            .scale
     }
 }
 
@@ -325,7 +308,13 @@ fn write_clip(
 ) -> anyhow::Result<u32> {
     let write = || -> anyhow::Result<u32> {
         let pending = Pending::new(output);
-        let mut writer = ClipWriter::open(&pending, clip, args.scale, &args.encoding, ffmpeg)?;
+        let mut writer = ClipWriter::open(
+            &pending,
+            clip,
+            args.options.scale,
+            &args.options.encoding,
+            ffmpeg,
+        )?;
         let frames = draw_clip(clip, |frame| Ok(writer.push(frame)?))?;
         writer.finish()?;
         pending.commit()?;
@@ -493,15 +482,15 @@ mod tests {
         let bundle = hike_bundle();
         let framing = Aspect::Square.framing(10).unwrap();
         let theme = Theme::default();
-        let text = args.overlay.text(&bundle, &theme.labels).unwrap();
+        let text = args.options.overlay.text(&bundle, &theme.labels).unwrap();
         let overlays = Overlays::layout(
             &text,
-            &args.overlay.style(&theme, theme.route.colour),
+            &args.options.overlay.style(&theme, theme.route.colour),
             &framing,
         );
-        let motion = args.animation.motion(true).unwrap();
+        let motion = args.options.animation.motion(true).unwrap();
         let gpu = isotrail_testkit::gpu();
-        let options = args.overlay.options();
+        let options = args.options.overlay.options();
         let clip = Clip {
             gpu: &gpu,
             mesher: &isotrail_render::VoxelMesher::default(),
@@ -519,7 +508,8 @@ mod tests {
         fs::write(&target, "good").unwrap();
 
         let pending = Pending::new(&target);
-        let mut writer = ClipWriter::open(&pending, &clip, 10, &args.encoding, None).unwrap();
+        let mut writer =
+            ClipWriter::open(&pending, &clip, 10, &args.options.encoding, None).unwrap();
         let mut pushed = 0;
         let drawn = draw_clip(&clip, |frame| {
             pushed += 1;
