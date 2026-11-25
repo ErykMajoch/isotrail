@@ -1360,6 +1360,12 @@ class IsotrailHike extends HTMLElement {
   #setState(state) {
     if (this.getAttribute('data-state') === state) return;
     this.setAttribute('data-state', state);
+    // At once, not on the loading line's next frame, which a busy page delays
+    if (state !== 'loading') {
+      cancelAnimationFrame(this.#loadingFrame);
+      this.#loadingFrame = 0;
+      this.#loaded.hidden = true;
+    }
     this.#emit('isotrail-state', { state });
   }
 
