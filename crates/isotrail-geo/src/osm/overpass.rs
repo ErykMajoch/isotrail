@@ -10,12 +10,11 @@ use super::{
     Area, BoundingBox, FeatureSource, Line, OsmError, OsmFeatures, OsmId, OsmKind, Polygon, Tags,
     overpass_query,
 };
-use crate::{FetchError, Fetcher, Grid, RetryPolicy, origin};
+use crate::{Fetcher, Grid, Retry, RetryPolicy, origin};
 
 pub const OVERPASS_URL: &str = "https://overpass-api.de/api/interpreter";
 /// For a server that doesn't answer at all, which is more often a wrong
 /// address or no network than a busy server
-#[cfg(not(target_arch = "wasm32"))]
 pub const UNREACHABLE_RETRY: RetryPolicy = RetryPolicy {
     max_attempts: 3,
     base_delay: Duration::from_secs(2),
@@ -91,27 +90,15 @@ impl<F: Fetcher> OverpassSource<F> {
     /// The policy that applies to a failure and how to describe it, or none
     /// when trying again can't help
     fn retry_for(&self, error: &OsmError) -> Option<(RetryPolicy, String)> {
-        match error {
-            OsmError::Fetch { source } if source.is_unreachable() => Some((
+        match error.retry()? {
+            Retry::Unreachable => Some((
                 self.unreachable,
                 format!("could not reach {}", origin(&self.endpoint)),
             )),
-            OsmError::Fetch { source } if source.is_transient() => {
-                let reason = match source {
-                    FetchError::Status { status, .. } => format!("HTTP {status}"),
-                    FetchError::Body { .. } => "the answer was cut off".to_owned(),
-                    _ => "no answer in time".to_owned(),
-                };
-                Some((self.busy, format!("Overpass is busy ({reason})")))
-            }
-            OsmError::Json { .. } => Some((
+            Retry::Busy => Some((
                 self.busy,
-                "Overpass is busy (the answer was not map data)".to_owned(),
+                format!("Overpass is busy ({})", error.busy_reason()?),
             )),
-            OsmError::Overpass { remark } if is_busy_remark(remark) => {
-                Some((self.busy, format!("Overpass is busy ({remark})")))
-            }
-            _ => None,
         }
     }
 }
@@ -162,20 +149,6 @@ fn retry_after(error: &OsmError) -> Option<Duration> {
         OsmError::Fetch { source } => source.retry_after(),
         _ => None,
     }
-}
-
-/// Overpass reports overload inside an HTTP 200 as a remark
-fn is_busy_remark(remark: &str) -> bool {
-    let remark = remark.to_ascii_lowercase();
-    [
-        "timed out",
-        "timeout",
-        "rate limit",
-        "rate_limit",
-        "too many",
-    ]
-    .iter()
-    .any(|busy| remark.contains(busy))
 }
 
 #[derive(Deserialize)]
@@ -329,6 +302,7 @@ mod tests {
     use isotrail_track::{Segment, Track, TrackPoint};
 
     use super::*;
+    use crate::FetchError;
     use crate::{Cache, CachedFetcher, Footprint, HttpFetcher};
 
     const TIMED_OUT: &str = r#"{"version":0.6,"elements":[],

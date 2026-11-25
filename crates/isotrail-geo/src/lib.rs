@@ -41,7 +41,8 @@ pub use error::GeoError;
 #[cfg(target_arch = "wasm32")]
 pub use fetch::RequestFailure;
 pub use fetch::{
-    Answer, FetchError, Fetcher, ReplayFetcher, Request, RetryPolicy, origin, redact, sha256_hex,
+    Answer, FetchError, Fetcher, ReplayFetcher, Request, Retry, RetryPolicy, origin, redact,
+    sha256_hex,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use fetch::{
@@ -58,11 +59,12 @@ pub use landcover::{
 };
 pub use osm::{
     Area, BoundingBox, FEATURE_KEYS, FeatureSource, Line, MINOR_WAY_MAX_CELL_M, OVERPASS_URL,
-    OsmError, OsmFeatures, OsmId, OsmKind, OverpassSource, Polygon, Ring, Tags, overpass_query,
+    OsmError, OsmFeatures, OsmId, OsmKind, OverpassSource, Polygon, Ring, Tags, UNREACHABLE_RETRY,
+    overpass_query,
 };
 pub use prepare::{
-    Fetchers, Prepared, Progress, SceneError, SceneOptions, Step, Times, Warning, dataset_name,
-    look_up_weather, prepare, requests, without_weather,
+    Fetchers, Plan, Prepared, Progress, SceneError, SceneOptions, Step, Times, Warning,
+    dataset_name, look_up_weather, plan, prepare, requests, without_weather,
 };
 pub use projection::LocalProjection;
 pub use relief::{EXAGGERATION_FACTOR, MAX_EXAGGERATION, MIN_EXAGGERATION, vertical_exaggeration};

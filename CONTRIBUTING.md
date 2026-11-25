@@ -36,7 +36,7 @@ The workspace is split into crates:
 
 `isotrail-track`, `isotrail-bundle` and `isotrail-render` must stay WebAssembly-safe. They can't use the filesystem, the network or threads. `isotrail-geo` builds for WebAssembly too, without its HTTP client and disk cache. So does `isotrail-export`, without reading frames back from the GPU. `isotrail-options` builds for WebAssembly without reading palette and theme files.
 
-The steps from a track to a scene bundle live in `isotrail-geo`. The command adds the disk cache, the server options and its own messages. In a browser, `isotrail-scene` runs the same steps in a worker, with the answers the page fetches. The text over the diorama is chosen in `isotrail-render`, and `isotrail-export` draws the finished stills and clips. The render options are defined once, in `isotrail-options`. Flags, config files and JSON go through the same checks there. The command adds its other flags and words the warnings.
+The steps from a track to a scene bundle live in `isotrail-geo`. The command adds the disk cache, the server options and its own messages. In a browser, `isotrail-scene` runs the same steps in a worker, with the answers the page fetches. The worker keeps those answers in the browser's cache, under the keys the disk cache uses. It asks several Overpass servers in turn, listed in `crates/isotrail-scene/src/servers.rs`. The text over the diorama is chosen in `isotrail-render`, and `isotrail-export` draws the finished stills and clips. The render options are defined once, in `isotrail-options`. Flags, config files and JSON go through the same checks there. The command adds its other flags and words the warnings.
 
 Code that builds a scene takes its sines, cosines and the rest from the `libm` crate. A scene then comes out bit for bit the same on every system and in a browser. A `clippy.toml` in `isotrail-track`, `isotrail-geo` and `isotrail-bundle` rejects the standard library's versions.
 
@@ -62,7 +62,7 @@ Please don't add real recordings to the repository. Tests use synthetic routes o
    node web/test/check.mjs chrome
    ```
 
-4. If you changed how a scene is built, or anything in `web/scene/`, build the scene worker and run its check. A local server plays the elevation, map and weather services from `fixtures/`. The check builds each scene in the browser and compares it with the one `isotrail bundle` makes.
+4. If you changed how a scene is built, or anything in `web/scene/`, build the scene worker and run its check. A local server plays the elevation, map and weather services from `fixtures/`. The check builds each scene in the browser and compares it with the one `isotrail bundle` makes. It also makes the server busy, slow or silent, to check the browser's cache, the waits, cancel and the messages.
 
    ```bash
    sh web/build-scene.sh

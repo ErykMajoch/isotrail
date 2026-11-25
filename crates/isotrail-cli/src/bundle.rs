@@ -204,6 +204,7 @@ pub fn prepare(track: &Track, file: &Path, data: &DataArgs) -> anyhow::Result<Pr
     let fetchers = Fetchers {
         data: &fetcher,
         map_data: &map_fetcher,
+        waits: true,
     };
     let title = track.title(file);
     isotrail_geo::prepare(

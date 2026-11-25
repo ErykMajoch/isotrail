@@ -2,6 +2,8 @@ use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use super::Retry;
+
 #[cfg(not(target_arch = "wasm32"))]
 type ClientError = reqwest::Error;
 #[cfg(target_arch = "wasm32")]
@@ -112,6 +114,17 @@ impl FetchError {
     /// Nothing answered at all: no server at that address, or no network
     pub fn is_unreachable(&self) -> bool {
         matches!(self, FetchError::Network { source, .. } if source.is_connect() && !source.is_timeout())
+    }
+
+    /// Why the same request may well succeed later, if it may
+    pub fn retry(&self) -> Option<Retry> {
+        if self.is_unreachable() {
+            Some(Retry::Unreachable)
+        } else if self.is_transient() {
+            Some(Retry::Busy)
+        } else {
+            None
+        }
     }
 
     pub fn retry_after(&self) -> Option<Duration> {

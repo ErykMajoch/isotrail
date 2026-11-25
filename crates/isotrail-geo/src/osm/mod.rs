@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
 pub use error::OsmError;
-pub use overpass::{OVERPASS_URL, OverpassSource};
+pub use overpass::{OVERPASS_URL, OverpassSource, UNREACHABLE_RETRY};
 pub use query::{BoundingBox, MINOR_WAY_MAX_CELL_M, overpass_query};
 
 use crate::Grid;

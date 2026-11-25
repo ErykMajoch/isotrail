@@ -9,11 +9,15 @@ repository.workspace = true
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-console_error_panic_hook.workspace = true
+[dependencies]
+isotrail-bundle = { path = "../isotrail-bundle" }
 isotrail-geo = { path = "../isotrail-geo" }
 isotrail-options = { path = "../isotrail-options" }
 isotrail-track = { path = "../isotrail-track" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook.workspace = true
+js-sys.workspace = true
 wasm-bindgen.workspace = true
 
 # `custom` is what wasm-pack reads for `--profile web`

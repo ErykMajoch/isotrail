@@ -8,10 +8,10 @@ use tracing::info;
 use crate::{
     DEFAULT_DETAIL, DemError, DemSource, FeatureSource, Fetcher, Footprint, FootprintOptions,
     GeoError, Grid, Heightmap, LandcoverMap, OSM_ATTRIBUTION, OVERPASS_URL, OpenMeteoSource,
-    OsmError, OsmFeatures, OverpassSource, Provenance, Request, RequestError, SeasonKind,
-    TERRARIUM_URL, TerrariumSource, WeatherError, WeatherRequest, WeatherServer, WeatherSource,
-    forced_season, ice_line, line_mask, origin, redact, retime, scene_bundle, snow_line,
-    snow_readings, untime,
+    OsmError, OsmFeatures, OverpassSource, Provenance, Request, RequestError, RetryPolicy,
+    SeasonKind, TERRARIUM_URL, TerrariumSource, WeatherError, WeatherRequest, WeatherServer,
+    WeatherSource, forced_season, ice_line, line_mask, origin, redact, retime, scene_bundle,
+    snow_line, snow_readings, untime,
 };
 
 /// What a scene is made with, besides the track
@@ -69,6 +69,9 @@ pub struct Fetchers<'a> {
     /// Elevation tiles and weather
     pub data: &'a dyn Fetcher,
     pub map_data: &'a dyn Fetcher,
+    /// False asks a busy Overpass once, for callers that wait between runs
+    /// themselves
+    pub waits: bool,
 }
 
 /// A stage of the pipeline, as it starts
@@ -162,10 +165,11 @@ pub fn prepare(
         .map_err(SceneError::Elevation)?;
     let features = if options.map_data {
         progress.step(Step::MapData);
-        let features = OverpassSource::new(fetchers.map_data)
-            .endpoint(&options.overpass_url)
-            .features(&grid)
-            .map_err(SceneError::MapData)?;
+        let mut source = OverpassSource::new(fetchers.map_data).endpoint(&options.overpass_url);
+        if !fetchers.waits {
+            source = source.retry(RetryPolicy::once(), RetryPolicy::once());
+        }
+        let features = source.features(&grid).map_err(SceneError::MapData)?;
         for (tag, count) in features.counts() {
             info!("{count:>6}  {tag}");
         }
@@ -264,6 +268,18 @@ pub fn requests(
     options: &SceneOptions,
     now: i64,
 ) -> Result<Vec<Request>, SceneError> {
+    plan(track, options, now).map(|plan| plan.requests)
+}
+
+/// What [`prepare`] fetches first and the grid it fetches for
+#[derive(Debug, Clone)]
+pub struct Plan {
+    pub requests: Vec<Request>,
+    pub grid: Grid,
+}
+
+/// [`requests`] with the grid they cover
+pub fn plan(track: &Track, options: &SceneOptions, now: i64) -> Result<Plan, SceneError> {
     let (trimmed, grid) = slab(track, options)?;
     let mut requests: Vec<Request> = TerrariumSource::<&dyn Fetcher>::tiles(&grid)
         .into_iter()
@@ -287,7 +303,7 @@ pub fn requests(
         let urls = options.weather_server.first_urls(&request);
         requests.extend(urls.into_iter().map(Request::get));
     }
-    Ok(requests)
+    Ok(Plan { requests, grid })
 }
 
 /// The kept part of the track and the grid around it

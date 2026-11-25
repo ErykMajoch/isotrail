@@ -2,8 +2,14 @@
 //! browser worker. The page fetches what the elevation, map and weather
 //! services answer, and the scene is built from those answers
 
+mod build;
 #[cfg(target_arch = "wasm32")]
 mod builder;
+mod servers;
 
+pub use build::{
+    Builder, Failure, Kind, MAP_DATA_BUSY_WAITS, MAX_MAP_DATA_KM2, Outcome, Wait, waits,
+};
 #[cfg(target_arch = "wasm32")]
-pub use builder::{SceneBuilder, Wanted, load_timezones};
+pub use builder::{SceneBuilder, Wanted, load_timezones, offline};
+pub use servers::{SERVER_NAMES, VK_MAPS_URL, map_data_servers, server_name};

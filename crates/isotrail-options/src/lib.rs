@@ -14,6 +14,7 @@ pub mod overlay;
 pub mod scene;
 mod settings;
 pub mod theme;
+mod words;
 
 use std::collections::HashSet;
 use std::fmt;
@@ -26,11 +27,12 @@ use isotrail_track::Units;
 
 pub use describe::{Kind, OptionInfo, Output, describe};
 #[cfg(not(target_arch = "wasm32"))]
-pub use files::{file_problem, io_words, plain, read_named, read_text};
+pub use files::{file_problem, io_words, read_named, read_text};
 pub use settings::{
     NOT_SETTINGS, Settings, bad_value, clock_time, conflicting, flag, long_name, not_both,
     reason_alone, same_setting, setting, unknown,
 };
+pub use words::plain;
 
 use crate::animation::AnimationArgs;
 use crate::data::DataArgs;

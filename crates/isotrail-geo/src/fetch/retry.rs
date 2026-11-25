@@ -1,5 +1,14 @@
 use std::time::Duration;
 
+/// Why a failed request is worth trying again
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Retry {
+    /// The server answered with a busy status, slowly or not in full
+    Busy,
+    /// Nothing answered at all: no server at that address, or no network
+    Unreachable,
+}
+
 /// How often and how patiently to retry rate-limited or failing requests
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RetryPolicy {

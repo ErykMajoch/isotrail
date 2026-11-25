@@ -321,33 +321,13 @@ fn check_input(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// A picture or a video by its first bytes, whatever its name: a bundle
-/// may be called hike.png
+/// A picture or a video by its first bytes, whatever its name
 fn media(path: &Path) -> Option<&'static str> {
     let mut start = [0u8; 12];
     let read = fs::File::open(path)
         .and_then(|mut file| file.read(&mut start))
         .ok()?;
-    let start = &start[..read];
-    let image = start.starts_with(&[0x89, b'P', b'N', b'G'])
-        || start.starts_with(&[0xff, 0xd8, 0xff])
-        || start.starts_with(b"GIF8")
-        || (start.starts_with(b"RIFF") && start.get(8..12) == Some(b"WEBP"));
-    if image {
-        return Some("an image");
-    }
-    // MP4, MOV and HEIC files open with an ftyp box naming their brand
-    if start.get(4..8) == Some(b"ftyp") {
-        let still = matches!(
-            start.get(8..12),
-            Some(b"heic" | b"heix" | b"mif1" | b"avif")
-        );
-        return Some(if still { "an image" } else { "a video" });
-    }
-    // WebM and Matroska
-    start
-        .starts_with(&[0x1a, 0x45, 0xdf, 0xa3])
-        .then_some("a video")
+    isotrail_track::media_kind(&start[..read])
 }
 
 fn read_track(path: &Path) -> anyhow::Result<Track> {

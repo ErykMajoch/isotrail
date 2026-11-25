@@ -1,13 +1,8 @@
-use std::fmt::Display;
-use std::path::Path;
-
-use isotrail_geo::{
-    Answer, Fetchers, Progress, ReplayFetcher, Request, RequestFailure, SceneOptions, Warning,
-    prepare, requests,
-};
-use isotrail_options::Settings;
-use isotrail_track::{GpxReader, Track, TrackReader};
+use isotrail_geo::{Answer, Request, RequestFailure, Retry};
+use js_sys::{Object, Reflect};
 use wasm_bindgen::prelude::*;
+
+use crate::{Builder, Failure, Kind, Outcome, Wait};
 
 /// Reads the time zone boundaries, tzf-dist's `lite.tzb`. Every build needs
 /// them, since the zone sets the hike's date
@@ -18,10 +13,18 @@ pub fn load_timezones(tzb: &[u8]) -> Result<(), JsError> {
         .map_err(|error| JsError::new(&format!("can't read the time zones: {error}")))
 }
 
+/// The failure for a page with no network, as an `Error` with a `reason`
+#[wasm_bindgen]
+pub fn offline() -> JsValue {
+    thrown(Failure::offline())
+}
+
 /// A request whose answer the build needs
 #[wasm_bindgen]
 pub struct Wanted {
     request: Request,
+    kind: Kind,
+    aliases: Vec<String>,
 }
 
 #[wasm_bindgen]
@@ -47,23 +50,30 @@ impl Wanted {
     pub fn body(&self) -> Option<Vec<u8>> {
         self.request.body.clone()
     }
+
+    /// `elevation`, `map-data` or `weather`
+    #[wasm_bindgen(getter)]
+    pub fn kind(&self) -> String {
+        self.kind.name().to_owned()
+    }
+
+    /// For map data, the keys of the same request at the other Overpass
+    /// servers. An answer kept under one of them can be held under it instead
+    #[wasm_bindgen(getter)]
+    pub fn aliases(&self) -> Vec<String> {
+        self.aliases.clone()
+    }
 }
 
 /// Builds a scene file from a GPX file, as `isotrail bundle` does. The
 /// answers come from the page: `requests` lists what to fetch first, and
-/// `build` either makes the scene or lists in `missing` what it still needs
+/// `build` either makes the scene, or lists in `missing` what it still
+/// needs, after the pause in `wait` when answers failed. Failures are thrown
+/// as an `Error` with a `reason`
 #[wasm_bindgen]
 pub struct SceneBuilder {
-    track: Track,
-    /// From the file, as the scene is built with it
-    file_title: String,
-    title: Option<String>,
-    exaggeration: Option<f64>,
-    options: SceneOptions,
-    now: i64,
-    replay: ReplayFetcher,
-    missing: Vec<Request>,
-    warnings: Vec<String>,
+    builder: Builder,
+    wait: Option<Wait>,
 }
 
 #[wasm_bindgen]
@@ -73,131 +83,141 @@ impl SceneBuilder {
     /// flag names of `isotrail render`, such as `{"times": "coarse"}`. `now`
     /// is in seconds since 1970 and picks the weather's archive or forecast
     #[wasm_bindgen(constructor)]
-    pub fn new(gpx: &[u8], name: &str, options: &str, now: f64) -> Result<SceneBuilder, JsError> {
+    pub fn new(gpx: &[u8], name: &str, options: &str, now: f64) -> Result<SceneBuilder, JsValue> {
         console_error_panic_hook::set_once();
         if !isotrail_track::timezones_loaded() {
-            return Err(JsError::new(
-                "the time zones aren't loaded: call loadTimezones first",
-            ));
+            return Err(
+                JsError::new("the time zones aren't loaded: call loadTimezones first").into(),
+            );
         }
-        let render = Settings::from_json(options, "the options")
-            .and_then(|settings| settings.options())
-            .map_err(error)?;
-        if render.data.offline {
-            return Err(JsError::new(
-                "offline in the options: a page has no cache folder to build from",
-            ));
-        }
-        if render.data.cache_dir.get().is_some() {
-            return Err(JsError::new(
-                "cache-dir in the options: a page has no cache folder",
-            ));
-        }
-        let track = GpxReader.parse(gpx).and_then(Track::clean).map_err(error)?;
+        let builder = Builder::new(gpx, name, options, now as i64).map_err(thrown)?;
         Ok(SceneBuilder {
-            file_title: track.title(Path::new(name)),
-            title: render.overlay.given_title().map(str::to_owned),
-            exaggeration: render.exaggeration,
-            options: render.data.options(None),
-            track,
-            now: now as i64,
-            replay: ReplayFetcher::new(),
-            missing: Vec::new(),
-            warnings: Vec::new(),
+            builder,
+            wait: None,
         })
+    }
+
+    /// Asks these Overpass servers in turn for the map data, in place of the
+    /// built-in ones, unless the options name their own. Call it before
+    /// `requests`
+    #[wasm_bindgen(js_name = useServers)]
+    pub fn use_servers(&mut self, servers: Vec<String>) {
+        self.builder.use_servers(servers);
+    }
+
+    /// Leaves out the built-in Overpass servers with these names: `dresel`,
+    /// `vk-maps` or `overpass-api`. Call it before `requests`. Throws with the
+    /// reason `no-server` when none is left to ask for map data
+    #[wasm_bindgen(js_name = skipServers)]
+    pub fn skip_servers(&mut self, skip: Vec<String>) -> Result<(), JsValue> {
+        self.builder.skip_servers(&skip).map_err(thrown)
+    }
+
+    /// The Overpass server the map data is asked of now
+    #[wasm_bindgen(getter)]
+    pub fn server(&self) -> String {
+        self.builder.server().to_owned()
     }
 
     /// What the build asks for first and isn't held yet, so it can all be
     /// fetched at once
-    pub fn requests(&self) -> Result<Vec<Wanted>, JsError> {
-        let all = requests(&self.track, &self.options, self.now).map_err(error)?;
-        Ok(all
-            .into_iter()
-            .filter(|request| !self.replay.holds(request))
-            .map(|request| Wanted { request })
-            .collect())
+    pub fn requests(&self) -> Vec<Wanted> {
+        self.wanted(self.builder.requests())
     }
 
     /// Holds the answer to the request with this key: its HTTP status and body
-    pub fn hold(&self, key: String, status: u16, body: Vec<u8>) {
+    pub fn hold(&mut self, key: String, status: u16, body: Vec<u8>) {
         let answer = if (200..300).contains(&status) {
             Answer::Body(body)
         } else {
             Answer::Status { status, body }
         };
-        self.replay.hold(key, answer);
+        self.builder.hold(key, answer);
     }
 
     /// Holds a request that got no answer at all
-    pub fn failed(&self, key: String, message: String, timed_out: bool) {
+    pub fn failed(&mut self, key: String, message: String, timed_out: bool) {
         let failure = RequestFailure { message, timed_out };
-        self.replay.hold(key, Answer::Failed(failure));
+        self.builder.hold(key, Answer::Failed(failure));
     }
 
-    /// The scene file's bytes, or nothing while an answer is missing
-    pub fn build(&mut self) -> Result<Option<Vec<u8>>, JsError> {
-        let mut heard = Heard::default();
-        let fetchers = Fetchers {
-            data: &self.replay,
-            map_data: &self.replay,
-        };
-        let built = prepare(
-            &self.track,
-            &self.file_title,
-            &self.options,
-            fetchers,
-            self.now,
-            &mut heard,
-        );
-        self.missing = self.replay.take_missed();
-        if !self.missing.is_empty() {
-            return Ok(None);
+    /// The scene file's bytes, or nothing while answers are missing
+    pub fn build(&mut self) -> Result<Option<Vec<u8>>, JsValue> {
+        self.wait = None;
+        match self.builder.build().map_err(thrown)? {
+            Outcome::Scene(bytes) => Ok(Some(bytes)),
+            Outcome::Missing => Ok(None),
+            Outcome::Wait(wait) => {
+                self.wait = Some(wait);
+                Ok(None)
+            }
         }
-        let mut bundle = built.map_err(error)?.bundle;
-        if let Some(exaggeration) = self.exaggeration {
-            bundle.grid.exaggeration = exaggeration;
-        }
-        if let Some(title) = &self.title {
-            bundle.meta.title.clone_from(title);
-        }
-        self.warnings = heard.0;
-        bundle.to_bytes().map(Some).map_err(error)
     }
 
     /// The requests the last build stopped at
     #[wasm_bindgen(getter)]
     pub fn missing(&self) -> Vec<Wanted> {
-        self.missing
-            .iter()
-            .map(|request| Wanted {
-                request: request.clone(),
-            })
-            .collect()
+        self.wanted(self.builder.missing().to_vec())
+    }
+
+    /// The pause to make before fetching `missing`, when the last build
+    /// stopped at answers that failed: `{ kind, why, attempt, attempts, ms }`,
+    /// with `why` `busy` or `unreachable`
+    #[wasm_bindgen(getter)]
+    pub fn wait(&self) -> JsValue {
+        let Some(wait) = self.wait else {
+            return JsValue::UNDEFINED;
+        };
+        let why = match wait.retry {
+            Retry::Busy => "busy",
+            Retry::Unreachable => "unreachable",
+        };
+        object(&[
+            ("kind", wait.kind.name().into()),
+            ("why", why.into()),
+            ("attempt", (wait.attempt as u32).into()),
+            ("attempts", (wait.attempts as u32).into()),
+            ("ms", (wait.delay.as_millis() as f64).into()),
+        ])
     }
 
     /// What the scene left out, by name, such as `weather`
     #[wasm_bindgen(getter)]
     pub fn warnings(&self) -> Vec<String> {
-        self.warnings.clone()
+        self.builder.warnings().to_vec()
+    }
+
+    /// The keys whose answers the last build threw away, as unusable or
+    /// failed, so the page drops any copy it keeps
+    #[wasm_bindgen(getter)]
+    pub fn dropped(&self) -> Vec<String> {
+        self.builder.dropped().to_vec()
     }
 }
 
-#[derive(Default)]
-struct Heard(Vec<String>);
-
-impl Progress for Heard {
-    fn warn(&mut self, warning: Warning) {
-        let name = match warning {
-            Warning::MapDataSkipped => "map-data-skipped",
-            Warning::TimesLeftOut => "times-left-out",
-            Warning::NoWeatherRequest(_) => "no-weather-request",
-            Warning::Weather(_) => "weather",
-            Warning::DaysBefore(_) => "days-before",
-        };
-        self.0.push(name.to_owned());
+impl SceneBuilder {
+    fn wanted(&self, requests: Vec<Request>) -> Vec<Wanted> {
+        requests
+            .into_iter()
+            .map(|request| Wanted {
+                kind: self.builder.kind(&request),
+                aliases: self.builder.aliases(&request),
+                request,
+            })
+            .collect()
     }
 }
 
-fn error(error: impl Display) -> JsError {
-    JsError::new(&format!("{error:#}"))
+fn thrown(failure: Failure) -> JsValue {
+    let error = js_sys::Error::new(&failure.message);
+    let _ = Reflect::set(&error, &"reason".into(), &failure.reason.into());
+    error.into()
+}
+
+fn object(fields: &[(&str, JsValue)]) -> JsValue {
+    let object = Object::new();
+    for (name, value) in fields {
+        let _ = Reflect::set(&object, &(*name).into(), value);
+    }
+    object.into()
 }

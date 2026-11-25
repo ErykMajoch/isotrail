@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 #[cfg(target_arch = "wasm32")]
 use super::RequestFailure;
-use super::{ERROR_BODY_BYTES, FetchError, Fetcher, cache_key};
+use super::{ERROR_BODY_BYTES, FetchError, Fetcher, Retry, cache_key};
 
 /// A request as the pipeline makes it
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -64,6 +64,7 @@ pub enum Answer {
 pub struct ReplayFetcher {
     held: RefCell<HashMap<String, Answer>>,
     missed: RefCell<Vec<Request>>,
+    failed: RefCell<Vec<(Request, Retry)>>,
     forgotten: RefCell<HashSet<String>>,
 }
 
@@ -86,28 +87,46 @@ impl ReplayFetcher {
         std::mem::take(&mut *self.missed.borrow_mut())
     }
 
+    /// The requests answered since the last call with a failure that trying
+    /// again may mend, each once, and why
+    pub fn take_failed(&self) -> Vec<(Request, Retry)> {
+        std::mem::take(&mut *self.failed.borrow_mut())
+    }
+
+    /// Lets go of an answer, so the next run asks for it again
+    pub fn drop_answer(&self, key: &str) {
+        self.held.borrow_mut().remove(key);
+    }
+
     fn answer(&self, request: Request) -> Result<Vec<u8>, FetchError> {
         let key = request.key();
         let url = request.url.clone();
-        match self.held.borrow().get(&key) {
+        let error = match self.held.borrow().get(&key) {
             Some(Answer::Body(body)) => return Ok(body.clone()),
             Some(Answer::Status { status, body }) => {
                 let kept = body.len().min(ERROR_BODY_BYTES as usize);
-                return Err(FetchError::Status {
-                    url,
+                Some(FetchError::Status {
+                    url: url.clone(),
                     status: *status,
                     retry_after: None,
                     body: body[..kept].to_vec(),
-                });
+                })
             }
             #[cfg(target_arch = "wasm32")]
-            Some(Answer::Failed(failure)) => {
-                return Err(FetchError::Network {
-                    url,
-                    source: failure.clone(),
-                });
+            Some(Answer::Failed(failure)) => Some(FetchError::Network {
+                url: url.clone(),
+                source: failure.clone(),
+            }),
+            None => None,
+        };
+        if let Some(error) = error {
+            if let Some(retry) = error.retry() {
+                let mut failed = self.failed.borrow_mut();
+                if !failed.iter().any(|(seen, _)| *seen == request) {
+                    failed.push((request, retry));
+                }
             }
-            None => {}
+            return Err(error);
         }
         let mut missed = self.missed.borrow_mut();
         if !missed.contains(&request) {
@@ -192,6 +211,34 @@ mod tests {
             other => panic!("{other:?}"),
         }
         assert!(replay.take_missed().is_empty());
+    }
+
+    #[test]
+    fn failures_worth_another_try_are_noted_once() {
+        let replay = ReplayFetcher::new();
+        let busy = Request::post(URL, b"q".to_vec());
+        let missing = Request::get("https://example.org/missing.png");
+        replay.hold(
+            busy.key(),
+            Answer::Status {
+                status: 502,
+                body: Vec::new(),
+            },
+        );
+        replay.hold(
+            missing.key(),
+            Answer::Status {
+                status: 404,
+                body: Vec::new(),
+            },
+        );
+        assert!(replay.post(URL, b"q").is_err());
+        assert!(replay.post(URL, b"q").is_err());
+        assert!(replay.get(&missing.url).is_err());
+        assert_eq!(replay.take_failed(), [(busy.clone(), Retry::Busy)]);
+        assert!(replay.take_failed().is_empty());
+        replay.drop_answer(&busy.key());
+        assert!(!replay.holds(&busy));
     }
 
     #[test]

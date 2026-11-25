@@ -23,7 +23,7 @@ pub use http::{HttpFetcher, MAX_RESPONSE_BYTES, USER_AGENT};
 #[cfg(not(target_arch = "wasm32"))]
 pub use recorded::RecordedFetcher;
 pub use replay::{Answer, ReplayFetcher, Request};
-pub use retry::RetryPolicy;
+pub use retry::{Retry, RetryPolicy};
 
 /// How much of an error answer is kept, which is enough for the reason it gives
 const ERROR_BODY_BYTES: u64 = 4096;

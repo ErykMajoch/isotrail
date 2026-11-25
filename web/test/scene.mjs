@@ -5,13 +5,14 @@
 // Needs what check.mjs needs, and the scene worker built into web/scene/pkg
 // (sh web/build-scene.sh). A local server plays the elevation, map and
 // weather services from the recordings in fixtures/, and `isotrail bundle`
-// builds each scene from the same server for comparison. Exits with 1 if any
-// check fails
+// builds each scene from the same server for comparison. The server can also
+// be busy, hold an answer back or stop answering, for the cache, the waits,
+// cancel and the failures. Exits with 1 if any check fails
 
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { extname, join, normalize } from 'node:path';
@@ -60,7 +61,14 @@ const TYPES = {
 };
 
 const seen = [];
+// `services` false stops every service answering. `overpass` 'busy' answers
+// the next map data request with HTTP 502, and 'hold' keeps it waiting
+const mode = { services: true, overpass: 'normal' };
+let open = 0;
+let held = 0;
 const server = createServer(async (req, res) => {
+  open++;
+  res.on('close', () => open--);
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
   const body = Buffer.concat(chunks);
@@ -68,6 +76,32 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   const path = decodeURIComponent(url.pathname);
   const query = url.search.slice(1);
+  if (!path.startsWith('/web/')) {
+    if (!mode.services) {
+      req.socket.destroy();
+      return;
+    }
+    // Overpass servers for the page's own list: one always busy, one that
+    // answers with nothing
+    if (path.startsWith('/busy/')) {
+      res.writeHead(502, { 'content-type': 'text/plain' }).end('busy');
+      return;
+    }
+    if (path.startsWith('/empty/')) {
+      res.writeHead(200, { 'content-type': 'application/json' }).end('{"elements":[]}');
+      return;
+    }
+    if (path.startsWith('/overpass/') && mode.overpass === 'busy') {
+      mode.overpass = 'normal';
+      res.writeHead(502, { 'content-type': 'text/plain' }).end('busy');
+      return;
+    }
+    if (path.startsWith('/overpass/') && mode.overpass === 'hold') {
+      held++;
+      res.on('close', () => held--);
+      return;
+    }
+  }
   let file;
   let tile;
   if (path.startsWith('/web/')) {
@@ -97,6 +131,12 @@ const SERVERS = {
   'overpass-url': `${ORIGIN}/overpass/api/interpreter`,
   'weather-url': `${ORIGIN}/weather`,
 };
+
+// A port nothing listens on, from a server closed at once
+const unused = createServer();
+await new Promise((resolve) => unused.listen(0, '127.0.0.1', resolve));
+const CLOSED = unused.address().port;
+await new Promise((resolve) => unused.close(resolve));
 
 // Each case as flags for `isotrail bundle` and as the page's JSON options
 const CASES = [
@@ -163,35 +203,61 @@ await cdp.send('Network.enable');
 await cdp.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
 await cdp.send('Emulation.setDeviceMetricsOverride', VIEWPORT);
 
+async function page() {
+  await cdp.send('Page.navigate', { url: `${ORIGIN}/web/test/scene.html` });
+  await cdp.waitFor("document.readyState === 'complete' && window.__scene?.state === 'idle' && !!window.__scenes");
+}
+
+// Builds `file` on the test page with these options and says how it went
+//
+// `during` runs once the build has started
+async function build(file, options, { clear = false, during } = {}) {
+  if (clear) await cdp.evaluate('window.__scenes.clearCache()');
+  asked.length = 0;
+  seen.length = 0;
+  await cdp.evaluate(`document.getElementById('options').value = ${JSON.stringify(JSON.stringify(options))}`);
+  const { result } = await cdp.send('Runtime.evaluate', { expression: "document.getElementById('file')" });
+  const started = Date.now();
+  await cdp.send('DOM.setFileInputFiles', { files: [file], objectId: result.objectId });
+  if (during) {
+    await cdp.waitFor("window.__scene.state === 'building'", 5000);
+    await during();
+  }
+  await cdp.waitFor("['built', 'failed', 'cancelled'].includes(window.__scene.state)");
+  const wall = Date.now() - started;
+  const outcome = await cdp.evaluate(`(() => {
+    const { scene, ...rest } = window.__scene;
+    let text = '';
+    for (let i = 0; scene && i < scene.length; i += 0x8000) text += String.fromCharCode(...scene.subarray(i, i + 0x8000));
+    return { ...rest, scene: btoa(text) };
+  })()`);
+  const services = seen.filter(({ url }) => !url.startsWith('/web/'));
+  return { ...outcome, scene: Buffer.from(outcome.scene ?? '', 'base64'), wall, services };
+}
+
 const results = [];
+const row = (name, outcome) => ({
+  name,
+  bytes: outcome.scene.length,
+  gzipped: gzipSync(outcome.scene, { level: 9 }).length,
+  passes: outcome.passes,
+  worker_ms: Math.round(outcome.ms),
+  wall_ms: outcome.wall,
+  warnings: outcome.warnings ?? [],
+  requests: outcome.services.length,
+});
 try {
   for (const [index, { name, flags, options }] of CASES.entries()) {
     const expected = await bundle(index, flags);
-    asked.length = 0;
-    seen.length = 0;
-    await cdp.send('Page.navigate', { url: `${ORIGIN}/web/test/scene.html` });
-    await cdp.waitFor("document.readyState === 'complete' && window.__scene?.state === 'idle'");
-    const json = JSON.stringify({ detail: 32, ...SERVERS, ...options });
-    await cdp.evaluate(`document.getElementById('options').value = ${JSON.stringify(json)}`);
-    const { result } = await cdp.send('Runtime.evaluate', { expression: "document.getElementById('file')" });
-    const started = Date.now();
-    await cdp.send('DOM.setFileInputFiles', { files: [GPX], objectId: result.objectId });
-    await cdp.waitFor("['built', 'failed'].includes(window.__scene.state)");
-    const wall = Date.now() - started;
-    const outcome = await cdp.evaluate(`(() => {
-      const { state, error, warnings, passes, ms, scene } = window.__scene;
-      let text = '';
-      for (let i = 0; scene && i < scene.length; i += 0x8000) text += String.fromCharCode(...scene.subarray(i, i + 0x8000));
-      return { state, error, warnings, passes, ms, scene: btoa(text) };
-    })()`);
-    const scene = Buffer.from(outcome.scene ?? '', 'base64');
+    await page();
+    const outcome = await build(GPX, { detail: 32, ...SERVERS, ...options }, { clear: true });
+    const { scene, services } = outcome;
     check(`${name}: the scene is built`, outcome.state === 'built', outcome.error);
     check(`${name}: it is byte for byte the one isotrail bundle makes`, scene.equals(expected), `${scene.length} against ${expected.length} bytes`);
     const ready = await cdp.waitFor("document.getElementById('hike').dataset.state === 'ready'");
     check(`${name}: the element shows it`, ready, await cdp.evaluate("document.getElementById('hike').dataset.state"));
     const elsewhere = asked.filter(({ url }) => !url.startsWith(`${ORIGIN}/`) && !/^(blob|data):/.test(url));
     check(`${name}: no request leaves for anywhere but the local server`, elsewhere.length === 0, elsewhere.map((r) => r.url).join(', '));
-    const services = seen.filter(({ url }) => !url.startsWith('/web/'));
     check(`${name}: the services were asked`, services.length > 0);
     const decoded = (text) => {
       try {
@@ -205,13 +271,121 @@ try {
       return MARKERS.some((marker) => text.includes(marker));
     });
     check(`${name}: no request holds the GPX`, giving.length === 0, giving.map((r) => r.url).join(', '));
-    results.push({ name, bytes: scene.length, gzipped: gzipSync(scene, { level: 9 }).length, passes: outcome.passes, worker_ms: Math.round(outcome.ms), wall_ms: wall, warnings: outcome.warnings, requests: services.length });
+    results.push(row(name, outcome));
   }
+
+  const OPTIONS = { detail: 32, ...SERVERS };
+  const expected = await bundle(CASES.length, []);
+  await page();
+
+  // The cache, cold then warm
+  const cold = await build(GPX, OPTIONS, { clear: true });
+  check('cold: the scene is built', cold.state === 'built' && cold.scene.equals(expected), cold.error);
+  const tiles = cold.services.filter(({ url }) => url.startsWith('/terrain/')).length;
+  const counts = cold.events.filter((e) => e.type === 'progress' && e.step === 'elevation');
+  const last = counts.at(-1);
+  check('cold: progress counts the tiles up to their number', tiles > 0 && last?.done === tiles && last?.total === tiles && counts.some((e) => e.done === 1), JSON.stringify(last));
+  check('cold: progress names every step', ['elevation', 'map-data', 'weather', 'building'].every((step) => cold.events.some((e) => e.type === 'progress' && e.step === step)));
+  const cache = await cdp.evaluate('window.__scenes.cacheSize()');
+  check('cold: the answers are kept in the cache', cache.entries === cold.fetched && cache.bytes > 0, JSON.stringify(cache));
+  const warm = await build(GPX, OPTIONS);
+  check('warm: a second build makes no request', warm.state === 'built' && warm.services.length === 0, warm.services.map((r) => r.url).join(', '));
+  check('warm: it is the same scene', warm.scene.equals(expected));
+  results.push(row('cold', cold), row('warm', warm));
+
+  // The services stopped after the first build
+  mode.services = false;
+  const stopped = await build(GPX, OPTIONS);
+  mode.services = true;
+  check('services stopped: the cache still builds the scene', stopped.state === 'built' && stopped.scene.equals(expected), stopped.error);
+
+  // A busy Overpass, once
+  mode.overpass = 'busy';
+  const busy = await build(GPX, OPTIONS, { clear: true });
+  const wait = busy.events.find((e) => e.type === 'wait');
+  check('busy: the wait is told', wait?.kind === 'map-data' && wait.why === 'busy' && wait.attempt === 2 && wait.attempts === 3, JSON.stringify(wait));
+  check('busy: the wait is 5s', wait && Math.abs(wait.until - wait.at - 5000) < 500);
+  check('busy: then the scene is built', busy.state === 'built' && busy.scene.equals(expected), busy.error);
+  check('busy: it took the wait', busy.wall >= 5000, `${busy.wall}ms`);
+  results.push(row('busy once', busy));
+
+  // The page's own list of Overpass servers, the first busy or empty
+  const { 'overpass-url': _, ...LISTED } = OPTIONS;
+  for (const first of ['busy', 'empty']) {
+    await cdp.evaluate(`window.__servers = ['${ORIGIN}/${first}/api/interpreter', '${ORIGIN}/overpass/api/interpreter']`);
+    const handed = await build(GPX, LISTED, { clear: true });
+    const asked = (prefix) => handed.services.filter(({ url }) => url.startsWith(prefix)).length;
+    check(`servers, ${first} first: the next one gives the scene`, handed.state === 'built' && handed.scene.equals(expected), handed.error);
+    check(`servers, ${first} first: at once, each asked once`, !handed.events.some((e) => e.type === 'wait') && asked(`/${first}/`) === 1 && asked('/overpass/') === 1);
+    check(`servers, ${first} first: progress names the server`, handed.events.some((e) => e.type === 'progress' && e.step === 'map-data' && e.server === new URL(ORIGIN).host));
+    const kept = await build(GPX, LISTED);
+    check(`servers, ${first} first: a second build asks nothing`, kept.state === 'built' && kept.services.length === 0 && kept.scene.equals(expected), kept.services.map((r) => r.url).join(', '));
+  }
+  await cdp.evaluate('window.__servers = undefined');
+
+  // Built-in servers left out by name: all of them, then one that doesn't exist
+  await cdp.evaluate("window.__skip = ['dresel', 'vk-maps', 'overpass-api']");
+  const none = await build(GPX, LISTED);
+  check('skip all: refused as no server', none.state === 'failed' && none.reason === 'no-server', `${none.reason}: ${none.error}`);
+  check('skip all: before any request', none.services.length === 0 && !asked.some(({ url }) => /dresel|mail\.ru|overpass-api/.test(url)), none.services.map((r) => r.url).join(', '));
+  await cdp.evaluate("window.__skip = ['vk']");
+  const unknown = await build(GPX, LISTED);
+  check('skip an unknown name: a usage mistake', unknown.reason === 'usage' && unknown.error.includes('called vk'), `${unknown.reason}: ${unknown.error}`);
+  await cdp.evaluate('window.__skip = undefined');
+
+  // Overpass at an address where nothing answers
+  const unreachable = await build(GPX, { ...OPTIONS, 'overpass-url': `http://127.0.0.1:${CLOSED}/api/interpreter` });
+  check('unreachable: the build fails as unreachable', unreachable.state === 'failed' && unreachable.reason === 'unreachable', `${unreachable.reason}: ${unreachable.error}`);
+  check('unreachable: it names the server', unreachable.error?.startsWith(`could not reach http://127.0.0.1:${CLOSED}; `), unreachable.error);
+  check('unreachable: within 15s', unreachable.wall < 15000, `${unreachable.wall}ms`);
+
+  // A full storage quota
+  await cdp.send('Storage.overrideQuotaForOrigin', { origin: ORIGIN, quotaSize: 1 });
+  const full = await build(GPX, OPTIONS, { clear: true });
+  await cdp.send('Storage.overrideQuotaForOrigin', { origin: ORIGIN });
+  check('full quota: the scene is still built', full.state === 'built' && full.scene.equals(expected), full.error);
+  check('full quota: the answers it couldn\'t keep are counted', full.unsaved > 0, `${full.unsaved}`);
+
+  // Cancel while Overpass holds its answer back
+  mode.overpass = 'hold';
+  const cancelled = await build(GPX, OPTIONS, {
+    clear: true,
+    during: async () => {
+      for (let i = 0; i < 100 && held === 0; i++) await sleepFor(100);
+      check('cancel: the map data request was under way', held === 1, `${held}`);
+      await cdp.evaluate("document.getElementById('cancel').click()");
+    },
+  });
+  mode.overpass = 'normal';
+  check('cancel: the build says it was cancelled', cancelled.state === 'cancelled', cancelled.state);
+  for (let i = 0; i < 50 && open > 0; i++) await sleepFor(100);
+  check('cancel: no request is left running', held === 0 && open === 0, `${held} held, ${open} open`);
+
+  // Routes and files the page refuses
+  const long = join(temp, 'long.gpx');
+  const points = Array.from({ length: 11 }, (_, i) => `<trkpt lat="${(52 + (150 / 111.2) * i / 10).toFixed(6)}" lon="-1.5"><ele>200</ele></trkpt>`).join('');
+  await writeFile(long, `<?xml version="1.0"?><gpx version="1.1" creator="test"><trk><name>Long walk</name><trkseg>${points}</trkseg></trk></gpx>`);
+  const large = await build(long, OPTIONS);
+  check('too large: refused', large.state === 'failed' && large.reason === 'too-large', `${large.reason}: ${large.error}`);
+  check('too large: before any request', large.services.length === 0, large.services.map((r) => r.url).join(', '));
+  const picture = join(temp, 'photo.png');
+  await writeFile(picture, Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'));
+  const png = await build(picture, OPTIONS);
+  check('a picture: refused as input', png.reason === 'input' && png.error === 'photo.png is an image, not a GPX file', `${png.reason}: ${png.error}`);
+  const spot = join(temp, 'spot.gpx');
+  await writeFile(spot, '<gpx version="1.1"><trk><trkseg><trkpt lat="52" lon="-1.5"></trkpt><trkpt lat="52" lon="-1.5"></trkpt></trkseg></trk></gpx>');
+  const ground = await build(spot, { ...OPTIONS, padding: '0,0' });
+  check('one spot: refused as no ground', ground.reason === 'no-ground', `${ground.reason}: ${ground.error}`);
+  check('refusals: no service asked', [png, ground].every((r) => r.services.length === 0));
+  const after = await build(GPX, OPTIONS);
+  check('after them all: the page still builds', after.state === 'built' && after.scene.equals(expected), after.error);
+
   check('no script error on the page', cdp.exceptions.length === 0, cdp.exceptions.join(' | '));
 } catch (error) {
   check('the check ran to the end', false, error.stack ?? String(error));
 } finally {
   await quit(browser, cdp);
+  server.closeAllConnections();
   server.close();
   await sleepFor(500);
   await rm(browser.profile, { recursive: true, force: true, maxRetries: 5 }).catch(() => {});

@@ -74,6 +74,7 @@ fn build(options: &SceneOptions) -> (Result<Prepared, SceneError>, Heard) {
     let fetchers = Fetchers {
         data: &data,
         map_data: &map_data,
+        waits: true,
     };
     let mut heard = Heard::default();
     let built = prepare(&snowdon(), "Snowdon", options, fetchers, LATER, &mut heard);
@@ -208,6 +209,7 @@ fn the_plan_is_what_a_build_asks_for() {
                 inner: &osm,
                 asked: &asked,
             },
+            waits: true,
         };
         prepare(
             &snowdon(),
@@ -254,6 +256,7 @@ fn replayed_answers_build_the_same_scene() {
         let fetchers = Fetchers {
             data: &replay,
             map_data: &replay,
+            waits: true,
         };
         let replayed = prepare(
             &snowdon(),
@@ -280,6 +283,7 @@ fn without_the_plan_a_replay_stops_at_each_missing_tile() {
     let fetchers = Fetchers {
         data: &replay,
         map_data: &replay,
+        waits: true,
     };
     let built = prepare(
         &snowdon(),
@@ -311,6 +315,7 @@ fn missing_elevation_is_an_elevation_error() {
     let fetchers = Fetchers {
         data: &nothing,
         map_data: &nothing,
+        waits: true,
     };
     let built = prepare(
         &snowdon(),

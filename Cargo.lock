@@ -1276,9 +1276,11 @@ name = "isotrail-scene"
 version = "1.5.1"
 dependencies = [
  "console_error_panic_hook",
+ "isotrail-bundle",
  "isotrail-geo",
  "isotrail-options",
  "isotrail-track",
+ "js-sys",
  "wasm-bindgen",
 ]
 
