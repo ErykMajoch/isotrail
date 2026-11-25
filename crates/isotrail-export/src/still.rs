@@ -6,9 +6,6 @@ use isotrail_render::{
 
 use crate::ExportError;
 
-/// Output pixels per internal pixel
-pub const DEFAULT_SCALE: u32 = 3;
-
 /// Renders the bundle's diorama and its whole route at the framing's internal
 /// resolution, seen as `aim` sets, lit by `sun` and finished with `look`
 pub fn render_still(

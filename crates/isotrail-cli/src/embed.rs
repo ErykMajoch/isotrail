@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, bail};
 use clap::Args;
 use isotrail_bundle::SceneBundle;
-use isotrail_export::{DEFAULT_SCALE, encode_png, upscale};
+use isotrail_export::{DEFAULT_SCALE, Still, encode_png};
 use isotrail_render::{Aim, Aspect, Gpu, PITCH_DEG, credit_line};
 use tracing::warn;
 
@@ -249,16 +249,15 @@ pub fn run(args: &EmbedArgs, typed: &Typed) -> anyhow::Result<()> {
         report.add(Written::file(&bundle_path));
     }
 
-    let poster = crate::render::still(
-        &Gpu::headless()?,
-        &bundle,
-        mesher.as_ref(),
-        &fitted.overlays,
-        &aim,
-        &sun,
-        &look,
-    )?;
-    let poster = upscale(&poster, args.scale)?;
+    let poster = Still {
+        bundle: &bundle,
+        mesher: mesher.as_ref(),
+        overlays: &fitted.overlays,
+        aim: &aim,
+        sun: &sun,
+        look: &look,
+    }
+    .render(&Gpu::headless()?, args.scale)?;
     output::write(&poster_path, |file| Ok(encode_png(&poster, file)?))?;
     report.wrote(Written::image(
         &poster_path,

@@ -40,6 +40,7 @@ mod mesh;
 mod occlusion;
 mod options;
 mod overlay;
+mod overlay_options;
 mod palette;
 mod post;
 mod present;
@@ -81,7 +82,10 @@ pub use options::{
 pub use overlay::{
     DEFAULT_STATS, DateFormat, FitStep, Fitted, Layout, OverlayStyle, OverlayText, OverlayTheme,
     Overlays, OverlaysDontFit, PANEL_TINT, PanelStyle, SUBTEXT, Stat, StatKind, Subtitle, TEXT,
-    TEXT_SHADOW, TitleSize, WEATHER_CREDIT, credit_line, format_date,
+    TEXT_SHADOW, TitleSize, WEATHER_CREDIT, credit_line, data_credit, format_date,
+};
+pub use overlay_options::{
+    Composed, DontFit, OverlayOptions, OverlayPart, TextError, TextPart, TextWarning,
 };
 pub use palette::{DEFAULT_PALETTE, MAX_COLOURS, Palette, PaletteError, srgb_to_oklab};
 pub use post::{

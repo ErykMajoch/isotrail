@@ -2,15 +2,16 @@ use isotrail_bundle::{
     MoonSample, SceneBundle, Season, SunSample, Units, Weather, WeatherDataset, WeatherSample,
 };
 use isotrail_export::{
-    ExportError, GifOptions, GifWriter, Plays, render_clip, render_still, upscale,
+    Caption, ExportError, GifOptions, GifWriter, Plays, Still, finished_clip, render_clip,
+    render_still, upscale,
 };
 use isotrail_render::{
     Aim, Aspect, Background, Canvas, Conditions, DEFAULT_PALETTE, DEFAULT_STATS, DateFormat,
-    Diorama, Edges, Frame, Framing, GodRays, Gpu, HiddenRoute, LIVE_SAFE_AREA, Look, MAX_ZOOM,
-    Markers, Mesher, Motion, OffscreenTarget, Orbit, OverlayStyle, OverlayText, Overlays, Pace,
-    Palette, PixelGrid, RouteStyle, Shaped, SmoothMesher, StatKind, SunState, Terrain,
-    TerrainRenderer, Theme, Timeline, View, VoxelMesher, Walk, WeatherEffects, When,
-    draw_test_scene, mesh_within,
+    Diorama, Edges, Frame, Framing, GodRays, Gpu, HiddenRoute, LIVE_SAFE_AREA, Labels, Look,
+    MAX_ZOOM, Markers, Mesher, Motion, OffscreenTarget, Orbit, OverlayOptions, OverlayStyle,
+    OverlayText, Overlays, Pace, Palette, PixelGrid, RouteStyle, Shaped, SmoothMesher, StatKind,
+    SunState, Terrain, TerrainRenderer, Theme, Timeline, View, VoxelMesher, Walk, WeatherEffects,
+    When, draw_test_scene, mesh_within,
 };
 use isotrail_testkit::{
     Tolerance, assert_golden, decode_gif, differing_share, diorama_bundle, hike_bundle,
@@ -677,6 +678,112 @@ fn every_preset_at_scale_10_matches_its_golden() {
             frame.width(),
             frame.height(),
             frame.rgba(),
+        );
+    }
+}
+
+/// The whole still from the library's options, as the command line makes it
+#[test]
+fn finished_stills_match_the_preset_goldens() {
+    let gpu = isotrail_testkit::gpu();
+    let bundle = hike_bundle();
+    let options = OverlayOptions::default();
+    let labels = Labels::built_in();
+    let theme = Theme::default();
+    let look = theme.look();
+    let style = options.style(&theme.overlay, look.route.colour);
+    let text = options.text(&bundle, labels).unwrap();
+    assert_eq!(text.warnings, []);
+    for aspect in Aspect::ALL {
+        let framing = aspect.framing(6).unwrap();
+        let fitted = OverlayOptions::fit(&text.text, None, &style, &framing).unwrap();
+        let still = Still {
+            bundle: &bundle,
+            mesher: &VoxelMesher::default(),
+            overlays: &fitted.overlays,
+            aim: &Aim::default(),
+            sun: &SunState::seen(&bundle, When::Start, &theme.conditions()),
+            look: &look,
+        };
+        let frame = still.render(&gpu, 1).unwrap();
+        assert_golden(
+            &format!("preset-{}", aspect.name()),
+            frame.width(),
+            frame.height(),
+            frame.rgba(),
+        );
+        if aspect == Aspect::Square {
+            let enlarged = still.render(&gpu, 3).unwrap();
+            assert_eq!(enlarged.rgba(), upscale(&frame, 3).unwrap().rgba());
+        }
+    }
+}
+
+/// The clip of the frames golden test, finished by the library
+#[test]
+fn finished_clip_frames_match_goldens() {
+    let gpu = isotrail_testkit::gpu();
+    let mut bundle = hike_bundle();
+    for (i, point) in bundle.route.points.iter_mut().enumerate() {
+        let stop = if i >= 4 { 3_600 } else { 0 };
+        point.time = Some(1_750_000_000 + i as i64 * 600 + stop);
+    }
+    let framing = Aspect::Square.framing(6).unwrap();
+    let options = OverlayOptions::default();
+    let labels = Labels::built_in();
+    let text = options.text(&bundle, labels).unwrap().text;
+    let overlays = OverlayOptions::fit(&text, None, &OverlayStyle::default(), &framing)
+        .unwrap()
+        .overlays;
+    let look = Look::default();
+    let motion = Motion {
+        timeline: Timeline {
+            duration_s: 1.0,
+            fps: 7,
+            step_fps: None,
+            ..Timeline::default()
+        },
+        pace: Pace::Time,
+        ..Motion::default()
+    };
+    let diorama = overlays.diorama_framing();
+    let options_gif = GifOptions {
+        scale: 1,
+        fps: 7,
+        plays: Plays::Forever,
+    };
+    let mut gif = GifWriter::new(
+        Vec::new(),
+        diorama.width,
+        diorama.height,
+        &look,
+        options_gif,
+    )
+    .unwrap();
+    let caption = Caption {
+        bundle: &bundle,
+        overlays: &overlays,
+        options: &options,
+        labels,
+    };
+    let count = finished_clip(
+        &gpu,
+        &VoxelMesher::default(),
+        &look,
+        &motion,
+        &caption,
+        |_, frame| gif.push(frame),
+    )
+    .unwrap();
+    assert_eq!(count, 7);
+    let frames = decode_gif(&gif.finish().unwrap());
+    for (name, i) in [("first", 0), ("middle", 3), ("last", 6)] {
+        let frame = &frames[i];
+        assert_golden(
+            &format!("animation-{name}"),
+            frame.width,
+            frame.height,
+            &frame.rgba,
         );
     }
 }

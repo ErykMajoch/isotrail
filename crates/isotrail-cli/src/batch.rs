@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use clap::Args;
 use isotrail_bundle::SceneBundle;
-use isotrail_export::{DEFAULT_SCALE, encode_png, upscale};
+use isotrail_export::{DEFAULT_SCALE, Still, encode_png};
 use isotrail_geo::sha256_hex;
 use isotrail_render::{Conditions, Fitted, Framing, Gpu, Look, Mesher, Theme};
 use serde::{Deserialize, Serialize};
@@ -584,16 +584,15 @@ fn draw(run: &mut Run, bundle: &SceneBundle, images: &[PathBuf]) -> anyhow::Resu
     };
     let mut written = Vec::new();
     for (fit, image) in fitted.iter().zip(images) {
-        let frame = crate::render::still(
-            gpu,
+        let frame = Still {
             bundle,
-            run.mesher.as_ref(),
-            &fit.overlays,
-            &aim,
-            &sun,
-            &run.look,
-        )?;
-        let frame = upscale(&frame, args.scale)?;
+            mesher: run.mesher.as_ref(),
+            overlays: &fit.overlays,
+            aim: &aim,
+            sun: &sun,
+            look: &run.look,
+        }
+        .render(gpu, args.scale)?;
         output::write(image, |file| Ok(encode_png(&frame, file)?))?;
         say!("Wrote {}", shown(image));
         written.push(Written::image(image, (frame.width(), frame.height())));

@@ -38,7 +38,7 @@ jobs:
         run: cargo test --workspace
 
       - name: Check wasm32 build of the crates that run in a browser
-        run: cargo clippy --target wasm32-unknown-unknown -p isotrail-track -p isotrail-bundle -p isotrail-geo -p isotrail-render -p isotrail-web -- -D warnings
+        run: cargo clippy --target wasm32-unknown-unknown -p isotrail-track -p isotrail-bundle -p isotrail-geo -p isotrail-render -p isotrail-export -p isotrail-web -- -D warnings
 
       - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
         with:

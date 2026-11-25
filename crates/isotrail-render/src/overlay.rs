@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use glam::IVec2;
-use isotrail_bundle::{HikeStats, SceneBundle, Units};
+use isotrail_bundle::{HikeStats, SceneBundle, Units, WEATHER_ATTRIBUTION};
 
 use crate::labels::fill;
 use crate::post::ROUTE_COLOUR;
@@ -195,6 +195,15 @@ pub fn credit_line(bundle: &SceneBundle) -> Option<String> {
     (!credits.is_empty()).then(|| credits.join(" · "))
 }
 
+/// The bundle's data credits for a caption, on one line
+pub fn data_credit(bundle: &SceneBundle) -> Option<String> {
+    let mut credits: Vec<&str> = bundle.meta.attribution.iter().map(String::as_str).collect();
+    if bundle.weather.is_some() {
+        credits.push(WEATHER_ATTRIBUTION);
+    }
+    (!credits.is_empty()).then(|| credits.join(" · "))
+}
+
 impl Stat {
     pub fn new(value: impl Into<String>, label: impl Into<String>) -> Stat {
         Stat {
@@ -205,6 +214,21 @@ impl Stat {
 }
 
 impl StatKind {
+    /// As the command line spells it
+    pub fn name(self) -> &'static str {
+        match self {
+            StatKind::Distance => "distance",
+            StatKind::Gain => "gain",
+            StatKind::Loss => "loss",
+            StatKind::Time => "time",
+            StatKind::Elapsed => "elapsed",
+            StatKind::High => "high",
+            StatKind::Low => "low",
+            StatKind::Speed => "speed",
+            StatKind::Pace => "pace",
+        }
+    }
+
     /// `None` if the track didn't record what this needs
     pub fn stat(self, stats: &HikeStats, units: Units) -> Option<Stat> {
         self.stat_with(stats, units, Labels::built_in())

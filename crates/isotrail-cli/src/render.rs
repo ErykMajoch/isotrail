@@ -6,13 +6,10 @@ use anyhow::Context;
 use clap::Args;
 use isotrail_bundle::SceneBundle;
 use isotrail_export::{
-    DEFAULT_SCALE, ExportError, Ffmpeg, GifWriter, Mp4Writer, check_gif_look, encode_png,
-    render_clip, render_still, upscale,
+    Caption, DEFAULT_SCALE, ExportError, Ffmpeg, GifWriter, Mp4Writer, Still, check_gif_look,
+    encode_png, finished_clip,
 };
-use isotrail_render::{
-    Aim, Background, Fitted, Frame, Gpu, Labels, Look, Mesher, Motion, Overlays, Pace, SunState,
-    Walk,
-};
+use isotrail_render::{Background, Fitted, Frame, Gpu, Look, Mesher, Motion, Pace, Walk};
 use isotrail_track::Track;
 use tracing::{info, warn};
 
@@ -196,14 +193,18 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
         let (width, height) = (framing.width * args.scale, framing.height * args.scale);
         let drawn = (framing.width, framing.height);
         if let Some(motion) = &motion {
+            let options = args.overlay.options();
             let clip = Clip {
                 gpu: &gpu,
-                bundle: &bundle,
                 mesher: mesher.as_ref(),
-                overlays,
                 look: &look,
                 motion,
-                labels: &theme.labels,
+                caption: Caption {
+                    bundle: &bundle,
+                    overlays,
+                    options: &options,
+                    labels: &theme.labels,
+                },
             };
             let frames = write_clip(args, &clip, output, ffmpeg.as_ref())?;
             let scale = clip_scale(args, motion, ffmpeg.is_some());
@@ -211,8 +212,15 @@ pub fn run(args: &RenderArgs, typed: &Typed) -> anyhow::Result<()> {
             say!("{}", rendered(Some(frames), size, drawn));
             report.wrote(Written::clip(output, size, frames));
         } else {
-            let frame = still(&gpu, &bundle, mesher.as_ref(), overlays, &aim, &sun, &look)?;
-            let image = upscale(&frame, args.scale)?;
+            let image = Still {
+                bundle: &bundle,
+                mesher: mesher.as_ref(),
+                overlays,
+                aim: &aim,
+                sun: &sun,
+                look: &look,
+            }
+            .render(&gpu, args.scale)?;
             output::write(output, |file| Ok(encode_png(&image, file)?))?;
             say!("{}", rendered(None, (width, height), drawn));
             report.wrote(Written::image(output, (width, height)));
@@ -247,37 +255,12 @@ fn clip_scale(args: &RenderArgs, motion: &Motion, mp4: bool) -> u32 {
     }
 }
 
-/// Renders the still with its overlays at internal resolution
-pub(crate) fn still(
-    gpu: &Gpu,
-    bundle: &SceneBundle,
-    mesher: &dyn Mesher,
-    overlays: &Overlays,
-    aim: &Aim,
-    sun: &SunState,
-    look: &Look,
-) -> anyhow::Result<Frame> {
-    let mut frame = render_still(
-        gpu,
-        bundle,
-        mesher,
-        &overlays.diorama_framing(),
-        aim,
-        sun,
-        look,
-    )?;
-    overlays.draw(&mut frame, look.palette.as_ref(), 1.0);
-    Ok(frame)
-}
-
 struct Clip<'a> {
     gpu: &'a Gpu,
-    bundle: &'a SceneBundle,
     mesher: &'a dyn Mesher,
-    overlays: &'a Overlays,
     look: &'a Look,
     motion: &'a Motion,
-    labels: &'a Labels,
+    caption: Caption<'a>,
 }
 
 enum ClipWriter {
@@ -295,7 +278,7 @@ impl ClipWriter {
         encoding: &EncodingArgs,
         ffmpeg: Option<&Ffmpeg>,
     ) -> anyhow::Result<ClipWriter> {
-        let framing = clip.overlays.diorama_framing();
+        let framing = clip.caption.overlays.diorama_framing();
         let (width, height) = (framing.width, framing.height);
         let fps = clip.motion.timeline.fps;
         Ok(match ffmpeg {
@@ -343,7 +326,7 @@ fn write_clip(
     let write = || -> anyhow::Result<u32> {
         let pending = Pending::new(output);
         let mut writer = ClipWriter::open(&pending, clip, args.scale, &args.encoding, ffmpeg)?;
-        let frames = draw_clip(args, clip, |frame| Ok(writer.push(frame)?))?;
+        let frames = draw_clip(clip, |frame| Ok(writer.push(frame)?))?;
         writer.finish()?;
         pending.commit()?;
         Ok(frames)
@@ -354,35 +337,20 @@ fn write_clip(
 /// Draws each frame of the animation with its stats counting up, hands it
 /// to `push`, and returns how many there were
 fn draw_clip(
-    args: &RenderArgs,
     clip: &Clip,
     mut push: impl FnMut(&Frame) -> anyhow::Result<()>,
 ) -> anyhow::Result<u32> {
-    let framing = clip.overlays.diorama_framing();
-    let walk = Walk::paced(clip.bundle, clip.motion.pacing);
-    let palette = clip.look.palette.as_ref();
-    let mut frames = 0;
-    render_clip(
+    finished_clip(
         clip.gpu,
-        clip.bundle,
         clip.mesher,
-        &framing,
         clip.look,
         clip.motion,
-        |moment, frame| -> anyhow::Result<()> {
+        &clip.caption,
+        |_, frame| -> anyhow::Result<()> {
             output::check_interrupted()?;
-            let mut frame = frame.clone();
-            let walked = walk.stats_at(moment);
-            let stats = args.overlay.walked_stats(clip.bundle, &walked, clip.labels);
-            clip.overlays
-                .with_stats(&stats)
-                .draw(&mut frame, palette, moment.progress);
-            push(&frame)?;
-            frames += 1;
-            Ok(())
+            push(frame)
         },
-    )?;
-    Ok(frames)
+    )
 }
 
 /// A scene bundle as it is, or a track still to be made into one
@@ -488,7 +456,7 @@ mod tests {
 
     use anyhow::bail;
     use clap::Parser;
-    use isotrail_render::{Aspect, Theme};
+    use isotrail_render::{Aspect, Overlays, Theme};
     use isotrail_testkit::hike_bundle;
 
     use super::*;
@@ -533,14 +501,18 @@ mod tests {
         );
         let motion = args.animation.motion(true).unwrap();
         let gpu = isotrail_testkit::gpu();
+        let options = args.overlay.options();
         let clip = Clip {
             gpu: &gpu,
-            bundle: &bundle,
             mesher: &isotrail_render::VoxelMesher::default(),
-            overlays: &overlays,
             look: &Look::default(),
             motion: &motion,
-            labels: &theme.labels,
+            caption: Caption {
+                bundle: &bundle,
+                overlays: &overlays,
+                options: &options,
+                labels: &theme.labels,
+            },
         };
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("clip.gif");
@@ -549,7 +521,7 @@ mod tests {
         let pending = Pending::new(&target);
         let mut writer = ClipWriter::open(&pending, &clip, 10, &args.encoding, None).unwrap();
         let mut pushed = 0;
-        let drawn = draw_clip(&args, &clip, |frame| {
+        let drawn = draw_clip(&clip, |frame| {
             pushed += 1;
             if pushed == 3 {
                 bail!("the disk is full");

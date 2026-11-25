@@ -2,6 +2,9 @@ use isotrail_render::Frame;
 
 use crate::ExportError;
 
+/// Output pixels per internal pixel
+pub const DEFAULT_SCALE: u32 = 3;
+
 /// Enlarges a frame by an integer factor, each pixel becoming a `scale x scale` square
 pub fn upscale(frame: &Frame, scale: u32) -> Result<Frame, ExportError> {
     if scale == 0 {

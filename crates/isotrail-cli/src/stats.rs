@@ -6,12 +6,11 @@ use chrono::{DateTime, SecondsFormat, TimeDelta, TimeZone, Utc};
 use clap::Args;
 use isotrail_bundle::{HikeStats, ProfileSample, SceneBundle, Weather, format_version};
 use isotrail_geo::{PROFILE_SAMPLES, elevation_profile};
-use isotrail_render::parse_count;
+use isotrail_render::{data_credit, parse_count};
 use isotrail_track::{Bounds, TrackStats, Units};
 use serde::Serialize;
 use tracing::warn;
 
-use crate::overlay::data_credit;
 use crate::servers::{CacheDirArg, WeatherUrlArg};
 use crate::{UnitsArg, weather};
 

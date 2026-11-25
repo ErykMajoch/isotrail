@@ -1,10 +1,11 @@
 use std::path::Path;
 
 use clap::{Args, ValueEnum};
-use isotrail_bundle::{HikeStats, SceneBundle, WEATHER_ATTRIBUTION};
+use isotrail_bundle::SceneBundle;
 use isotrail_render::{
-    DateFormat, FitStep, Fitted, Framing, Labels, Layout, OverlayStyle, OverlayText, Overlays,
-    PanelStyle, PixelFont, Stat, StatKind, Subtitle, Theme, TitleSize,
+    DateFormat, DontFit, FitStep, Fitted, Framing, Labels, Layout, OverlayOptions, OverlayPart,
+    OverlayStyle, OverlayText, PanelStyle, StatKind, Subtitle, TextError, TextPart, TextWarning,
+    Theme, TitleSize,
 };
 use tracing::warn;
 
@@ -142,23 +143,55 @@ impl From<StatArg> for StatKind {
     }
 }
 
+impl From<Part> for OverlayPart {
+    fn from(part: Part) -> Self {
+        match part {
+            Part::Title => OverlayPart::Title,
+            Part::Date => OverlayPart::Date,
+            Part::Stats => OverlayPart::Stats,
+            Part::Profile => OverlayPart::Profile,
+            Part::None => OverlayPart::None,
+        }
+    }
+}
+
 impl OverlayArgs {
-    /// The overlays' look in `theme`'s colours, with the profile walked in
-    /// `route_colour`
-    pub fn style(&self, theme: &Theme, route_colour: [u8; 3]) -> OverlayStyle {
-        OverlayStyle {
+    /// The flags as the renderer's options
+    pub fn options(&self) -> OverlayOptions {
+        OverlayOptions {
+            parts: self.overlay.iter().map(|&part| part.into()).collect(),
+            attribution: !self.no_attribution,
             panel: match self.panel {
                 PanelArg::Frosted => PanelStyle::Frosted,
                 PanelArg::None => PanelStyle::None,
             },
+            title: self.title.clone(),
             title_size: match self.title_size {
                 TitleSizeArg::Large => TitleSize::Large,
                 TitleSizeArg::Small => TitleSize::Small,
             },
+            subtitle: match self.subtitle.as_deref() {
+                None => Subtitle::Auto,
+                Some(none) if none.eq_ignore_ascii_case("none") => Subtitle::None,
+                Some(subtitle) => Subtitle::Text(subtitle.to_owned()),
+            },
+            date: self.date.clone(),
+            date_format: match self.date_format {
+                DateFormatArg::Long => DateFormat::Long,
+                DateFormatArg::Short => DateFormat::Short,
+                DateFormatArg::Iso => DateFormat::Iso,
+            },
+            stats: self.stats.iter().map(|&stat| stat.into()).collect(),
+            units: self.units.into(),
             layout: self.layout,
-            route_colour,
-            theme: theme.overlay.clone(),
+            credit_extra: self.credit_extra.clone(),
         }
+    }
+
+    /// The overlays' look in `theme`'s colours, with the profile walked in
+    /// `route_colour`
+    pub fn style(&self, theme: &Theme, route_colour: [u8; 3]) -> OverlayStyle {
+        self.options().style(&theme.overlay, route_colour)
     }
 
     /// `--credit-extra` as the embed's attribute, so its live view shows the
@@ -179,110 +212,30 @@ impl OverlayArgs {
 
     /// Checks the lists of parts and stats, before any work
     pub fn check(&self) -> anyhow::Result<()> {
-        if self.overlay.contains(&Part::None) && self.overlay.len() > 1 {
-            return Err(usage("--overlay none can't be combined with other parts"));
-        }
-        for (i, stat) in self.stats.iter().enumerate() {
-            if self.stats[..i].contains(stat) {
-                return Err(usage(format!("--stats lists {} twice", name(*stat))));
-            }
-        }
-        Ok(())
+        self.options().check().map_err(worded)
     }
 
     /// The bundle's text in the words of `labels` with the flags applied,
     /// leaving out the parts that weren't asked for
     pub fn text(&self, bundle: &SceneBundle, labels: &Labels) -> anyhow::Result<OverlayText> {
-        self.check()?;
-        let text = self.compose(bundle, labels);
-        if self.overlay.contains(&Part::Stats) {
-            for &stat in &self.stats {
-                if StatKind::from(stat)
-                    .stat(&bundle.meta.stats, self.units.into())
-                    .is_none()
-                {
-                    warn!("the track has no {} to show", name(stat));
+        let composed = self.options().text(bundle, labels).map_err(worded)?;
+        for warning in &composed.warnings {
+            match warning {
+                TextWarning::NoStat(stat) => {
+                    warn!("the track has no {} to show", stat.name());
+                }
+                TextWarning::Undrawable { part, missing } => {
+                    warn!("{}", undrawable(part_name(*part), missing));
                 }
             }
         }
-        let subtitle = match &text.subtitle {
-            Subtitle::Text(subtitle) => subtitle.as_str(),
-            _ => "",
-        };
-        let stats: String = text
-            .stats
-            .iter()
-            .map(|stat| format!("{} {} ", stat.value, stat.label))
-            .collect();
-        let font = PixelFont::monogram();
-        for (field, words) in [
-            ("title", text.title.as_str()),
-            ("subtitle", subtitle),
-            ("date", text.date.as_deref().unwrap_or_default()),
-            ("stats", stats.as_str()),
-            (
-                "credit line",
-                text.credit_extra.as_deref().unwrap_or_default(),
-            ),
-        ] {
-            let missing = font.missing(words);
-            if !missing.is_empty() {
-                warn!("{}", undrawable(field, &missing));
-            }
-        }
-        Ok(text)
+        Ok(composed.text)
     }
 
     /// The text in isotrail's own words when a theme changes them, so text
     /// that doesn't fit can be blamed on the theme's words
     pub fn built_in_text(&self, bundle: &SceneBundle, labels: &Labels) -> Option<OverlayText> {
-        let built_in = Labels::built_in();
-        (labels != built_in).then(|| self.compose(bundle, built_in))
-    }
-
-    fn compose(&self, bundle: &SceneBundle, labels: &Labels) -> OverlayText {
-        let show = |part| self.overlay.contains(&part);
-        let kinds: Vec<StatKind> = self.stats.iter().map(|&stat| stat.into()).collect();
-        let date_format = match self.date_format {
-            DateFormatArg::Long => DateFormat::Long,
-            DateFormatArg::Short => DateFormat::Short,
-            DateFormatArg::Iso => DateFormat::Iso,
-        };
-        let units = self.units.into();
-        let mut text = OverlayText::from_bundle_with(bundle, units, &kinds, date_format, labels);
-
-        if let Some(title) = &self.title {
-            text.title.clone_from(title);
-        }
-        text.subtitle = match self.subtitle.as_deref() {
-            None => Subtitle::Auto,
-            Some(none) if none.eq_ignore_ascii_case("none") => Subtitle::None,
-            Some(subtitle) => Subtitle::Text(subtitle.to_owned()),
-        };
-        if let Some(date) = &self.date {
-            text.date = Some(date.clone());
-            text.short_date = None;
-        }
-
-        if !show(Part::Title) {
-            text.title.clear();
-        }
-        if !show(Part::Date) {
-            text.date = None;
-        }
-        if !show(Part::Stats) {
-            text.stats.clear();
-        }
-        if !show(Part::Profile) {
-            text.profile.clear();
-        }
-        if !self.shows_attribution() {
-            text.attribution = None;
-        }
-        if !self.overlay.contains(&Part::None) {
-            text.credit_extra = self.credit_extra().map(str::to_owned);
-        }
-        text
+        self.options().built_in_text(bundle, labels)
     }
 
     /// The overlays laid out for a frame, with a warning if they had to give
@@ -298,14 +251,15 @@ impl OverlayArgs {
         scale: u32,
         style: &OverlayStyle,
     ) -> anyhow::Result<Fitted> {
-        let fit = Overlays::fit(text, style, framing).map_err(|_| {
-            match themed.filter(|(built_in, _)| Overlays::fit(built_in, style, framing).is_ok()) {
-                Some((_, theme)) => usage(format!(
+        let built_in = themed.map(|(built_in, _)| built_in);
+        let fit = OverlayOptions::fit(text, built_in, style, framing).map_err(|dont| {
+            match (dont, themed) {
+                (DontFit::ThemeWords, Some((_, theme))) => usage(format!(
                     "the words in the [labels] table of the theme {} are too long for the \
                      {shape} image at --scale {scale}; shorten them or try a lower --scale",
                     theme.display()
                 )),
-                None => usage(format!(
+                _ => usage(format!(
                     "the text doesn't fit the {shape} image at --scale {scale}; try a lower \
                      --scale, a larger --size, fewer --stats or --overlay none"
                 )),
@@ -321,26 +275,6 @@ impl OverlayArgs {
         Ok(fit)
     }
 
-    /// The stats of [`OverlayArgs::text`] part-way along the hike, with
-    /// `walked` holding the figures so far
-    pub fn walked_stats(
-        &self,
-        bundle: &SceneBundle,
-        walked: &HikeStats,
-        labels: &Labels,
-    ) -> Vec<Stat> {
-        if !self.overlay.contains(&Part::Stats) {
-            return Vec::new();
-        }
-        let units = self.units.into();
-        self.stats
-            .iter()
-            .filter_map(|&stat| {
-                StatKind::from(stat).stat_walked_with(&bundle.meta.stats, walked, units, labels)
-            })
-            .collect()
-    }
-
     /// `--title`, when given
     pub fn given_title(&self) -> Option<&str> {
         self.title.as_deref()
@@ -354,22 +288,26 @@ impl OverlayArgs {
     /// The data credit to put in the caption, when the image leaves it out,
     /// as asked or because it didn't fit
     pub fn caption_credit(&self, bundle: &SceneBundle, dropped: bool) -> Option<String> {
-        let left_off = dropped || !self.shows_attribution();
-        data_credit(bundle).filter(|_| left_off)
-    }
-
-    fn shows_attribution(&self) -> bool {
-        !self.no_attribution && !self.overlay.contains(&Part::None)
+        self.options().caption_credit(bundle, dropped)
     }
 }
 
-/// The bundle's data credits for a caption, on one line
-pub fn data_credit(bundle: &SceneBundle) -> Option<String> {
-    let mut credits: Vec<&str> = bundle.meta.attribution.iter().map(String::as_str).collect();
-    if bundle.weather.is_some() {
-        credits.push(WEATHER_ATTRIBUTION);
+/// A mistake in the lists of parts and stats, in the flags' words
+fn worded(error: TextError) -> anyhow::Error {
+    match error {
+        TextError::NoneWithOthers => usage("--overlay none can't be combined with other parts"),
+        TextError::StatTwice(stat) => usage(format!("--stats lists {} twice", stat.name())),
     }
-    (!credits.is_empty()).then(|| credits.join(" · "))
+}
+
+fn part_name(part: TextPart) -> &'static str {
+    match part {
+        TextPart::Title => "title",
+        TextPart::Subtitle => "subtitle",
+        TextPart::Date => "date",
+        TextPart::Stats => "stats",
+        TextPart::CreditLine => "credit line",
+    }
 }
 
 fn describe(step: &FitStep) -> String {
@@ -411,18 +349,13 @@ fn and_list(items: &[String]) -> String {
     }
 }
 
-fn name(stat: StatArg) -> String {
-    stat.to_possible_value()
-        .map_or_else(|| format!("{stat:?}"), |value| value.get_name().to_owned())
-}
-
 #[cfg(test)]
 mod tests {
     use clap::Parser;
     use isotrail_bundle::ProfileSample;
     use isotrail_testkit::{diorama_bundle, synthetic_weather};
 
-    use isotrail_render::{Aspect, ROUTE_COLOUR};
+    use isotrail_render::{Aspect, ROUTE_COLOUR, Stat};
 
     use super::*;
 
@@ -680,6 +613,14 @@ mod tests {
             .unwrap();
         assert_eq!(text.date.as_deref(), Some("2025-06-14"));
         assert!(parse(&["--date", "May", "--date-format", "short"]).is_err());
+    }
+
+    #[test]
+    fn stats_are_named_as_typed() {
+        for stat in StatArg::value_variants() {
+            let typed = stat.to_possible_value().unwrap();
+            assert_eq!(typed.get_name(), StatKind::from(*stat).name());
+        }
     }
 
     #[test]
