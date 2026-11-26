@@ -5,6 +5,7 @@
 mod build;
 #[cfg(target_arch = "wasm32")]
 mod builder;
+mod notes;
 mod servers;
 
 pub use build::{

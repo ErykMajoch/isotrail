@@ -13,6 +13,7 @@ use isotrail_options::data::distance_text;
 use isotrail_options::{Settings, plain};
 use isotrail_track::{GpxReader, Track, TrackReader, media_kind};
 
+use crate::notes::heard_while;
 use crate::{SERVER_NAMES, map_data_servers, server_name};
 
 /// The largest slab a page fetches map data for, in square kilometres. Map
@@ -118,6 +119,9 @@ pub struct Builder {
     replay: ReplayFetcher,
     missing: Vec<Request>,
     warnings: Vec<String>,
+    /// What reading the track warned about, then what the scene left out
+    read_notes: Vec<String>,
+    notes: Vec<String>,
     /// Further attempts made at each request, by key
     retried: HashMap<String, usize>,
     /// The Overpass servers asked in turn, and the one asked now
@@ -164,12 +168,10 @@ impl Builder {
                 "cache-dir in the options: a page has no cache folder",
             ));
         }
-        let track = GpxReader
-            .parse(gpx)
-            .and_then(Track::clean)
-            .map_err(|error| {
-                Failure::new("input", format!("can't read {shown}: {}", chain(&error)))
-            })?;
+        let (track, read_notes) = heard_while(|| GpxReader.parse(gpx).and_then(Track::clean));
+        let track = track.map_err(|error| {
+            Failure::new("input", format!("can't read {shown}: {}", chain(&error)))
+        })?;
         let mut builder = Builder {
             shown: shown.to_owned(),
             file_title: track.title(Path::new(name)),
@@ -183,6 +185,8 @@ impl Builder {
             replay: ReplayFetcher::new(),
             missing: Vec::new(),
             warnings: Vec::new(),
+            read_notes,
+            notes: Vec::new(),
             retried: HashMap::new(),
             servers: Vec::new(),
             server: 0,
@@ -333,6 +337,12 @@ impl Builder {
         &self.warnings
     }
 
+    /// What the command line would warn about while it reads the track and
+    /// builds the scene, each once, worded for a page
+    pub fn notes(&self) -> &[String] {
+        &self.notes
+    }
+
     pub fn kind(&self, request: &Request) -> Kind {
         let terrain = self
             .options
@@ -358,14 +368,16 @@ impl Builder {
             map_data: &self.replay,
             waits: false,
         };
-        let built = prepare(
-            &self.track,
-            &self.file_title,
-            &self.options,
-            fetchers,
-            self.now,
-            &mut heard,
-        );
+        let (built, built_notes) = heard_while(|| {
+            prepare(
+                &self.track,
+                &self.file_title,
+                &self.options,
+                fetchers,
+                self.now,
+                &mut heard,
+            )
+        });
         let missed = self.replay.take_missed();
         let again: Vec<(Request, Retry)> = self
             .replay
@@ -425,7 +437,13 @@ impl Builder {
             bundle.meta.title.clone_from(title);
         }
         self.missing.clear();
-        self.warnings = heard.0;
+        self.warnings = heard.names;
+        self.notes = self.read_notes.clone();
+        for note in built_notes.into_iter().chain(heard.notes) {
+            if !self.notes.contains(&note) {
+                self.notes.push(note);
+            }
+        }
         bundle
             .to_bytes()
             .map(Outcome::Scene)
@@ -602,18 +620,43 @@ fn chain(error: &(dyn Error + 'static)) -> String {
 }
 
 #[derive(Default)]
-struct Heard(Vec<String>);
+struct Heard {
+    names: Vec<String>,
+    notes: Vec<String>,
+}
 
 impl Progress for Heard {
+    /// The command line's warnings, without its flags
     fn warn(&mut self, warning: Warning) {
-        let name = match warning {
-            Warning::MapDataSkipped => "map-data-skipped",
-            Warning::TimesLeftOut => "times-left-out",
-            Warning::NoWeatherRequest(_) => "no-weather-request",
-            Warning::Weather(_) => "weather",
-            Warning::DaysBefore(_) => "days-before",
+        let (name, note) = match &warning {
+            Warning::MapDataSkipped => (
+                "map-data-skipped",
+                "the diorama is built from the elevation alone, without lakes, woods or paths"
+                    .to_owned(),
+            ),
+            Warning::TimesLeftOut => (
+                "times-left-out",
+                "the date and times are left out, with the light, weather and season that follow                  from them"
+                    .to_owned(),
+            ),
+            Warning::NoWeatherRequest(error) => (
+                "no-weather-request",
+                format!("{error}, so the weather is left out"),
+            ),
+            Warning::Weather(error) => (
+                "weather",
+                format!("can't get the weather, so it is left out: {}", chain(error)),
+            ),
+            Warning::DaysBefore(error) => (
+                "days-before",
+                format!(
+                    "can't get the weather before the hike, so lakes are left open: {}",
+                    chain(error)
+                ),
+            ),
         };
-        self.0.push(name.to_owned());
+        self.names.push(name.to_owned());
+        self.notes.push(note);
     }
 }
 

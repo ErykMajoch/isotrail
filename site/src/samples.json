@@ -1,0 +1,20 @@
+[
+  {
+    "slug": "tre-cime",
+    "name": "Round the Tre Cime di Lavaredo",
+    "where": "Dolomites, Italy",
+    "distance": "11.9km"
+  },
+  {
+    "slug": "durdle-door",
+    "name": "Durdle Door to Lulworth Cove",
+    "where": "Dorset coast, England",
+    "distance": "4.6km"
+  },
+  {
+    "slug": "catbells",
+    "name": "Catbells and Derwentwater",
+    "where": "Lake District, England",
+    "distance": "9.1km"
+  }
+]

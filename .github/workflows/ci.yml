@@ -177,3 +177,6 @@ jobs:
 
       - name: Browser check of a scene built on the site's page
         run: node web/test/scene.mjs chrome --webgl --site site/dist
+
+      - name: Browser check of the site's page
+        run: node site/test/page.mjs chrome --webgl

@@ -113,7 +113,21 @@ The scene check runs on the built site's page too. Its local server sends the he
 node web/test/scene.mjs chrome --site site/dist
 ```
 
-CI builds the site, reports its size and runs this check. The site is deployed by hand only. The Site workflow on GitHub builds it and uploads it to Cloudflare Pages, as a preview or as the public site.
+A second check works through the page as a visitor would. It drops GPX files on it, opens the sample walks and uses the keyboard alone. It also checks that each failure shows its message:
+
+```bash
+node site/test/page.mjs chrome
+```
+
+Add `--shots out/page` to save a screenshot of each state of the page.
+
+The sample walks in `site/public/samples/` are made up. Each was traced along paths mapped on OpenStreetMap, with invented times. Each comes as a GPX file and a scene file built from it with the default options. After a change to the scene file format, build the scene files again:
+
+```bash
+sh site/scripts/samples.sh
+```
+
+CI builds the site, reports its size and runs both checks. The site is deployed by hand only. The Site workflow on GitHub builds it and uploads it to Cloudflare Pages, as a preview or as the public site.
 
 ## Rendering in tests
 

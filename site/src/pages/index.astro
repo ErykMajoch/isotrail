@@ -1,5 +1,6 @@
 ---
 import runtime from '../runtime.json';
+import samples from '../samples.json';
 import '../styles/site.css';
 ---
 <!doctype html>
@@ -7,26 +8,82 @@ import '../styles/site.css';
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>isotrail</title>
+<title>isotrail: your hike as a pixel-art diorama</title>
+<meta name="description" content="Turn a GPX file of your hike into a pixel-art 3D diorama, in your browser.">
 <script is:inline type="module" src={`${runtime.path}isotrail-embed.js`}></script>
 </head>
 <body data-runtime={runtime.path}>
+<header>
+  <h1>isotrail</h1>
+  <p>Turn a GPX file of your hike into a pixel-art 3D diorama. It is built here in your browser.</p>
+</header>
 <main>
-<h1>isotrail</h1>
-<p>Turn a GPX file into a pixel-art 3D diorama, in your browser. The file never leaves it.</p>
-<p>Choose a GPX file. The scene is built on this page. Only the elevation, map and weather services are asked for data. Their answers are kept in the browser, so a second build downloads nothing.</p>
-<label>Options, as <code>isotrail render</code> flag names
-  <textarea id="options" rows="3" spellcheck="false">{'{}'}</textarea>
-</label>
-<label>GPX file <input type="file" id="file" accept=".gpx"></label>
-<p><button id="cancel" type="button" disabled>Cancel</button></p>
-<p id="status" role="status">No file yet.</p>
-<p><a id="download" hidden>Download the scene file</a></p>
-<p><span id="cache">Cache: counting…</span> <button id="clear" type="button">Clear the cache</button></p>
-<isotrail-hike id="hike" aspect="wide"></isotrail-hike>
+  <section class="start" aria-label="Choose a hike">
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept=".gpx,application/gpx+xml">
+      <span class="drop-title">Drop a GPX file here, or choose one</span>
+      <span class="drop-note">The file stays on this page. The elevation, map and weather services are asked about the area around the route and its dates.</span>
+    </label>
+    <div class="samples">
+      <p id="samples-title">Or try a sample walk:</p>
+      <ul aria-labelledby="samples-title">
+        {samples.map((sample) => (
+          <li>
+            <button type="button" class="sample" data-sample={sample.slug} data-name={sample.name}>
+              <span class="sample-name">{sample.name}</span>
+              <span class="sample-where">{sample.where} · {sample.distance}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      <p class="note">The sample walks are made up. They follow mapped paths, but their times are invented.</p>
+    </div>
+  </section>
+
+  <section class="build" id="build" aria-labelledby="build-title" hidden>
+    <h2 id="build-title">Building <span id="build-name"></span></h2>
+    <ol class="steps">
+      <li data-step="elevation"><span class="step-name">Elevation tiles</span> <span class="step-count"></span></li>
+      <li data-step="map-data"><span class="step-name">Map data</span> <span class="step-count"></span></li>
+      <li data-step="weather"><span class="step-name">Weather</span> <span class="step-count"></span></li>
+      <li data-step="building"><span class="step-name">The scene</span> <span class="step-count"></span></li>
+    </ol>
+    <p class="wait" id="wait" hidden></p>
+    <p><button type="button" id="cancel" disabled>Cancel</button></p>
+  </section>
+
+  <div class="error" id="error" role="alert" hidden>
+    <p class="error-lead" id="error-lead"></p>
+    <p class="error-text" id="error-text"></p>
+    <p class="actions">
+      <button type="button" id="retry" hidden>Try again</button>
+      <button type="button" id="no-map-data" hidden>Build without map data</button>
+    </p>
+  </div>
+
+  <p class="visually-hidden" id="status" role="status"></p>
+
+  <section class="view" aria-label="Diorama">
+    <div class="frame" id="frame">
+      <p class="empty" id="empty">Your diorama shows here once you choose a hike.</p>
+      <isotrail-hike id="hike" aspect="wide" autoplay hidden></isotrail-hike>
+    </div>
+    <div class="after" id="after" hidden>
+      <p class="shown" id="shown"></p>
+      <ul class="notes" id="notes" aria-label="Notes on this scene"></ul>
+      <p class="files">
+        <a id="download">Download the scene file</a>
+        <a id="gpx" hidden>Download the sample's GPX file</a>
+      </p>
+      <p class="note">Drag to turn the diorama. Hold Ctrl and scroll, or pinch, to zoom. Press play to watch the route draw itself.</p>
+    </div>
+  </section>
 </main>
+<footer>
+  <p><span id="cache">This browser keeps what the services answered, so a second build downloads nothing.</span> <button type="button" id="clear">Clear it</button></p>
+</footer>
 <script>
-  import '../scripts/scene.js';
+  import '../scripts/page.js';
 </script>
 </body>
 </html>

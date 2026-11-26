@@ -12,21 +12,19 @@
 // cancel and the failures. Exits with 1 if any check fails
 
 import { spawn, spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { extname, join, normalize, resolve, sep } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 
 import { connect, launch, quit, sleepFor } from './browser.mjs';
+import { SERVICE, closedPort, serve } from './services.mjs';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const WEB = join(ROOT, 'web');
-const FIXTURES = join(ROOT, 'fixtures');
-const GPX = join(FIXTURES, 'gpx', 'snowdon.gpx');
+const GPX = join(ROOT, 'fixtures', 'gpx', 'snowdon.gpx');
 const args = process.argv.slice(2);
 const WEBGL = args.includes('--webgl');
 const siteAt = args.indexOf('--site');
@@ -56,135 +54,10 @@ const trackName = /<name>(?:<!\[CDATA\[)?([^<\]]+)/.exec(gpx.toString('utf8'))[1
 // Things that would give the file away in a request
 const MARKERS = ['<gpx', 'trkpt', trackName, gpx.subarray(0, 64).toString('utf8')];
 
-// The services' answers, named as RecordedFetcher names them
-const recorded = (dir, query, body = '') => {
-  const hash = createHash('sha256').update(query).update('\n').update(body).digest('hex');
-  return `${dir}-${hash.slice(0, 16)}`;
-};
-const TYPES = {
-  '.html': 'text/html',
-  '.css': 'text/css',
-  '.js': 'text/javascript',
-  '.mjs': 'text/javascript',
-  '.wasm': 'application/wasm',
-};
-
-// Paths the local server answers as one of the services
-const SERVICE = /^\/(terrain|overpass|weather|busy|empty)\//;
-
-// The site's _headers rules, each a pattern and its headers. connect-src also
-// allows the local servers, as some checks ask one on another port
-const HEADERS = [];
-if (SITE) {
-  const text = await readFile(join(SITE, '_headers'), 'utf8').catch(() => '');
-  for (const line of text.split(/\r?\n/)) {
-    if (/^\S/.test(line)) {
-      HEADERS.push({ pattern: line.trim(), headers: {} });
-    } else if (line.trim() && HEADERS.length) {
-      const colon = line.indexOf(':');
-      const name = line.slice(0, colon).trim().toLowerCase();
-      let value = line.slice(colon + 1).trim();
-      if (name === 'content-security-policy') value = value.replace('connect-src', 'connect-src http://127.0.0.1:*');
-      HEADERS.at(-1).headers[name] = value;
-    }
-  }
-}
-
-// The headers of every rule that matches, joined by commas as Cloudflare does
-function headersFor(path) {
-  const found = {};
-  for (const { pattern, headers } of HEADERS) {
-    const source = pattern
-      .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
-      .replace(/:[A-Za-z]\w*/g, '[^/]+')
-      .replace('*', '.*');
-    if (!new RegExp(`^${source}$`).test(path)) continue;
-    for (const [name, value] of Object.entries(headers)) found[name] = found[name] ? `${found[name]}, ${value}` : value;
-  }
-  return found;
-}
-
-const seen = [];
-// `services` false stops every service answering. `overpass` 'busy' answers
-// the next map data request with HTTP 502, and 'hold' keeps it waiting
-const mode = { services: true, overpass: 'normal' };
-let open = 0;
-let held = 0;
-const server = createServer(async (req, res) => {
-  open++;
-  res.on('close', () => open--);
-  const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
-  const body = Buffer.concat(chunks);
-  seen.push({ method: req.method, url: req.url, body: body.toString('utf8') });
-  const url = new URL(req.url, 'http://localhost');
-  const path = decodeURIComponent(url.pathname);
-  const query = url.search.slice(1);
-  if (SERVICE.test(path)) {
-    if (!mode.services) {
-      req.socket.destroy();
-      return;
-    }
-    // Overpass servers for the page's own list: one always busy, one that
-    // answers with nothing
-    if (path.startsWith('/busy/')) {
-      res.writeHead(502, { 'content-type': 'text/plain' }).end('busy');
-      return;
-    }
-    if (path.startsWith('/empty/')) {
-      res.writeHead(200, { 'content-type': 'application/json' }).end('{"elements":[]}');
-      return;
-    }
-    if (path.startsWith('/overpass/') && mode.overpass === 'busy') {
-      mode.overpass = 'normal';
-      res.writeHead(502, { 'content-type': 'text/plain' }).end('busy');
-      return;
-    }
-    if (path.startsWith('/overpass/') && mode.overpass === 'hold') {
-      held++;
-      res.on('close', () => held--);
-      return;
-    }
-  }
-  let file;
-  let tile;
-  if (SITE && !SERVICE.test(path)) {
-    file = normalize(join(SITE, path.endsWith('/') ? `${path}index.html` : path));
-    if (!file.startsWith(SITE + sep)) file = undefined;
-  } else if (path.startsWith('/web/')) {
-    file = normalize(join(ROOT, path));
-    if (!file.startsWith(WEB)) file = undefined;
-  } else if ((tile = /^\/terrain\/(\d+)\/(\d+)\/(\d+)\.png$/.exec(path))) {
-    file = join(FIXTURES, 'dem', 's3.amazonaws.com', 'elevation-tiles-prod', 'terrarium', ...tile.slice(1, 3), `${tile[3]}.png`);
-  } else if (path === '/overpass/api/interpreter' && req.method === 'POST') {
-    file = recorded(join(FIXTURES, 'osm', 'overpass-api.de', 'api', 'interpreter'), query, body);
-  } else if (path === '/weather/v1/archive') {
-    file = recorded(join(FIXTURES, 'weather', 'archive-api.open-meteo.com', 'v1', 'archive'), query);
-  } else if (path === '/weather/v1/forecast') {
-    file = recorded(join(FIXTURES, 'weather', 'api.open-meteo.com', 'v1', 'forecast'), query);
-  }
-  if (!file || !existsSync(file)) {
-    res.writeHead(404).end();
-    return;
-  }
-  const bytes = await readFile(file);
-  const type = TYPES[extname(file)] ?? 'application/octet-stream';
-  const headers = SITE && !SERVICE.test(path) ? headersFor(path) : {};
-  res.writeHead(200, { 'content-type': type, ...headers, 'content-length': bytes.length }).end(bytes);
-});
-await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-const ORIGIN = `http://127.0.0.1:${server.address().port}`;
-const SERVERS = {
-  'terrain-url': `${ORIGIN}/terrain/{z}/{x}/{y}.png`,
-  'overpass-url': `${ORIGIN}/overpass/api/interpreter`,
-  'weather-url': `${ORIGIN}/weather`,
-};
-
-// A port nothing listens on, from a server closed at once
-const unused = createServer();
-await new Promise((resolve) => unused.listen(0, '127.0.0.1', resolve));
-const CLOSED = unused.address().port;
-await new Promise((resolve) => unused.close(resolve));
+const services = await serve({ site: SITE });
+const { origin: ORIGIN, servers: SERVERS, state } = services;
+const { seen, mode } = state;
+const CLOSED = await closedPort();
 
 // Each case as flags for `isotrail bundle` and as the page's JSON options
 const CASES = [
@@ -231,7 +104,7 @@ async function bundle(index, flags) {
 
 const browser = await launch(BROWSER, { webgl: WEBGL, viewport: VIEWPORT }).catch(async (error) => {
   console.error(error.message);
-  server.close();
+  services.close();
   await rm(temp, { recursive: true, force: true }).catch(() => {});
   process.exit(1);
 });
@@ -263,7 +136,10 @@ async function build(file, options, { clear = false, during } = {}) {
   if (clear) await cdp.evaluate('window.__scenes.clearCache()');
   asked.length = 0;
   seen.length = 0;
-  await cdp.evaluate(`document.getElementById('options').value = ${JSON.stringify(JSON.stringify(options))}`);
+  // The site's page has no options box: it adds `window.__options` to each build
+  await cdp.evaluate(SITE
+    ? `window.__options = ${JSON.stringify(options)}`
+    : `document.getElementById('options').value = ${JSON.stringify(JSON.stringify(options))}`);
   const { result } = await cdp.send('Runtime.evaluate', { expression: "document.getElementById('file')" });
   const started = Date.now();
   await cdp.send('DOM.setFileInputFiles', { files: [file], objectId: result.objectId });
@@ -352,7 +228,8 @@ try {
   const busy = await build(GPX, OPTIONS, { clear: true });
   const wait = busy.events.find((e) => e.type === 'wait');
   check('busy: the wait is told', wait?.kind === 'map-data' && wait.why === 'busy' && wait.attempt === 2 && wait.attempts === 3, JSON.stringify(wait));
-  check('busy: the wait is 5s', wait && Math.abs(wait.until - wait.at - 5000) < 500);
+  // The worker's own figure: the page hears the message late while its main thread draws
+  check('busy: the wait is 5s', wait?.ms === 5000, `${wait?.ms}ms`);
   check('busy: then the scene is built', busy.state === 'built' && busy.scene.equals(expected), busy.error);
   check('busy: it took the wait', busy.wall >= 5000, `${busy.wall}ms`);
   results.push(row('busy once', busy));
@@ -399,15 +276,15 @@ try {
   const cancelled = await build(GPX, OPTIONS, {
     clear: true,
     during: async () => {
-      for (let i = 0; i < 100 && held === 0; i++) await sleepFor(100);
-      check('cancel: the map data request was under way', held === 1, `${held}`);
+      for (let i = 0; i < 100 && state.held === 0; i++) await sleepFor(100);
+      check('cancel: the map data request was under way', state.held === 1, `${state.held}`);
       await cdp.evaluate("document.getElementById('cancel').click()");
     },
   });
   mode.overpass = 'normal';
   check('cancel: the build says it was cancelled', cancelled.state === 'cancelled', cancelled.state);
-  for (let i = 0; i < 50 && open > 0; i++) await sleepFor(100);
-  check('cancel: no request is left running', held === 0 && open === 0, `${held} held, ${open} open`);
+  for (let i = 0; i < 50 && state.open > 0; i++) await sleepFor(100);
+  check('cancel: no request is left running', state.held === 0 && state.open === 0, `${state.held} held, ${state.open} open`);
 
   // Routes and files the page refuses
   const long = join(temp, 'long.gpx');
@@ -433,8 +310,7 @@ try {
   check('the check ran to the end', false, error.stack ?? String(error));
 } finally {
   await quit(browser, cdp);
-  server.closeAllConnections();
-  server.close();
+  services.close();
   await sleepFor(500);
   await rm(browser.profile, { recursive: true, force: true, maxRetries: 5 }).catch(() => {});
   await rm(temp, { recursive: true, force: true, maxRetries: 5 }).catch(() => {});

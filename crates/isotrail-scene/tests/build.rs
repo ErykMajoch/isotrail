@@ -540,3 +540,44 @@ fn options_the_tool_would_refuse_are_refused_the_same_way() {
     assert_eq!(failure.reason, "usage");
     assert!(failure.message.contains("detail"), "{}", failure.message);
 }
+
+/// The Snowdon fixture without the lines that hold `tag`
+fn snowdon_without(tag: &str) -> Vec<u8> {
+    String::from_utf8(snowdon())
+        .unwrap()
+        .lines()
+        .filter(|line| !line.contains(tag))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .into_bytes()
+}
+
+fn notes(gpx: &[u8], options: &str) -> Vec<String> {
+    let mut builder = Builder::new(gpx, "walk.gpx", options, LATER).unwrap();
+    let (built, _) = run(&mut builder, |_| None);
+    built.unwrap();
+    builder.notes().to_vec()
+}
+
+#[test]
+fn the_track_s_own_warnings_are_kept_for_the_page() {
+    assert!(notes(&snowdon(), OPTIONS).is_empty());
+    assert_eq!(
+        notes(&snowdon_without("<time>"), OPTIONS),
+        [
+            "the track has no timestamps, so time-based features are off",
+            "the track has no times, so the weather is left out",
+        ]
+    );
+    // Without elevations the weather is asked at another height, which has no recording
+    let untracked = notes(&snowdon_without("<ele>"), OPTIONS);
+    assert_eq!(untracked[0], "the track has no elevation data");
+    assert!(
+        untracked[1].starts_with("can't get the weather, so it is left out: "),
+        "{untracked:?}"
+    );
+    assert_eq!(
+        notes(&snowdon(), r#"{"detail": 32, "no-map-data": true}"#),
+        ["the diorama is built from the elevation alone, without lakes, woods or paths"]
+    );
+}

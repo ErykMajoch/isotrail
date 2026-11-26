@@ -4,6 +4,10 @@
 //   const scenes = new SceneWorker();
 //   const { scene, warnings } = await scenes.build(file, { options, onProgress, signal });
 //
+// `warnings` names what the scene left out, such as `weather`, and `notes`
+// says in words what the command line would warn about, such as a track
+// with no times
+//
 // A failed build rejects with an Error whose `reason` is one of `usage`,
 // `input`, `no-ground`, `too-large`, `no-server`, `busy`, `unreachable`, `network`,
 // `offline` or `other`, and a cancelled one with the reason `cancelled`

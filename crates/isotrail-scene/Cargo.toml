@@ -14,6 +14,7 @@ isotrail-bundle = { path = "../isotrail-bundle" }
 isotrail-geo = { path = "../isotrail-geo" }
 isotrail-options = { path = "../isotrail-options" }
 isotrail-track = { path = "../isotrail-track" }
+tracing.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook.workspace = true

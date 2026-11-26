@@ -1281,6 +1281,7 @@ dependencies = [
  "isotrail-options",
  "isotrail-track",
  "js-sys",
+ "tracing",
  "wasm-bindgen",
 ]
 

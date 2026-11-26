@@ -5,8 +5,8 @@
 // In:  { type: 'build', id, gpx, name, options, now, servers, skip }, { type: 'cancel', id },
 //      { type: 'cache-size', id }, { type: 'clear-cache', id }
 // Out: { type: 'progress', step, done, total, server }, { type: 'slow', kind, seconds },
-//      { type: 'wait', kind, why, attempt, attempts, until },
-//      { type: 'built', scene, warnings, passes, ms, fetched, cached, unsaved, memory },
+//      { type: 'wait', kind, why, attempt, attempts, ms, until },
+//      { type: 'built', scene, warnings, notes, passes, ms, fetched, cached, unsaved, memory },
 //      { type: 'failed', reason, message }, { type: 'cancelled' },
 //      { type: 'cache', bytes, entries }
 import init, { SceneBuilder, loadTimezones, offline } from './pkg/isotrail_scene.js';
@@ -183,6 +183,7 @@ class Build {
             type: 'built',
             scene,
             warnings: builder.warnings,
+            notes: builder.notes,
             passes: pass,
             ms: performance.now() - started,
             fetched: this.fetched,
@@ -197,7 +198,7 @@ class Build {
         const wait = builder.wait;
         if (wait) {
           const { kind, why, attempt, attempts, ms } = wait;
-          this.post({ type: 'wait', kind, why, attempt, attempts, until: Date.now() + ms });
+          this.post({ type: 'wait', kind, why, attempt, attempts, ms, until: Date.now() + ms });
           await sleep(ms, this.abort.signal);
         }
         await this.fetchAll(builder, builder.missing);

@@ -187,6 +187,13 @@ impl SceneBuilder {
         self.builder.warnings().to_vec()
     }
 
+    /// What the command line would warn about while it reads the track and
+    /// builds the scene, such as a track with no times, worded for a page
+    #[wasm_bindgen(getter)]
+    pub fn notes(&self) -> Vec<String> {
+        self.builder.notes().to_vec()
+    }
+
     /// The keys whose answers the last build threw away, as unusable or
     /// failed, so the page drops any copy it keeps
     #[wasm_bindgen(getter)]
