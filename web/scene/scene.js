@@ -46,6 +46,32 @@ export class SceneWorker {
     }
   }
 
+  // Checks options, a palette file's text or a theme file's text, rejecting
+  // with the command line's message and the reason `usage`. `what` is
+  // `options`, `palette` or `theme`; `options` may be an object
+  async check(what, text, name = '') {
+    const json = what === 'options' && typeof text !== 'string' ? JSON.stringify(text) : text;
+    await this.#ask(this.#next++, { type: 'check', what, name, text: json });
+  }
+
+  // Rejects with the reason `no-server` when leaving out the Overpass
+  // servers in `skip` leaves none that can serve this GPX file's slab,
+  // without fetching anything
+  async checkServers(gpx, { name, options = {}, now, skip = [] } = {}) {
+    const bytes = gpx instanceof Blob ? await gpx.arrayBuffer() : copy(gpx);
+    const json = typeof options === 'string' ? options : JSON.stringify(options);
+    await this.#ask(this.#next++, { type: 'servers', gpx: bytes, name: name ?? gpx.name ?? '', options: json, now, skip }, [bytes]);
+  }
+
+  // The scene file's bytes with `exaggeration`, `season` and `no-weather`
+  // applied, as the command line applies them to a scene file
+  async adjust(scene, options = {}) {
+    const bytes = scene instanceof Blob ? await scene.arrayBuffer() : copy(scene);
+    const json = typeof options === 'string' ? options : JSON.stringify(options);
+    const { scene: adjusted } = await this.#ask(this.#next++, { type: 'adjust', scene: bytes, options: json }, [bytes]);
+    return adjusted;
+  }
+
   // What the cache holds: `{ bytes, entries }`
   cacheSize() {
     return this.#ask(this.#next++, { type: 'cache-size' });

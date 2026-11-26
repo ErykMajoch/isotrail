@@ -10,3 +10,4 @@
 /site/.astro/
 /site/public/runtime/
 /site/src/runtime.json
+/site/src/options.json

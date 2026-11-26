@@ -78,6 +78,20 @@ import '../styles/site.css';
       <p class="note">Drag to turn the diorama. Hold Ctrl and scroll, or pinch, to zoom. Press play to watch the route draw itself.</p>
     </div>
   </section>
+
+  <section class="controls" id="controls" aria-labelledby="controls-title" hidden>
+    <h2 id="controls-title">Change how it looks</h2>
+    <p class="note">Each change shows on the diorama at once. Open a group for more.</p>
+    <div class="first" id="first"></div>
+    <div class="groups" id="groups"></div>
+    <p class="actions"><button type="button" id="reset-all">Reset to the defaults</button></p>
+    <p class="palette-file" id="palette-file">
+      <button type="button" id="palette-choose">Use a palette file</button>
+      <input type="file" id="palette-input" accept=".hex,text/plain" hidden>
+      <span class="hint">A .hex file from Lospec.</span>
+    </p>
+    <button type="button" id="theme-remove" hidden>Remove the theme</button>
+  </section>
 </main>
 <footer>
   <p><span id="cache">This browser keeps what the services answered, so a second build downloads nothing.</span> <button type="button" id="clear">Clear it</button></p>

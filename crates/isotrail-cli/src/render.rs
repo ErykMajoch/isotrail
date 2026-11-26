@@ -377,12 +377,7 @@ impl Source {
         match self {
             Source::Bundle(bundle) => {
                 let mut bundle = *bundle;
-                if data.no_weather {
-                    bundle.weather = None;
-                    bundle.meta.provenance.weather = None;
-                    crate::season::without_weather(&mut bundle.season);
-                }
-                crate::season::apply(&mut bundle, data.season);
+                data.apply_to(&mut bundle);
                 Ok(bundle)
             }
             Source::Track(track) => Ok(crate::bundle::prepare(&track, path, data)?.bundle),

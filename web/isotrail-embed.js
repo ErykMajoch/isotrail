@@ -68,6 +68,8 @@ const KEY_TURN_DEG = 10;
 const KEY_PAN_PX = 40;
 const KEY_ZOOM = 1.25;
 const HINT_MS = 1500;
+// A turn or zoom counts as ended once nothing has moved for this long
+const VIEW_SETTLED_MS = 200;
 // A hidden tab resumes where it was rather than jumping ahead
 const MAX_STEP_S = 0.1;
 // Browsers keep only about 16 WebGL contexts per page, so embeds far off
@@ -754,6 +756,8 @@ class IsotrailHike extends HTMLElement {
   // Until played, scrubbed or set, the viewer shows the poster's light
   #moved = false;
   #yaw = 0;
+  #viewTimer = 0;
+  #viewSent = '';
   #time = 0;
   #playsLeft = 1;
   #playing = false;
@@ -867,6 +871,7 @@ class IsotrailHike extends HTMLElement {
         this.#paintRoute(ROUTE_COLOUR.test(given ?? '') ? given : null);
       }
       if (this.#viewer) this.#changeLook();
+      if (['turn', 'pitch', 'zoom'].includes(name)) this.#viewMoved();
     }
   }
 
@@ -923,6 +928,23 @@ class IsotrailHike extends HTMLElement {
     this.#playing = false;
     this.#syncPlayButton();
     this.#emit('isotrail-pause', { progress: this.#progress });
+  }
+
+  // The view shown, as the turn, pitch and zoom attributes would give it from
+  // the start: { turn, pitch, zoom }. Moving around a zoomed view isn't part
+  // of it
+  get view() {
+    const given = (name, low, high, fallback) => {
+      const value = Number(this.getAttribute(name) ?? fallback);
+      return Number.isFinite(value) && value >= low && value <= high ? value : fallback;
+    };
+    const settle = this.#settling ? this.#clip.yaw(this.#time) : 0;
+    const turned = given('turn', -360, 360, 0) + this.#yaw + settle;
+    const turn = Math.round((((turned + 180) % 360 + 360) % 360 - 180) * 10) / 10;
+    const fitted = Math.min(given('zoom', 0.5, 2, 1), 1);
+    const shown = fitted * (this.#guard((viewer) => viewer.zoom) ?? Math.max(given('zoom', 0.5, 2, 1), 1));
+    const zoom = Math.round(Math.min(Math.max(shown, 0.5), 2) * 100) / 100;
+    return { turn: turn === -180 ? 180 : turn, pitch: given('pitch', 10, 80, 30), zoom };
   }
 
   // Back to the starting view, as the reset button does
@@ -1293,6 +1315,7 @@ class IsotrailHike extends HTMLElement {
     this.#time = this.#clip.settled;
     this.#playsLeft = 1;
     this.#yaw = 0;
+    this.#viewSent = '';
     this.#failure = null;
     this.#busy = false;
     this.#downloads = [];
@@ -1459,6 +1482,7 @@ class IsotrailHike extends HTMLElement {
     this.#cancelSettle();
     this.#yaw += degrees;
     this.#schedule();
+    this.#viewMoved();
   }
 
   #pan(dx, dy) {
@@ -1472,6 +1496,7 @@ class IsotrailHike extends HTMLElement {
     this.#guard((viewer) => viewer.zoomBy(factor, x ?? canvas.width / 2, y ?? canvas.height / 2));
     this.#syncZoom();
     this.#schedule();
+    this.#viewMoved();
   }
 
   #resetView() {
@@ -1480,6 +1505,24 @@ class IsotrailHike extends HTMLElement {
     this.#guard((viewer) => viewer.resetView());
     this.#syncZoom();
     this.#schedule();
+    this.#viewMoved();
+  }
+
+  // isotrail-view once a turn, zoom or reset has ended, and never twice for
+  // the same view
+  #viewMoved() {
+    clearTimeout(this.#viewTimer);
+    this.#viewTimer = setTimeout(() => {
+      if (this.#pointers.size > 0) {
+        this.#viewMoved();
+        return;
+      }
+      const view = this.view;
+      const sent = JSON.stringify(view);
+      if (sent === this.#viewSent) return;
+      this.#viewSent = sent;
+      this.#emit('isotrail-view', view);
+    }, VIEW_SETTLED_MS);
   }
 
   #zoomed() {

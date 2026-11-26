@@ -2,7 +2,7 @@ use isotrail_geo::{Answer, Request, RequestFailure, Retry};
 use js_sys::{Object, Reflect};
 use wasm_bindgen::prelude::*;
 
-use crate::{Builder, Failure, Kind, Outcome, Wait};
+use crate::{Builder, Failure, Kind, Outcome, Wait, page};
 
 /// Reads the time zone boundaries, tzf-dist's `lite.tzb`. Every build needs
 /// them, since the zone sets the hike's date
@@ -17,6 +17,34 @@ pub fn load_timezones(tzb: &[u8]) -> Result<(), JsError> {
 #[wasm_bindgen]
 pub fn offline() -> JsValue {
     thrown(Failure::offline())
+}
+
+/// Checks a JSON object of options as a build reads it, throwing the tool's
+/// message with the reason `usage` for a mistake
+#[wasm_bindgen(js_name = checkOptions)]
+pub fn check_options(options: &str) -> Result<(), JsValue> {
+    console_error_panic_hook::set_once();
+    page::read_options(options).map(drop).map_err(thrown)
+}
+
+/// Checks a palette file's contents, named `name` in the message
+#[wasm_bindgen(js_name = checkPalette)]
+pub fn check_palette(name: &str, text: &str) -> Result<(), JsValue> {
+    page::check_palette(name, text).map_err(thrown)
+}
+
+/// Checks a theme file's contents, named `name` in the message
+#[wasm_bindgen(js_name = checkTheme)]
+pub fn check_theme(name: &str, text: &str) -> Result<(), JsValue> {
+    page::check_theme(name, text).map_err(thrown)
+}
+
+/// The scene file with `exaggeration`, `season` and `no-weather` from the JSON
+/// options applied, as the command line applies them to a scene file
+#[wasm_bindgen]
+pub fn adjust(scene: &[u8], options: &str) -> Result<Vec<u8>, JsValue> {
+    console_error_panic_hook::set_once();
+    page::adjust(scene, options).map_err(thrown)
 }
 
 /// A request whose answer the build needs

@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 
 use clap::Args;
-#[cfg(not(target_arch = "wasm32"))]
 use isotrail_render::Theme;
 
 /// A theme file for `render`, `embed` and `style-lab`
@@ -29,7 +28,39 @@ impl ThemeFileArg {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn read(path: &Path) -> anyhow::Result<Theme> {
-    use crate::usage;
-    let text = crate::read_text(path, "the theme ").map_err(usage)?;
-    Theme::parse(&text).map_err(|error| usage(format!("the theme {}: {error}", path.display())))
+    let text = crate::read_text(path, "the theme ").map_err(crate::usage)?;
+    theme_from_text(&path.display().to_string(), &text)
+}
+
+/// A theme file's contents read and checked, with `name` for the file in the
+/// message
+pub fn theme_from_text(name: &str, text: &str) -> anyhow::Result<Theme> {
+    Theme::parse(text).map_err(|error| crate::usage(format!("the theme {name}: {error}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_theme_s_text_gets_the_file_s_message() {
+        let dir = std::env::temp_dir().join(format!("isotrail-theme-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("bad.toml");
+        let text = "[route]\nshade = 1\n";
+        std::fs::write(&path, text).unwrap();
+        let from_file = read(&path).unwrap_err();
+        let from_text = theme_from_text(&path.display().to_string(), text);
+        std::fs::remove_dir_all(&dir).unwrap();
+        let from_text = from_text.unwrap_err();
+        assert_eq!(from_text.to_string(), from_file.to_string());
+        assert!(
+            from_text
+                .to_string()
+                .ends_with(r#"unknown key "shade" in the [route] table"#),
+            "{from_text}"
+        );
+        assert!(from_text.is::<crate::UsageError>());
+        assert!(theme_from_text("good.toml", "[route]\n").is_ok());
+    }
 }

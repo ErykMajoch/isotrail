@@ -179,13 +179,14 @@ pub fn read_palette(value: &str) -> anyhow::Result<Option<Palette>> {
     let bytes =
         crate::read_named(path, "the palette ").map_err(|error| usage(error.to_string()))?;
     let text = String::from_utf8_lossy(&bytes);
-    let palette = Palette::parse_hex(&text).map_err(|error| {
-        usage(format!(
-            "can't read the palette {}: {error}",
-            path.display()
-        ))
-    })?;
-    Ok(Some(palette))
+    palette_from_text(&path.display().to_string(), &text).map(Some)
+}
+
+/// A palette file's contents read and checked, with `name` for the file in
+/// the message
+pub fn palette_from_text(name: &str, text: &str) -> anyhow::Result<Palette> {
+    Palette::parse_hex(text)
+        .map_err(|error| crate::usage(format!("can't read the palette {name}: {error}")))
 }
 
 fn parse_background(value: &str) -> Result<Background, String> {
@@ -276,5 +277,29 @@ mod tests {
         assert_eq!(palette_file("warm.hex"), Some(Path::new("warm.hex")));
         let message = read_palette("warm").unwrap_err().to_string();
         assert!(message.contains("unknown palette"), "{message}");
+    }
+
+    #[test]
+    fn a_palette_s_text_gets_the_file_s_message() {
+        let dir = std::env::temp_dir().join(format!("isotrail-palette-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("bad.hex");
+        let text = "ff0000\nzzzzzz\n";
+        std::fs::write(&path, text).unwrap();
+        let from_file = read_palette(path.to_str().unwrap()).unwrap_err();
+        let from_text = palette_from_text(&path.display().to_string(), text);
+        std::fs::remove_dir_all(&dir).unwrap();
+        let from_text = from_text.unwrap_err();
+        assert_eq!(from_text.to_string(), from_file.to_string());
+        assert_eq!(
+            from_text.to_string(),
+            format!(
+                "can't read the palette {}: line 2: expected a colour as RRGGBB, found \"zzzzzz\"",
+                path.display()
+            )
+        );
+        assert!(from_text.is::<crate::UsageError>());
+        let good = palette_from_text("good.hex", "#ff0000\n00ff00").unwrap();
+        assert_eq!(good.colours().len(), 2);
     }
 }

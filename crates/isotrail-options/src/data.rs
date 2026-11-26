@@ -3,9 +3,11 @@ use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
 
 use clap::{Args, ValueEnum};
+use isotrail_bundle::SceneBundle;
 use isotrail_geo::{
     ApiKey, DEFAULT_DETAIL, FootprintOptions, MIN_PADDING_M, OVERPASS_URL, Orientation,
-    PADDING_FRACTION, SceneOptions, SeasonKind, TERRARIUM_URL, Times, WeatherServer,
+    PADDING_FRACTION, SceneOptions, SeasonKind, TERRARIUM_URL, Times, WeatherServer, forced_season,
+    without_weather,
 };
 use isotrail_render::parse_count;
 use tracing::warn;
@@ -228,6 +230,19 @@ impl DataArgs {
         }
     }
 
+    /// Applies `--no-weather` and `--season` to a scene file, which already
+    /// holds everything else these options shape
+    pub fn apply_to(&self, bundle: &mut SceneBundle) {
+        if self.no_weather {
+            bundle.weather = None;
+            bundle.meta.provenance.weather = None;
+            without_weather(&mut bundle.season);
+        }
+        if let Some(kind) = self.season.kind() {
+            bundle.season = forced_season(kind, bundle);
+        }
+    }
+
     /// The settings that change the scene made from a GPX file, leaving out
     /// --offline, the cache and the servers, which only change where data
     /// comes from
@@ -365,7 +380,46 @@ pub fn parse_template(value: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
+    use isotrail_bundle::Season;
+    use isotrail_testkit::diorama_bundle;
+
     use super::*;
+    use crate::Settings;
+
+    fn data(json: &str) -> DataArgs {
+        Settings::from_json(json, "the test")
+            .and_then(|settings| settings.options())
+            .unwrap()
+            .data
+    }
+
+    #[test]
+    fn a_scene_file_takes_the_season_and_no_weather() {
+        let mut bundle = diorama_bundle();
+        bundle.season.snow_line_m = Some(400.0);
+        data("{}").apply_to(&mut bundle);
+        assert_eq!(bundle.season.snow_line_m, Some(400.0));
+        data(r#"{"season": "autumn"}"#).apply_to(&mut bundle);
+        assert_eq!(
+            bundle.season,
+            Season {
+                leaf_day: Some(290),
+                ..Season::default()
+            }
+        );
+        data(r#"{"season": "winter"}"#).apply_to(&mut bundle);
+        assert_eq!(bundle.season.leaf_day, Some(15));
+        assert!(bundle.season.snow_line_m.is_some() && bundle.season.ice_line_m.is_some());
+        data(r#"{"no-weather": true}"#).apply_to(&mut bundle);
+        assert_eq!(
+            bundle.season,
+            Season {
+                leaf_day: Some(15),
+                ..Season::default()
+            }
+        );
+        assert!(bundle.weather.is_none() && bundle.meta.provenance.weather.is_none());
+    }
 
     #[test]
     fn trims_are_metres_or_kilometres() {

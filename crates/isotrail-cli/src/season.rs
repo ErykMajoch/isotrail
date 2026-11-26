@@ -1,15 +1,5 @@
-use isotrail_bundle::{SceneBundle, Season};
-use isotrail_geo::forced_season;
-pub use isotrail_geo::without_weather;
-pub use isotrail_options::data::SeasonArg;
+use isotrail_bundle::Season;
 use isotrail_render::foliage;
-
-/// Shows the season `--season` asks for in place of the hike's own
-pub fn apply(bundle: &mut SceneBundle, season: SeasonArg) {
-    if let Some(kind) = season.kind() {
-        bundle.season = forced_season(kind, bundle);
-    }
-}
 
 /// One line for the `bundle` report
 pub fn describe(season: &Season) -> String {
@@ -34,8 +24,6 @@ pub fn describe(season: &Season) -> String {
 
 #[cfg(test)]
 mod tests {
-    use isotrail_testkit::diorama_bundle;
-
     use super::*;
 
     #[test]
@@ -49,33 +37,6 @@ mod tests {
         assert_eq!(
             describe(&season),
             "autumn colours, snow above 1650m, lakes frozen above 1400m"
-        );
-    }
-
-    #[test]
-    fn forcing_a_season_replaces_the_hike_s_own() {
-        let mut bundle = diorama_bundle();
-        bundle.season.snow_line_m = Some(400.0);
-        apply(&mut bundle, SeasonArg::Auto);
-        assert_eq!(bundle.season.snow_line_m, Some(400.0));
-        apply(&mut bundle, SeasonArg::Autumn);
-        assert_eq!(
-            bundle.season,
-            Season {
-                leaf_day: Some(290),
-                ..Season::default()
-            }
-        );
-        apply(&mut bundle, SeasonArg::Winter);
-        assert_eq!(bundle.season.leaf_day, Some(15));
-        assert!(bundle.season.snow_line_m.is_some() && bundle.season.ice_line_m.is_some());
-        without_weather(&mut bundle.season);
-        assert_eq!(
-            bundle.season,
-            Season {
-                leaf_day: Some(15),
-                ..Season::default()
-            }
         );
     }
 }

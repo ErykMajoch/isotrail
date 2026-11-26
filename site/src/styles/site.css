@@ -54,6 +54,9 @@ button:disabled {
 
 button:focus-visible,
 a:focus-visible,
+summary:focus-visible,
+.controls input:focus-visible,
+.controls select:focus-visible,
 .drop:has(input:focus-visible) {
   outline: 3px solid var(--focus);
   outline-offset: 2px;
@@ -209,7 +212,9 @@ a {
 
 .frame {
   position: relative;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: var(--shape, 16 / 9);
+  width: min(100%, calc(75vh * var(--shape, 16 / 9)));
+  margin-inline: auto;
   border-radius: 10px;
   background: var(--slate);
   overflow: hidden;
@@ -249,6 +254,158 @@ isotrail-hike {
   display: flex;
   gap: 1.5rem;
   flex-wrap: wrap;
+}
+
+.controls {
+  margin-top: 1.5rem;
+}
+
+.controls > .note {
+  margin: 0 0 1rem;
+}
+
+.first {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: 1rem 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.group {
+  border-top: 1px solid var(--line);
+  padding: 0.5rem 0;
+}
+
+.group summary {
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.25rem 0;
+}
+
+.group-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: 1rem 1.5rem;
+  padding: 0.5rem 0 1rem;
+}
+
+.group-note,
+.servers {
+  grid-column: 1 / -1;
+}
+
+.group-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.control label,
+.control legend {
+  display: block;
+  font-weight: 600;
+  padding: 0;
+}
+
+.control .switch,
+.control .choice {
+  font-weight: 400;
+}
+
+.control .switch .label-text {
+  font-weight: 600;
+}
+
+.control .choice {
+  display: inline-block;
+  margin-right: 0.75rem;
+}
+
+.control fieldset,
+.servers {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.servers legend {
+  font-weight: 600;
+  padding: 0;
+}
+
+.server {
+  display: block;
+  margin: 0.25rem 0;
+}
+
+.server .label-text {
+  font-weight: 600;
+}
+
+.server .hint {
+  display: block;
+  margin: 0 0 0 1.6rem;
+}
+
+.flag {
+  font-weight: 400;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.control input[type='text'],
+.control input[type='number'],
+.control input[type='time'],
+.control select {
+  font: inherit;
+  width: 100%;
+  max-width: 16rem;
+  margin-top: 0.25rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: inherit;
+  box-sizing: border-box;
+}
+
+.control input[type='color'] {
+  margin-top: 0.25rem;
+  width: 4rem;
+  height: 2rem;
+}
+
+.hint {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.problem {
+  margin: 0.25rem 0 0;
+  color: var(--accent);
+  font-size: 0.9rem;
+}
+
+.palette-file {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+  margin: 0.4rem 0 0;
+}
+
+.palette-file .hint {
+  margin: 0;
+}
+
+.palette-file button,
+#theme-remove {
+  padding: 0.2rem 0.6rem;
+}
+
+#theme-remove {
+  margin-top: 0.4rem;
 }
 
 footer {

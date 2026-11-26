@@ -105,6 +105,12 @@ sh site/build.sh
 
 The build copies the runtime into `site/public/runtime/`, in a folder named by a hash of its files. Browsers can then keep those files for a year. `site/public/_headers` sets that cache, the type of the `.wasm` files and the Content-Security-Policy. The policy only lets the page reach the elevation, map and weather services.
 
+The page's controls are made from the tool's own option definitions. The build writes them to `site/src/options.json` first, so a new option reaches the page with the next build. `site/src/scripts/controls.js` says where each option goes on the page. An option it doesn't place fails the page check:
+
+```bash
+cargo run -p isotrail-options --example describe -- site/src/options.json
+```
+
 While working on the pages, run `npm run dev` in `site/`. It serves the pages and reloads them as you edit. `npm run preview` serves the built site instead, and `npm run size` lists its files with their sizes.
 
 The scene check runs on the built site's page too. Its local server sends the headers from `_headers`, so a policy that blocks the page fails the check:
@@ -113,7 +119,7 @@ The scene check runs on the built site's page too. Its local server sends the he
 node web/test/scene.mjs chrome --site site/dist
 ```
 
-A second check works through the page as a visitor would. It drops GPX files on it, opens the sample walks and uses the keyboard alone. It also checks that each failure shows its message:
+A second check works through the page as a visitor would. It drops GPX files on it, opens the sample walks and uses the keyboard alone. It also checks that each failure shows its message, and that each control changes the diorama:
 
 ```bash
 node site/test/page.mjs chrome

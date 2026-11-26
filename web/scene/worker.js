@@ -3,13 +3,17 @@
 // browser's cache. Every message carries the `id` of its build
 //
 // In:  { type: 'build', id, gpx, name, options, now, servers, skip }, { type: 'cancel', id },
-//      { type: 'cache-size', id }, { type: 'clear-cache', id }
+//      { type: 'cache-size', id }, { type: 'clear-cache', id },
+//      { type: 'check', id, what: 'options' | 'palette' | 'theme', name, text },
+//      { type: 'servers', id, gpx, name, options, now, skip }, { type: 'adjust', id, scene, options }
 // Out: { type: 'progress', step, done, total, server }, { type: 'slow', kind, seconds },
 //      { type: 'wait', kind, why, attempt, attempts, ms, until },
 //      { type: 'built', scene, warnings, notes, passes, ms, fetched, cached, unsaved, memory },
 //      { type: 'failed', reason, message }, { type: 'cancelled' },
-//      { type: 'cache', bytes, entries }
-import init, { SceneBuilder, loadTimezones, offline } from './pkg/isotrail_scene.js';
+//      { type: 'cache', bytes, entries }, { type: 'checked' }, { type: 'adjusted', scene }
+import init, {
+  SceneBuilder, adjust, checkOptions, checkPalette, checkTheme, loadTimezones, offline,
+} from './pkg/isotrail_scene.js';
 
 // Each pass fetches what the last one missed or waited for
 const PASSES = 20;
@@ -20,8 +24,12 @@ const SLOW_MS = 10000;
 const CACHE = 'isotrail-data';
 
 let memory;
+const loaded = init().then((exports) => {
+  ({ memory } = exports);
+});
+// Checks need only the code; reading a GPX file needs the time zones too
 const ready = (async () => {
-  ({ memory } = await init());
+  await loaded;
   const zones = await fetch(new URL('./pkg/lite.tzb', import.meta.url));
   if (!zones.ok) throw new Error(`can't fetch the time zones: HTTP ${zones.status}`);
   loadTimezones(new Uint8Array(await zones.arrayBuffer()));
@@ -230,5 +238,36 @@ onmessage = async ({ data }) => {
   } else if (type === 'clear-cache') {
     await caches.delete(CACHE).catch(() => {});
     postMessage({ id, type: 'cache', bytes: 0, entries: 0 });
+  } else if (['check', 'servers', 'adjust'].includes(type)) {
+    try {
+      await (type === 'servers' ? ready : loaded);
+      const answer = quick(data);
+      postMessage({ id, ...answer }, answer.scene ? [answer.scene.buffer] : []);
+    } catch (error) {
+      postMessage({ id, type: 'failed', reason: error?.reason ?? 'other', message: String(error?.message ?? error) });
+    }
   }
 };
+
+// What the page asks without fetching anything
+function quick({ type, what, name, text, gpx, options, now, skip, scene }) {
+  if (type === 'adjust') return { type: 'adjusted', scene: adjust(new Uint8Array(scene), options ?? '{}') };
+  if (type === 'servers') {
+    // Building the scene's plan names the servers that can serve its slab
+    const builder = new SceneBuilder(new Uint8Array(gpx), name ?? '', options ?? '{}', now ?? Date.now() / 1000);
+    try {
+      builder.skipServers(skip ?? []);
+    } finally {
+      builder.free();
+    }
+  } else if (what === 'options') {
+    checkOptions(text ?? '{}');
+  } else if (what === 'palette') {
+    checkPalette(name ?? '', text ?? '');
+  } else if (what === 'theme') {
+    checkTheme(name ?? '', text ?? '');
+  } else {
+    throw failure('other', `nothing to check called ${what}`);
+  }
+  return { type: 'checked' };
+}

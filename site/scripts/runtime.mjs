@@ -29,10 +29,16 @@ const FILES = [
 ];
 
 const missing = FILES.filter(([file]) => !existsSync(join(WEB, file)));
-if (missing.length) {
-  for (const [file, build] of missing) console.error(`web/${file} is missing: build it first with ${build}`);
-  process.exit(1);
+for (const [file, build] of missing) console.error(`web/${file} is missing: build it first with ${build}`);
+// The controls are made from it
+const described = existsSync(join(SITE, 'src', 'options.json'));
+if (!described) {
+  console.error(
+    'site/src/options.json is missing: write it first with '
+      + 'cargo run -p isotrail-options --example describe -- site/src/options.json',
+  );
 }
+if (missing.length || !described) process.exit(1);
 
 const hash = createHash('sha256');
 for (const [file] of FILES) {

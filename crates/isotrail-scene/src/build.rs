@@ -10,10 +10,11 @@ use isotrail_geo::{
     Warning, origin, plan, prepare,
 };
 use isotrail_options::data::distance_text;
-use isotrail_options::{Settings, plain};
+use isotrail_options::plain;
 use isotrail_track::{GpxReader, Track, TrackReader, media_kind};
 
 use crate::notes::heard_while;
+use crate::page::read_options;
 use crate::{SERVER_NAMES, map_data_servers, server_name};
 
 /// The largest slab a page fetches map data for, in square kilometres. Map
@@ -55,7 +56,7 @@ pub struct Failure {
 }
 
 impl Failure {
-    fn new(reason: &'static str, message: impl Into<String>) -> Failure {
+    pub(crate) fn new(reason: &'static str, message: impl Into<String>) -> Failure {
         Failure {
             reason,
             message: message.into(),
@@ -153,21 +154,7 @@ impl Builder {
                 format!("{shown} is already a scene file, not a GPX file"),
             ));
         }
-        let render = Settings::from_json(options, "the options")
-            .and_then(|settings| settings.options())
-            .map_err(|error| Failure::new("usage", format!("{error:#}")))?;
-        if render.data.offline {
-            return Err(Failure::new(
-                "usage",
-                "offline in the options: a page has no cache folder to build from",
-            ));
-        }
-        if render.data.cache_dir.get().is_some() {
-            return Err(Failure::new(
-                "usage",
-                "cache-dir in the options: a page has no cache folder",
-            ));
-        }
+        let render = read_options(options)?;
         let (track, read_notes) = heard_while(|| GpxReader.parse(gpx).and_then(Track::clean));
         let track = track.map_err(|error| {
             Failure::new("input", format!("can't read {shown}: {}", chain(&error)))
@@ -636,7 +623,7 @@ impl Progress for Heard {
             ),
             Warning::TimesLeftOut => (
                 "times-left-out",
-                "the date and times are left out, with the light, weather and season that follow                  from them"
+                "the date and times are left out, with the light, weather and season that follow from them"
                     .to_owned(),
             ),
             Warning::NoWeatherRequest(error) => (

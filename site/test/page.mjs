@@ -1,6 +1,6 @@
-// Headless browser check of the web app's first screen: a GPX file dropped
-// or chosen, the sample walks, the keyboard, reduced motion, every failure
-// the page can show and the scene file it hands back
+// Headless browser check of the web app: a GPX file dropped or chosen, the
+// sample walks, the keyboard, reduced motion, every failure the page can
+// show, the scene file it hands back, and the controls
 //
 //   node site/test/page.mjs [chrome|edge] [--webgl] [--site DIR] [--shots DIR]
 //
@@ -168,6 +168,78 @@ const scene = async () => Buffer.from(await cdp.evaluate(`(() => {
 const services_asked = () => state.seen.filter(({ url }) => SERVICE.test(new URL(url, ORIGIN).pathname));
 const hash = async () => createHash('sha256').update(await cdp.screenshot()).digest('hex');
 
+// The diorama once it holds still for a second, without the page round it
+async function picture() {
+  await cdp.evaluate('window.__controls.settled()');
+  await ready();
+  const clip = await cdp.evaluate(`(() => {
+    const { x, y, width, height } = document.getElementById('frame').getBoundingClientRect();
+    return { x: x + scrollX, y: y + scrollY, width, height, scale: 1 };
+  })()`);
+  const framed = async () => createHash('sha256').update(await cdp.screenshot(clip)).digest('hex');
+  let seen = await framed();
+  let still = 0;
+  for (let i = 0; i < 60 && still < 4; i++) {
+    await sleepFor(250);
+    const now = await framed();
+    still = now === seen ? still + 1 : 0;
+    seen = now;
+  }
+  return seen;
+}
+
+// Sets a control as a visitor would, and waits for it to show
+const set = (name, value) => cdp.evaluate(`window.__controls.set(${JSON.stringify(name)}, ${JSON.stringify(value)})`);
+const shownScene = async () => Buffer.from(await cdp.evaluate(`(() => {
+  const bytes = window.__scene.shown ?? new Uint8Array();
+  let text = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(text);
+})()`), 'base64');
+
+// A value for each control that shows on the diorama, with what it needs set
+// first to show. Data options that would ask for map data or weather the
+// recordings don't hold leave them out
+const TRIES = {
+  aspect: { value: 'square' },
+  palette: { value: 'aap-64' },
+  season: { value: 'winter' },
+  weather: { value: 'overcast' },
+  time: { value: '21:30' },
+  mesher: { value: 'smooth' },
+  'block-height': { value: 2 },
+  occlusion: { value: 0 },
+  'soft-shadows': { value: 0 },
+  'god-rays': { value: 'on', with: { weather: 'clear' } },
+  exaggeration: { value: 12 },
+  'prop-density': { value: 0 },
+  paths: { value: 'off' },
+  streams: { value: 'off' },
+  strata: { value: 'off' },
+  'base-blocks': { value: 12 },
+  outlines: { value: 0 },
+  shadows: { value: 'off' },
+  'night-sky': { value: 'off', with: { time: '23:30', weather: 'clear' } },
+  'weather-effects': { value: 'none', with: { weather: 'rain' } },
+  sun: { value: '90,20' },
+  'route-colour': { value: '#00ff00' },
+  'route-width': { value: 4 },
+  'route-hidden': { value: 'off', with: { pitch: 12 } },
+  markers: { value: 'none' },
+  pitch: { value: 60 },
+  turn: { value: 90 },
+  zoom: { value: 1.5 },
+  detail: { value: 40, with: { 'no-map-data': true } },
+  'no-map-data': { value: true },
+  padding: { value: '30,800', with: { 'no-map-data': true } },
+  footprint: { value: 'north', with: { 'no-map-data': true } },
+  'no-weather': { value: true },
+  times: { value: 'none' },
+  'trim-start': { value: '300m', with: { 'no-map-data': true, 'no-weather': true } },
+  'trim-end': { value: '300m', with: { 'no-map-data': true, 'no-weather': true } },
+};
+const REBUILDS = ['detail', 'no-map-data', 'padding', 'footprint', 'times', 'trim-start', 'trim-end'];
+
 async function key(key, code = key, keyCode = 0, text) {
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode: keyCode, text });
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: keyCode });
@@ -284,6 +356,132 @@ try {
   check('reduced motion: a sample doesn\'t play by itself', !(await cdp.evaluate("window.__events.includes('isotrail-play')")));
   await reducedMotion(false);
 
+  // The controls, under reduced motion so the picture holds still
+  await reducedMotion(true);
+  await open();
+  const described = JSON.parse(await readFile(join(ROOT, 'site', 'src', 'options.json'), 'utf8')).map(({ name }) => name);
+  const placed = await cdp.evaluate('({ shown: window.__controls.shown, leftOut: window.__controls.leftOut, later: window.__controls.later })');
+  const every = [...placed.shown, ...placed.leftOut, ...placed.later];
+  check('controls: every option is a control, left out or for later, and nothing else',
+    every.length === described.length && new Set(every).size === every.length && described.every((name) => every.includes(name)),
+    JSON.stringify({ missing: described.filter((name) => !every.includes(name)), extra: every.filter((name) => !described.includes(name)) }));
+  check('controls: the left-out list is the page\'s own',
+    JSON.stringify(placed.leftOut.toSorted()) === JSON.stringify(['cache-dir', 'ffmpeg', 'heading', 'offline', 'overpass-url', 'terrain-url', 'weather-url']),
+    placed.leftOut.join(', '));
+
+  // Each control that changes a finished scene is tried on a sample walk,
+  // which has paths, streams and lakes and asks no data service. The ones
+  // that build the scene again are tried on the dropped file, whose
+  // services are the recordings
+  const tryEach = async (names) => {
+    for (const name of names) {
+      const tried = TRIES[name];
+      check(`control ${name}: has a value to try`, !!tried);
+      if (!tried) continue;
+      await cdp.evaluate('window.__controls.reset()');
+      for (const [other, value] of Object.entries(tried.with ?? {})) await set(other, value);
+      const before = await picture();
+      const sceneBefore = await shownScene();
+      const seen = services_asked().length;
+      await set(name, tried.value);
+      const problem = await cdp.evaluate(`window.__controls.problem(${JSON.stringify(name)})`);
+      const after = await picture();
+      check(`control ${name}: changes the picture`, after !== before && !problem, problem);
+      const rebuilt = services_asked().length - seen;
+      if (REBUILDS.includes(name)) {
+        check(`control ${name}: builds the scene again`, !(await shownScene()).equals(sceneBefore));
+        await cdp.evaluate('window.__controls.reset()');
+        for (const [other, value] of Object.entries(tried.with ?? {})) await set(other, value);
+        const warm = services_asked().length;
+        await set(name, tried.value);
+        check(`control ${name}: again with a warm cache, with no request`, services_asked().length === warm && (await picture()) === after,
+          `${services_asked().length - warm} requests, ${rebuilt} the first time`);
+      } else {
+        check(`control ${name}: with no request`, rebuilt === 0, `${rebuilt} requests`);
+      }
+    }
+  };
+  check('controls: those that build again are controls', REBUILDS.every((name) => placed.shown.includes(name)));
+  await cdp.evaluate(`document.querySelector('[data-sample="${samples[0].slug}"]').click()`);
+  await ready();
+  const samplePicture = await picture();
+  await shot('8-controls');
+  await tryEach(placed.shown.filter((name) => name !== 'theme' && !REBUILDS.includes(name)));
+  await cdp.evaluate('window.__controls.reset()');
+  check('controls: reset gives the sample\'s first picture back exactly', (await picture()) === samplePicture);
+  await drop([files.walk]);
+  await settled();
+  await ready();
+  const firstPicture = await picture();
+  await tryEach(REBUILDS);
+  await cdp.evaluate('window.__controls.reset()');
+  check('controls: reset gives the first picture back exactly', (await picture()) === firstPicture);
+
+  // The view, from the keyboard
+  await tabTo("document.getElementById('hike').shadowRoot?.activeElement?.tagName === 'CANVAS'");
+  await key('ArrowLeft', 'ArrowLeft', 37);
+  check('camera: the turn field follows the diorama',
+    await cdp.waitFor("window.__controls.value('turn') === 10", 3000), String(await cdp.evaluate("window.__controls.value('turn')")));
+  await cdp.evaluate("document.getElementById('hike').shadowRoot.activeElement?.blur()");
+  await cdp.evaluate('window.__controls.reset()');
+  check('camera: reset turns it back', (await picture()) === firstPicture);
+
+  // Palette and theme files
+  const bad = { palette: join(temp, 'bad.hex'), theme: join(temp, 'bad.toml') };
+  const good = { palette: join(temp, 'lospec.hex'), theme: join(temp, 'green.toml') };
+  await writeFile(bad.palette, 'ff0000\nzzzzzz\n');
+  await writeFile(good.palette, '000000\n1d2b53\n7e2553\n008751\nab5236\n5f574f\nc2c3c7\nfff1e8\nff004d\nffa300\nffec27\n00e436\n29adff\n83769c\nff77a8\nffccaa\n');
+  await writeFile(bad.theme, '[route]\nshade = 1\n');
+  await writeFile(good.theme, '[route]\ncolour = "#00ff00"\n');
+  const choose = async (input, path) => {
+    const { root } = await cdp.send('DOM.getDocument', { depth: 0 });
+    const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: input });
+    await cdp.send('DOM.setFileInputFiles', { files: [path], nodeId });
+    await cdp.evaluate('new Promise((resolve) => setTimeout(resolve, 100)).then(() => window.__controls.settled())');
+  };
+  await choose('#palette-input', bad.palette);
+  check('palette file: a bad one gets the tool\'s message',
+    (await cdp.evaluate("window.__controls.problem('palette')")) === 'Can\'t read the palette bad.hex: line 2: expected a colour as RRGGBB, found "zzzzzz".',
+    await cdp.evaluate("window.__controls.problem('palette')"));
+  check('palette file: a bad one changes nothing', (await picture()) === firstPicture);
+  await choose('#palette-input', good.palette);
+  check('palette file: a good one is used', (await picture()) !== firstPicture && (await cdp.evaluate("window.__controls.problem('palette')")) === '');
+  await cdp.evaluate('window.__controls.reset()');
+  await choose('#option-theme', bad.theme);
+  check('theme file: a bad one gets the tool\'s message',
+    (await cdp.evaluate("window.__controls.problem('theme')")) === 'The theme bad.toml: unknown key "shade" in the [route] table.',
+    await cdp.evaluate("window.__controls.problem('theme')"));
+  check('theme file: a bad one changes nothing', (await picture()) === firstPicture);
+  await choose('#option-theme', good.theme);
+  check('theme file: a good one is used', (await picture()) !== firstPicture && (await cdp.evaluate("window.__controls.problem('theme')")) === '');
+  await cdp.evaluate('window.__controls.reset()');
+  check('files: reset leaves neither', (await picture()) === firstPicture);
+
+  // A sample changed without a download, and servers left out
+  const { 'overpass-url': _ours, ...builtIn } = OPTIONS;
+  await open(builtIn);
+  await cdp.evaluate(`document.querySelector('[data-sample="${samples[0].slug}"]').click()`);
+  await ready();
+  state.seen.length = 0;
+  asked.length = 0;
+  const sample = await picture();
+  for (const [name, value] of [['season', 'winter'], ['exaggeration', 3], ['no-weather', true]]) {
+    await set(name, value);
+    check(`sample: ${name} changes it`, (await picture()) !== sample);
+    await set(name, undefined);
+  }
+  for (const box of ['dresel', 'vk-maps', 'overpass-api']) {
+    await cdp.evaluate(`(() => { const box = document.querySelector('[data-server="${box}"]'); box.checked = false; box.dispatchEvent(new Event('change')); })()`);
+  }
+  await cdp.evaluate('window.__controls.settled()');
+  check('servers: none left is said at once',
+    (await cdp.evaluate("window.__controls.problem('servers')")).startsWith('None of the Overpass servers left can fetch the map data here'),
+    await cdp.evaluate("window.__controls.problem('servers')"));
+  const strays = asked.filter((url) => !url.startsWith(`${ORIGIN}/`) && !/^(blob|data):/.test(url));
+  check('sample: nothing asked of a data service', services_asked().length === 0 && strays.length === 0, strays.join(', '));
+  await shot('9-sample');
+  await reducedMotion(false);
+
   // What the page refuses, and what fails on the way
   await open();
   const failing = async (name, run, expect) => {
@@ -330,6 +528,8 @@ try {
   const kinds = services_asked().map(({ url }) => url.split('/')[1]);
   check('too large: that build asks no map data', kinds.includes('terrain') && !kinds.includes('overpass'), kinds.join(', '));
 
+  // A fresh page, as that button left map data out of the page's options
+  await open();
   const { 'overpass-url': _, ...BUILT_IN } = OPTIONS;
   await cdp.evaluate("window.__skip = ['dresel', 'vk-maps', 'overpass-api']");
   await cdp.evaluate(`window.__options = ${JSON.stringify(BUILT_IN)}`);

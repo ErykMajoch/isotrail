@@ -581,3 +581,86 @@ fn the_track_s_own_warnings_are_kept_for_the_page() {
         ["the diorama is built from the elevation alone, without lakes, woods or paths"]
     );
 }
+
+fn snowdon_scene() -> Vec<u8> {
+    let (built, _) = run(&mut builder(OPTIONS), |_| None);
+    built.unwrap()
+}
+
+#[test]
+fn a_finished_scene_takes_the_season_weather_and_exaggeration_as_the_tool_does() {
+    let scene = snowdon_scene();
+    assert_eq!(isotrail_scene::adjust(&scene, "{}").unwrap(), scene);
+    let options = r#"{"season": "winter", "no-weather": true, "exaggeration": 3}"#;
+    let adjusted =
+        SceneBundle::from_bytes(&isotrail_scene::adjust(&scene, options).unwrap()).unwrap();
+    let mut expected = SceneBundle::from_bytes(&scene).unwrap();
+    let render = isotrail_options::Settings::from_json(options, "the test")
+        .and_then(|settings| settings.options())
+        .unwrap();
+    render.data.apply_to(&mut expected);
+    expected.grid.exaggeration = 3.0;
+    assert_eq!(adjusted, expected);
+    assert!(adjusted.weather.is_none());
+    assert_eq!(adjusted.season.leaf_day, Some(15));
+    let autumn = isotrail_scene::adjust(&scene, r#"{"season": "autumn"}"#).unwrap();
+    assert_eq!(
+        SceneBundle::from_bytes(&autumn).unwrap().season.leaf_day,
+        Some(290)
+    );
+}
+
+#[test]
+fn a_finished_scene_refuses_what_needs_the_gpx_file() {
+    let scene = snowdon_scene();
+    let failure = isotrail_scene::adjust(&scene, r#"{"trim-start": "1km"}"#).unwrap_err();
+    assert_eq!(failure.reason, "usage");
+    assert_eq!(
+        failure.message,
+        "--trim-start can't cut the route a scene bundle holds; give the GPX file instead"
+    );
+    let failure = isotrail_scene::adjust(b"not a scene", r#"{"season": "winter"}"#).unwrap_err();
+    assert_eq!(failure.reason, "input");
+    assert!(failure.message.starts_with("can't read the scene file: "));
+}
+
+#[test]
+fn palette_and_theme_files_get_the_tool_s_messages() {
+    assert_eq!(
+        isotrail_scene::check_palette("warm.hex", "ff0000\n00ff00\n"),
+        Ok(())
+    );
+    let failure = isotrail_scene::check_palette("warm.hex", "ff0000\nzzzzzz\n").unwrap_err();
+    assert_eq!(failure.reason, "usage");
+    assert_eq!(
+        failure.message,
+        r#"can't read the palette warm.hex: line 2: expected a colour as RRGGBB, found "zzzzzz""#
+    );
+    let failure = isotrail_scene::check_palette("empty.hex", "\n").unwrap_err();
+    assert_eq!(
+        failure.message,
+        "can't read the palette empty.hex: the palette has no colours"
+    );
+    assert_eq!(
+        isotrail_scene::check_theme("mine.toml", "[route]\n"),
+        Ok(())
+    );
+    let failure = isotrail_scene::check_theme("mine.toml", "[route]\nshade = 1\n").unwrap_err();
+    assert_eq!(failure.reason, "usage");
+    assert_eq!(
+        failure.message,
+        r#"the theme mine.toml: unknown key "shade" in the [route] table"#
+    );
+}
+
+#[test]
+fn options_are_checked_with_the_tool_s_messages() {
+    assert!(isotrail_scene::read_options(r#"{"palette": "aap-64", "route-width": 3}"#).is_ok());
+    let failure = isotrail_scene::read_options(r#"{"route-width": 9}"#).expect_err("refused");
+    assert_eq!(failure.reason, "usage");
+    assert!(
+        failure.message.starts_with("route-width in the options: "),
+        "{}",
+        failure.message
+    );
+}
