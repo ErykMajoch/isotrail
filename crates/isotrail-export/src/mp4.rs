@@ -1,15 +1,21 @@
-use std::ffi::OsString;
-use std::io::{self, Read, Write};
-use std::path::{MAIN_SEPARATOR_STR, Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
-use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+#[cfg(not(target_arch = "wasm32"))]
+use std::{
+    ffi::OsString,
+    io::{self, Read, Write},
+    path::{MAIN_SEPARATOR_STR, Path, PathBuf},
+    process::{Child, Command, Stdio},
+    sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender},
+    thread::JoinHandle,
+    time::{Duration, Instant},
+};
 
+#[cfg(not(target_arch = "wasm32"))]
 use isotrail_render::Frame;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::{ExportError, upscale};
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Longer than ffmpeg ever needs to take one frame or to finish the file
 const PATIENCE: Duration = Duration::from_secs(60);
 pub const MAX_MP4_FPS: u32 = 60;
@@ -39,12 +45,14 @@ pub struct Mp4Options {
     pub preset: Option<&'static str>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// The ffmpeg program that encodes MP4 video
 #[derive(Debug, Clone)]
 pub struct Ffmpeg {
     program: PathBuf,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Ffmpeg {
     /// The `ffmpeg` on PATH
     pub fn find() -> Result<Ffmpeg, ExportError> {
@@ -78,6 +86,7 @@ impl Ffmpeg {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Streams frames, enlarged `scale` times, into ffmpeg, which encodes them as
 /// H.264 in an MP4 file
 pub struct Mp4Writer {
@@ -96,6 +105,7 @@ pub struct Mp4Writer {
     patience: Duration,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Mp4Writer {
     /// Frames are `width x height` internal pixels
     pub fn create(
@@ -311,6 +321,7 @@ impl Mp4Writer {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Drop for Mp4Writer {
     fn drop(&mut self) {
         if self.frames.is_some() || self.feeder.is_some() {

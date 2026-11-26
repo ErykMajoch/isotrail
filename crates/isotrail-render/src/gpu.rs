@@ -48,6 +48,8 @@ impl fmt::Display for AdapterMode {
     }
 }
 
+/// Cloning shares the same device
+#[derive(Clone)]
 pub struct Gpu {
     adapter: wgpu::Adapter,
     device: wgpu::Device,

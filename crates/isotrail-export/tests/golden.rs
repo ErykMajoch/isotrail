@@ -2,8 +2,8 @@ use isotrail_bundle::{
     MoonSample, SceneBundle, Season, SunSample, Units, Weather, WeatherDataset, WeatherSample,
 };
 use isotrail_export::{
-    Caption, ExportError, GifOptions, GifWriter, Plays, Still, finished_clip, render_clip,
-    render_still, upscale,
+    Caption, ClipFrames, DrawnStill, ExportError, GifOptions, GifWriter, Plays, Still,
+    finished_clip, render_clip, render_still, upscale,
 };
 use isotrail_render::{
     Aim, Aspect, Background, Canvas, Conditions, DEFAULT_PALETTE, DEFAULT_STATS, DateFormat,
@@ -1118,4 +1118,106 @@ fn every_clip_ends_on_the_still() {
             share * 100.0
         );
     }
+}
+
+/// A pause that waits for the GPU, as a browser task would
+fn wait_for(gpu: &Gpu) -> impl FnMut() -> std::future::Ready<()> + '_ {
+    || {
+        gpu.device()
+            .poll(wgpu::PollType::wait_indefinitely())
+            .unwrap();
+        std::future::ready(())
+    }
+}
+
+#[test]
+fn a_still_read_without_blocking_is_the_same_still() {
+    let gpu = isotrail_testkit::gpu();
+    let bundle = hike_bundle();
+    let framing = Canvas::new(160, 90).framing(1).unwrap();
+    let look = Look::default();
+    let sun = SunState::for_hike(&bundle);
+    let renderer = TerrainRenderer::new(&gpu);
+    let mesh = mesh_within(&VoxelMesher::default(), &bundle, gpu.max_buffer_size()).unwrap();
+    let drawn = DrawnStill::draw(
+        &gpu,
+        &renderer,
+        &bundle,
+        mesh,
+        &framing,
+        &Aim::default(),
+        &sun,
+        &look,
+    )
+    .unwrap();
+    let read = pollster::block_on(drawn.read_async(&gpu, wait_for(&gpu))).unwrap();
+    // The same buffer, read again and blocking
+    assert_eq!(read, drawn.read(&gpu).unwrap());
+    let still = render_still(
+        &gpu,
+        &bundle,
+        &VoxelMesher::default(),
+        &framing,
+        &Aim::default(),
+        &sun,
+        &look,
+    )
+    .unwrap();
+    assert_eq!(read, still);
+}
+
+#[test]
+fn clip_frames_read_one_by_one_are_the_clip() {
+    let gpu = isotrail_testkit::gpu();
+    let bundle = hike_bundle();
+    let framing = Canvas::new(96, 64).framing(1).unwrap();
+    let look = Look::default();
+    let motion = Motion {
+        timeline: Timeline {
+            duration_s: 2.0,
+            fps: 6,
+            step_fps: Some(3),
+            ..Timeline::default()
+        },
+        ..Motion::default()
+    };
+    let mut whole = Vec::new();
+    render_clip(
+        &gpu,
+        &bundle,
+        &VoxelMesher::default(),
+        &framing,
+        &look,
+        &motion,
+        |moment, frame| -> Result<(), ExportError> {
+            whole.push((*moment, frame.clone()));
+            Ok(())
+        },
+    )
+    .unwrap();
+
+    let renderer = TerrainRenderer::new(&gpu);
+    let mesh = mesh_within(&VoxelMesher::default(), &bundle, gpu.max_buffer_size()).unwrap();
+    let mut frames = ClipFrames::new(&gpu, &renderer, &bundle, mesh, &framing, &motion).unwrap();
+    assert_eq!(frames.len(), 12);
+    let mut drawn = 0;
+    let mut shown = None;
+    let mut one_by_one = Vec::new();
+    while let Some((moment, new)) = frames.advance(&gpu, &renderer, &bundle, &look) {
+        if new {
+            drawn += 1;
+            let read = frames.target().read_back_async(&gpu, wait_for(&gpu));
+            shown = Some(pollster::block_on(read).unwrap());
+        }
+        one_by_one.push((moment, shown.clone().unwrap()));
+    }
+    // Drawn again only when the moment changes
+    let moments = whole
+        .windows(2)
+        .filter(|w| w[0].0.time_s != w[1].0.time_s)
+        .count()
+        + 1;
+    assert!(moments < whole.len());
+    assert_eq!(drawn, moments);
+    assert!(one_by_one == whole);
 }

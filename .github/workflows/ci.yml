@@ -56,7 +56,10 @@ jobs:
       # Clippy rather than check, as the web crate's code only exists on wasm32
       - name: Check wasm32 build of the crates that run in a browser
         if: runner.os == 'Linux'
-        run: cargo clippy --target wasm32-unknown-unknown -p isotrail-track -p isotrail-bundle -p isotrail-geo -p isotrail-render -p isotrail-export -p isotrail-options -p isotrail-web -p isotrail-scene -- -D warnings
+        # Once more for the web app's renderer, which reads stills and frames back
+        run: |
+          cargo clippy --target wasm32-unknown-unknown -p isotrail-track -p isotrail-bundle -p isotrail-geo -p isotrail-render -p isotrail-export -p isotrail-options -p isotrail-web -p isotrail-scene -- -D warnings
+          cargo clippy --target wasm32-unknown-unknown -p isotrail-web --features export -- -D warnings
 
   deny:
     name: dependencies
@@ -140,6 +143,23 @@ jobs:
 
       - name: Browser check of a scene built from a GPX file
         run: node web/test/scene.mjs chrome --webgl
+
+      # The web app's own build of the renderer, which also reads stills and frames back
+      - name: Build the web app's renderer
+        run: |
+          sh web/build-app.sh
+          {
+            echo "| Web app renderer file | Bytes | Gzipped bytes |"
+            echo "|---|---|---|"
+            for file in web/app/pkg/isotrail_web.js web/app/pkg/isotrail_web_bg.wasm; do
+              echo "| \`$file\` | $(wc -c < "$file") | $(gzip -9c "$file" | wc -c) |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Browser check of reading stills and frames back
+        env:
+          ISOTRAIL_GPU: software
+        run: node web/test/export.mjs chrome --webgl
 
   site:
     name: site

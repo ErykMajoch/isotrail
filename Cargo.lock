@@ -1204,8 +1204,10 @@ dependencies = [
  "isotrail-render",
  "isotrail-testkit",
  "png",
+ "pollster",
  "tempfile",
  "thiserror",
+ "wgpu",
 ]
 
 [[package]]
@@ -1320,6 +1322,7 @@ dependencies = [
  "console_error_panic_hook",
  "glam",
  "isotrail-bundle",
+ "isotrail-export",
  "isotrail-render",
  "js-sys",
  "wasm-bindgen",

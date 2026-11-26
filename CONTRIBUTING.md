@@ -52,6 +52,7 @@ Please don't add real recordings to the repository. Tests use synthetic routes o
    cargo clippy --workspace --all-targets -- -D warnings
    cargo test --workspace
    cargo clippy --target wasm32-unknown-unknown -p isotrail-track -p isotrail-bundle -p isotrail-geo -p isotrail-render -p isotrail-export -p isotrail-options -p isotrail-web -p isotrail-scene -- -D warnings
+   cargo clippy --target wasm32-unknown-unknown -p isotrail-web --features export -- -D warnings
    cargo deny check
    ```
 
@@ -69,8 +70,15 @@ Please don't add real recordings to the repository. Tests use synthetic routes o
    node web/test/scene.mjs chrome
    ```
 
-5. If you changed anything in `site/`, build the web app and run the same check on its page, as [The web app](#the-web-app) explains.
-6. Open the pull request.
+5. If you changed the renderer or how stills and clips are drawn, build the web app's renderer and run its check. It reads stills and animation frames in the browser and compares them with the ones isotrail draws natively. On Windows the native ones are drawn through Direct3D 12, as the browser draws them.
+
+   ```bash
+   sh web/build-app.sh
+   node web/test/export.mjs chrome
+   ```
+
+6. If you changed anything in `site/`, build the web app and run the same check on its page, as [The web app](#the-web-app) explains.
+7. Open the pull request.
 
 ### Notes on the checks
 
@@ -82,7 +90,7 @@ Release archives carry `THIRD-PARTY-NOTICES.md`, with the licence of every crate
 cargo about generate --locked --fail about.hbs -o out/THIRD-PARTY-NOTICES.md
 ```
 
-CI fails if `isotrail-embed.js`, `pkg/isotrail_web.js` and `pkg/isotrail_web_bg.wasm` come to more than 1.1MB gzipped. After `sh web/build.sh`, a local build of `isotrail embed` finds the runtime with `--runtime-dir web`. The scene worker has no limit, but CI reports its size.
+CI fails if `isotrail-embed.js`, `pkg/isotrail_web.js` and `pkg/isotrail_web_bg.wasm` come to more than 1.1MB gzipped. After `sh web/build.sh`, a local build of `isotrail embed` finds the runtime with `--runtime-dir web`. The scene worker and the web app's renderer have no limit, but CI reports their sizes.
 
 isotrail asks the GPU for WebGL2's limits on every platform, so the native tests also catch anything the browser fallback couldn't draw.
 

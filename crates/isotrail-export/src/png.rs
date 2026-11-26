@@ -1,5 +1,9 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
-use std::io::{BufWriter, Write};
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::BufWriter;
+use std::io::Write;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 use isotrail_render::Frame;
@@ -16,6 +20,7 @@ pub fn encode_png(frame: &Frame, writer: impl Write) -> Result<(), ExportError> 
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn write_png(path: &Path, frame: &Frame) -> Result<(), ExportError> {
     let write = || -> Result<(), ExportError> {
         let mut file = BufWriter::new(File::create(path)?);

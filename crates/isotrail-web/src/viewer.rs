@@ -1,5 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use glam::Vec2;
 use isotrail_bundle::{BundleError, FORMAT_VERSION, OLDEST_FORMAT_VERSION, SceneBundle};
@@ -23,14 +24,14 @@ thread_local! {
 /// A hike's diorama drawn into a canvas
 #[wasm_bindgen]
 pub struct Viewer {
-    gpu: Gpu,
+    pub(crate) gpu: Gpu,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
-    renderer: TerrainRenderer,
+    pub(crate) renderer: Rc<TerrainRenderer>,
     present: Present,
-    bundle: SceneBundle,
-    mesh: TerrainMesh,
-    options: Options,
+    pub(crate) bundle: Rc<SceneBundle>,
+    pub(crate) mesh: TerrainMesh,
+    pub(crate) options: Options,
     stage: Option<Stage>,
     walk: Walk,
     view: View,
@@ -105,7 +106,7 @@ impl Viewer {
         {
             config.alpha_mode = wgpu::CompositeAlphaMode::PreMultiplied;
         }
-        let renderer = TerrainRenderer::new(&gpu);
+        let renderer = Rc::new(TerrainRenderer::new(&gpu));
         let present = Present::new(&gpu, config.format);
         let options = Options::read(&options, &bundle);
         let mesh = mesh_within(options.mesher().as_ref(), &bundle, gpu.max_buffer_size())
@@ -121,7 +122,7 @@ impl Viewer {
             config,
             renderer,
             present,
-            bundle,
+            bundle: Rc::new(bundle),
             mesh,
             options,
             stage: None,
@@ -448,7 +449,7 @@ fn unreadable(err: BundleError) -> JsValue {
     }
 }
 
-fn failure(reason: &str, err: impl std::fmt::Display) -> JsValue {
+pub(crate) fn failure(reason: &str, err: impl std::fmt::Display) -> JsValue {
     let error = js_sys::Error::new(&err.to_string());
     let _ = js_sys::Reflect::set(&error, &"reason".into(), &reason.into());
     error.into()

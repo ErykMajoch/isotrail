@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+#[cfg(not(target_arch = "wasm32"))]
 use std::process::ExitStatus;
 
 /// Why a frame could not be exported
@@ -29,6 +30,7 @@ pub enum ExportError {
     #[error("a GIF can be at most 65535 pixels wide and high, not {width} x {height}")]
     GifSize { width: u32, height: u32 },
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[error(
         "MP4 output needs ffmpeg, which wasn't found on PATH; install it from \
          https://ffmpeg.org/download.html or with winget install Gyan.FFmpeg, \
@@ -36,12 +38,15 @@ pub enum ExportError {
     )]
     FfmpegMissing,
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("can't run ffmpeg at {}; check --ffmpeg or ISOTRAIL_FFMPEG", path.display())]
     FfmpegAt { path: PathBuf },
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("ffmpeg failed ({status}): {stderr}")]
     Ffmpeg { status: ExitStatus, stderr: String },
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[error(
         "ffmpeg made no progress for {seconds}s, so it was stopped{}",
         last_words(.stderr)
@@ -77,6 +82,7 @@ pub enum ExportError {
     Io(#[from] std::io::Error),
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn last_words(stderr: &str) -> String {
     match stderr.lines().last() {
         Some(line) => format!(": {line}"),

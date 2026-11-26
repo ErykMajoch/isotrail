@@ -3,7 +3,9 @@ use std::path::PathBuf;
 
 use clap::Args;
 use clap::builder::PossibleValuesParser;
-use isotrail_export::{DEFAULT_CRF, Ffmpeg, GifOptions, MAX_CRF, Mp4Options, Plays, X264_PRESETS};
+#[cfg(not(target_arch = "wasm32"))]
+use isotrail_export::Ffmpeg;
+use isotrail_export::{DEFAULT_CRF, GifOptions, MAX_CRF, Mp4Options, Plays, X264_PRESETS};
 use isotrail_render::parse_count;
 use tracing::warn;
 
@@ -125,6 +127,7 @@ impl EncodingArgs {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn ffmpeg(&self) -> anyhow::Result<Ffmpeg> {
         Ok(match &self.ffmpeg {
             Some(path) => Ffmpeg::at(path)?,

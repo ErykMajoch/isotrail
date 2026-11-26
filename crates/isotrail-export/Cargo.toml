@@ -17,7 +17,9 @@ thiserror.workspace = true
 [dev-dependencies]
 anyhow.workspace = true
 isotrail-testkit = { path = "../isotrail-testkit" }
+pollster.workspace = true
 tempfile.workspace = true
+wgpu.workspace = true
 
 [lints]
 workspace = true
