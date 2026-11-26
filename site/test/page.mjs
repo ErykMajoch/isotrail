@@ -1,6 +1,7 @@
 // Headless browser check of the web app: a GPX file dropped or chosen, the
 // sample walks, the keyboard, reduced motion, every failure the page can
-// show, the scene file it hands back, and the controls
+// show, the scene file it hands back, the controls, the settings it keeps,
+// phone and desktop sizes with an accessibility scan, touch, and memory
 //
 //   node site/test/page.mjs [chrome|edge] [--webgl] [--site DIR] [--shots DIR]
 //
@@ -32,6 +33,9 @@ const SHOTS = option('--shots') && resolve(option('--shots'));
 const BROWSER = args.find((arg, i) => !arg.startsWith('--') && !['--site', '--shots'].includes(args[i - 1])) ?? 'chrome';
 const TIMEOUT_MS = 60000;
 const VIEWPORT = { width: 1100, height: 1200, deviceScaleFactor: 1, mobile: false };
+const PHONE = { width: 390, height: 844, deviceScaleFactor: 1, mobile: true };
+const DESKTOP = { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false };
+const AXE = await readFile(join(ROOT, 'site', 'node_modules', 'axe-core', 'axe.min.js'), 'utf8');
 
 if (!existsSync(join(SITE, 'index.html'))) {
   console.error(`${SITE} holds no built site: build it first with sh site/build.sh`);
@@ -118,10 +122,14 @@ async function reducedMotion(on) {
   await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: on ? 'reduce' : 'no-preference' }] });
 }
 
-// The page, fresh, with every build pointed at the local services
-async function open(options = OPTIONS) {
+// The page, fresh, with every build pointed at the local services. Settings
+// kept from an earlier visit are cleared unless `keep` is set
+async function open(options = OPTIONS, { keep = false } = {}) {
+  if (!keep) await cdp.send('Storage.clearDataForOrigin', { origin: ORIGIN, storageTypes: 'local_storage' });
   await cdp.send('Page.navigate', { url: `${ORIGIN}/` });
   await cdp.waitFor("document.readyState === 'complete' && window.__scene?.state === 'idle' && !!window.__scenes");
+  // A reload keeps the scroll, which could leave the diorama off screen and not loading
+  await cdp.evaluate('window.__controls.settled().then(() => window.scrollTo(0, 0))');
   await cdp.evaluate(`window.__options = ${JSON.stringify(options)}; window.__events = [];
     for (const type of ['isotrail-play', 'isotrail-ready']) document.getElementById('hike').addEventListener(type, () => window.__events.push(type))`);
 }
@@ -147,6 +155,7 @@ const shown = () => cdp.evaluate(`(() => {
 // Drops these files on the drop zone as a person would
 async function drop(paths) {
   const box = await cdp.evaluate(`(() => {
+    document.getElementById('drop').scrollIntoView({ block: 'center' });
     const { x, y, width, height } = document.getElementById('drop').getBoundingClientRect();
     return { x: x + width / 2, y: y + height / 2 };
   })()`);
@@ -252,6 +261,108 @@ async function tabTo(focused, presses = 40) {
     if (await cdp.evaluate(focused)) return true;
   }
   return false;
+}
+
+// Unticks a map data server's box as a visitor would
+async function untick(server) {
+  await cdp.evaluate(`(() => {
+    const box = document.querySelector('[data-server="${server}"]');
+    box.checked = false;
+    box.dispatchEvent(new Event('change'));
+  })()`);
+  await cdp.evaluate('window.__controls.settled()');
+}
+
+// The window's size, and the browser's text size in pixels. A phone has a
+// touch screen, so its pointer is coarse
+async function size(screen, text) {
+  await cdp.send('Emulation.setDeviceMetricsOverride', screen);
+  await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: screen.mobile, maxTouchPoints: screen.mobile ? 5 : 1 });
+  await cdp.send('Page.setFontSizes', { fontSizes: { standard: text, fixed: Math.round(text * 0.8125) } });
+}
+
+const sideways = () => cdp.evaluate('document.documentElement.scrollWidth - document.documentElement.clientWidth');
+
+// The accessibility scan's serious and critical findings, shadow roots
+// included. With --shots every finding is printed
+async function scan() {
+  await cdp.evaluate(`${AXE}\n;true`);
+  const found = await cdp.evaluate(`axe.run(document, {
+    runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa', 'best-practice'] },
+  }).then(({ violations }) => violations.map(({ id, impact, nodes }) => ({ id, impact, nodes: nodes.slice(0, 3).map(({ target }) => target.flat().join(' ')) })))`);
+  if (SHOTS) for (const { id, impact, nodes } of found) console.log(`     scan: ${impact} ${id} (${nodes.join(', ')})`);
+  return found.filter(({ impact }) => ['serious', 'critical'].includes(impact));
+}
+
+const scanned = (found) => [found.length === 0, found.map(({ id, nodes }) => `${id}: ${nodes.join(', ')}`).join(' | ')];
+
+// What has focus, in words, whether it shows an outline, and whether it is
+// on screen and not covered
+const FOCUSED = `(() => {
+  const element = document.activeElement;
+  if (!element || element === document.body) return { name: 'body' };
+  if (element.id === 'hike') return { name: 'diorama', outline: true, seen: true, inside: true };
+  const option = element.closest('[data-option]')?.dataset.option;
+  const name = element.dataset.server ? 'server ' + element.dataset.server
+    : element.dataset.sample ? 'sample ' + element.dataset.sample
+    : option ? 'option ' + option + (element.type === 'checkbox' && element.closest('fieldset') ? ' ' + element.value : '')
+    : element.tagName === 'SUMMARY' ? 'group ' + element.textContent
+    : element.id || element.tagName.toLowerCase();
+  const ring = element.id === 'file' ? document.getElementById('drop') : element;
+  const style = getComputedStyle(ring);
+  const box = ring.getBoundingClientRect();
+  const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+  return {
+    name,
+    closed: element.tagName === 'SUMMARY' && !element.parentElement.open,
+    // A time field's clock button has the focus inside it, and the browser rings it
+    outline: (style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) > 0) || (element.type === 'time' && !element.matches(':focus')),
+    seen: !!hit && (ring.contains(hit) || hit.contains(ring) || !!element.labels?.[0]?.contains(hit)),
+    inside: box.bottom > 0 && box.top < innerHeight,
+  };
+})()`;
+
+// Tabs through the whole page with a hike shown, opening each group on the
+// way. Every control must be reached, show its focus and not be covered
+async function tabWalk(at) {
+  await open();
+  await cdp.evaluate(`document.querySelector('[data-sample="${samples[0].slug}"]').click()`);
+  check(`${at}: the diorama shows for the walk`, await ready(), await cdp.evaluate("document.getElementById('hike').dataset.state"));
+  await cdp.evaluate('document.activeElement?.blur(); window.scrollTo(0, 0)');
+  const order = [];
+  const unseen = [];
+  for (let i = 0; i < 400; i++) {
+    await key('Tab', 'Tab', 9);
+    await sleepFor(30);
+    const focused = await cdp.evaluate(FOCUSED);
+    if (focused.name === 'body' || (order.length && focused.name === order[0])) break;
+    order.push(focused.name);
+    if (!focused.outline || !focused.seen || !focused.inside) {
+      unseen.push(`${focused.name}${focused.outline ? '' : ' (no outline)'}${focused.seen && focused.inside ? '' : ' (covered)'}`);
+    }
+    if (focused.closed) await key('Enter', 'Enter', 13, '\r');
+  }
+  const wanted = await cdp.evaluate(`[...document.querySelectorAll('#controls [data-option]')].filter((control) => control.offsetParent)
+    .flatMap((control) => control.dataset.kind === 'choices'
+      ? [...control.querySelectorAll('input')].map((box) => 'option ' + control.dataset.option + ' ' + box.value)
+      : ['option ' + control.dataset.option])
+    .concat([...document.querySelectorAll('[data-server]')].map((box) => 'server ' + box.dataset.server), ['remember', 'reset-all', 'diorama'])`);
+  const missed = wanted.filter((name) => !order.includes(name));
+  check(`${at}: Tab reaches every control`, missed.length === 0, missed.join(', '));
+  check(`${at}: each one shows its focus on screen`, unseen.length === 0, unseen.join(', '));
+  return order;
+}
+
+// A one-finger swipe from this point, by dx and dy
+async function swipe({ x, y }, dx, dy) {
+  const steps = 10;
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+  for (let i = 1; i <= steps; i++) {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + (dx * i) / steps, y: y + (dy * i) / steps }] });
+    await sleepFor(16);
+  }
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await sleepFor(400);
 }
 
 async function downloaded(name) {
@@ -480,6 +591,169 @@ try {
   const strays = asked.filter((url) => !url.startsWith(`${ORIGIN}/`) && !/^(blob|data):/.test(url));
   check('sample: nothing asked of a data service', services_asked().length === 0 && strays.length === 0, strays.join(', '));
   await shot('9-sample');
+  await reducedMotion(false);
+
+  // The settings this browser keeps
+  await reducedMotion(true);
+  await open();
+  for (const [name, value] of [['aspect', 'square'], ['season', 'winter'], ['paths', 'off'], ['trim-start', '300m'], ['turn', 90]]) await set(name, value);
+  await untick('vk-maps');
+  const kept = await cdp.evaluate('window.__controls.kept()');
+  check('kept: the settings set, without the camera', JSON.stringify(kept) === JSON.stringify({
+    version: 1, remember: true, options: { aspect: 'square', season: 'winter', paths: 'off', 'trim-start': '300m' }, skip: ['vk-maps'],
+  }), JSON.stringify(kept));
+  await open(OPTIONS, { keep: true });
+  const back = await cdp.evaluate(`(() => {
+    const value = window.__controls.value;
+    return {
+      values: ['aspect', 'season', 'paths', 'trim-start', 'turn'].map(value),
+      shape: getComputedStyle(document.getElementById('frame')).getPropertyValue('--shape').trim(),
+      attribute: document.getElementById('hike').getAttribute('aspect'),
+      box: document.querySelector('[data-server="vk-maps"]').checked,
+      notice: document.getElementById('kept').hidden ? null : document.getElementById('kept-text').textContent,
+    };
+  })()`);
+  check('kept: they come back after a reload', JSON.stringify(back.values) === JSON.stringify(['square', 'winter', 'off', '300m', null]) &&
+    back.shape === '1 / 1' && back.attribute === 'square' && back.box === false, JSON.stringify(back));
+  check('kept: the first screen names them',
+    back.notice === 'This browser kept your settings from last time: Shape, Season, Paths, Trim the start and Map data servers.', back.notice);
+  await cdp.evaluate("document.getElementById('remember').click()");
+  const off = JSON.stringify({ version: 1, remember: false });
+  check('kept: turning remembering off keeps only that', JSON.stringify(await cdp.evaluate('window.__controls.kept()')) === off,
+    JSON.stringify(await cdp.evaluate('window.__controls.kept()')));
+  await open(OPTIONS, { keep: true });
+  const forgotten = await cdp.evaluate(`({
+    aspect: window.__controls.value('aspect') ?? null,
+    box: document.querySelector('[data-server="vk-maps"]').checked,
+    remember: document.getElementById('remember').checked,
+    notice: !document.getElementById('kept').hidden,
+  })`);
+  check('kept: after a reload, nothing comes back and the switch stays off',
+    JSON.stringify(forgotten) === JSON.stringify({ aspect: null, box: true, remember: false, notice: false }), JSON.stringify(forgotten));
+  await set('season', 'summer');
+  check('kept: nothing is saved while it is off', JSON.stringify(await cdp.evaluate('window.__controls.kept()')) === off);
+  await cdp.evaluate("document.getElementById('remember').click()");
+  check('kept: turning it on again saves what shows', JSON.stringify((await cdp.evaluate('window.__controls.kept()'))?.options) === JSON.stringify({ season: 'summer' }),
+    JSON.stringify(await cdp.evaluate('window.__controls.kept()')));
+  await cdp.evaluate('window.__controls.reset()');
+  check('kept: reset leaves nothing kept', (await cdp.evaluate('window.__controls.kept()')) === null);
+  const stored = [
+    ['another version', JSON.stringify({ version: 0, options: { aspect: 'square' } })],
+    ['a broken one', '{"version": 1, "options": {'],
+    ['values the page no longer takes', JSON.stringify({
+      version: 1, remember: true, options: { aspect: 'triangle', 'block-height': 99, turn: 5, nonsense: 1 }, skip: ['nowhere'],
+    })],
+  ];
+  for (const [what, text] of stored) {
+    await cdp.evaluate(`localStorage.setItem('isotrail.settings', ${JSON.stringify(text)})`);
+    const errors = cdp.exceptions.length;
+    await open(OPTIONS, { keep: true });
+    const fresh = await cdp.evaluate(`({
+      aspect: window.__controls.value('aspect') ?? null,
+      height: window.__controls.value('block-height') ?? null,
+      notice: !document.getElementById('kept').hidden,
+      kept: window.__controls.kept(),
+    })`);
+    check(`kept: ${what} is dropped without an error`,
+      fresh.aspect === null && fresh.height === null && !fresh.notice && fresh.kept === null && cdp.exceptions.length === errors, JSON.stringify(fresh));
+  }
+  await reducedMotion(false);
+
+  // Phone and desktop sizes, at the browser's own text size and at twice it
+  await reducedMotion(true);
+  const walks = {};
+  for (const screen of [PHONE, DESKTOP]) {
+    for (const text of [16, 32]) {
+      const at = `${screen.width}px${text === 32 ? ', large text' : ''}`;
+      await size(screen, text);
+      await open();
+      check(`${at}: no sideways scroll on the first screen`, (await sideways()) === 0, `${await sideways()}px`);
+      check(`${at}: the first screen passes the accessibility scan`, ...scanned(await scan()));
+      await cdp.evaluate(`document.querySelector('[data-sample="${samples[0].slug}"]').click()`);
+      check(`${at}: the diorama shows`, await ready(), await cdp.evaluate(`JSON.stringify({
+        state: document.getElementById('hike').dataset.state,
+        frame: document.getElementById('frame').getBoundingClientRect(),
+        scrolled: scrollY, height: innerHeight, focus: document.hasFocus(),
+      })`));
+      await cdp.evaluate("document.querySelectorAll('#controls details').forEach((details) => (details.open = true))");
+      check(`${at}: no sideways scroll with every group open`, (await sideways()) === 0, `${await sideways()}px`);
+      check(`${at}: the page with a hike passes the accessibility scan`, ...scanned(await scan()));
+      await cdp.evaluate("[...document.querySelectorAll('#controls [data-option]')].at(-1).scrollIntoView({ block: 'end' })");
+      await sleepFor(300);
+      const view = await cdp.evaluate(`(() => {
+        const { top, bottom } = document.getElementById('frame').getBoundingClientRect();
+        return { top, bottom, height: innerHeight, scrolled: scrollY };
+      })()`);
+      check(`${at}: the diorama stays in view at the last control`, view.scrolled > 0 && view.top >= 0 && view.bottom <= view.height, JSON.stringify(view));
+      await drop([files.photo]);
+      await settled();
+      check(`${at}: the error shows`, (await shown()).error?.text === 'photo.png is an image, not a GPX file.', JSON.stringify((await shown()).error));
+      check(`${at}: no sideways scroll with an error`, (await sideways()) === 0, `${await sideways()}px`);
+      check(`${at}: the page with an error passes the accessibility scan`, ...scanned(await scan()));
+      if (text === 16) walks[screen.width] = await tabWalk(at);
+    }
+  }
+  if (SHOTS) for (const [width, order] of Object.entries(walks)) await writeFile(join(SHOTS, `walk-${width}.json`), `${JSON.stringify(order, null, 1)}\n`);
+  await size(VIEWPORT, 16);
+
+  // Touch on a phone: a swipe up the diorama scrolls the page, a swipe across
+  // turns the diorama
+  await reducedMotion(true);
+  await size(PHONE, 16);
+  await open();
+  await cdp.evaluate(`document.querySelector('[data-sample="${samples[0].slug}"]').click()`);
+  await ready();
+  await cdp.evaluate("window.scrollTo(0, document.getElementById('controls').offsetTop - 600)");
+  await sleepFor(300);
+  const centre = () => cdp.evaluate(`(() => {
+    const { x, y, width, height } = document.getElementById('frame').getBoundingClientRect();
+    return { x: x + width / 2, y: y + height / 2, scrolled: scrollY };
+  })()`);
+  const start = await centre();
+  await swipe(start, 0, -150);
+  const up = await cdp.evaluate("({ scrolled: scrollY, turn: window.__controls.value('turn') ?? null })");
+  check('touch: a swipe up the diorama scrolls the page', up.scrolled > start.scrolled + 50 && up.turn === null, JSON.stringify({ before: start.scrolled, ...up }));
+  const across = await centre();
+  await swipe({ x: across.x - 80, y: across.y }, 160, 0);
+  await sleepFor(500);
+  const turned = await cdp.evaluate("({ scrolled: scrollY, turn: window.__controls.value('turn') ?? null })");
+  check('touch: a swipe across turns the diorama and leaves the page', Math.abs(turned.scrolled - across.scrolled) <= 2 && turned.turn !== null,
+    JSON.stringify({ before: across.scrolled, ...turned }));
+  await size(VIEWPORT, 16);
+  await reducedMotion(false);
+
+  // Memory: a worker grown by a build is replaced, and the page goes on
+  await open();
+  await cdp.evaluate('window.__recycle = 0; window.__scenes.first = true');
+  await drop([files.walk]);
+  await settled();
+  check('memory: a worker grown past the bar is replaced', await cdp.evaluate('window.__scene.recycled === true && !window.__scenes.first'));
+  await set('block-height', 2);
+  check('memory: the fresh worker checks options', (await cdp.evaluate("window.__controls.problem('block-height')")) === '');
+  await drop([files.walk]);
+  await settled();
+  check('memory: and builds again', (await cdp.evaluate('window.__scene.state')) === 'built' && (await scene()).equals(walk) && (await ready()));
+  await cdp.evaluate('window.__recycle = undefined');
+
+  // Each change of scene starts a renderer of its own, and frees the last
+  const devicesCounted = await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
+    source: `window.__devices = { made: 0, destroyed: 0 };
+      if (window.GPUAdapter) {
+        const request = GPUAdapter.prototype.requestDevice;
+        GPUAdapter.prototype.requestDevice = function (...args) { window.__devices.made++; return request.apply(this, args); };
+        const destroy = GPUDevice.prototype.destroy;
+        GPUDevice.prototype.destroy = function (...args) { window.__devices.destroyed++; return destroy.apply(this, args); };
+      }`,
+  });
+  await reducedMotion(true);
+  await open();
+  await cdp.evaluate(`document.querySelector('[data-sample="${samples[0].slug}"]').click()`);
+  await ready();
+  for (let i = 0; i < 20; i++) await set('season', i % 2 ? 'summer' : 'winter');
+  check('memory: twenty changes in a row still show', await ready());
+  const devices = await cdp.evaluate('window.__devices');
+  if (!WEBGL) check('memory: one renderer is left after twenty changes', devices.made > 20 && devices.made - devices.destroyed === 1, JSON.stringify(devices));
+  await cdp.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: devicesCounted.identifier });
   await reducedMotion(false);
 
   // What the page refuses, and what fails on the way

@@ -40,6 +40,8 @@ import '../styles/site.css';
     </div>
   </section>
 
+  <p class="kept" id="kept" hidden><span id="kept-text"></span> <button type="button" id="kept-reset">Reset them</button></p>
+
   <section class="build" id="build" aria-labelledby="build-title" hidden>
     <h2 id="build-title">Building <span id="build-name"></span></h2>
     <ol class="steps">
@@ -63,35 +65,45 @@ import '../styles/site.css';
 
   <p class="visually-hidden" id="status" role="status"></p>
 
-  <section class="view" aria-label="Diorama">
-    <div class="frame" id="frame">
-      <p class="empty" id="empty">Your diorama shows here once you choose a hike.</p>
-      <isotrail-hike id="hike" aspect="wide" autoplay hidden></isotrail-hike>
+  <div class="workspace" id="workspace">
+    <div class="stage">
+      <section class="view" aria-label="Diorama">
+        <div class="frame" id="frame">
+          <p class="empty" id="empty">Your diorama shows here once you choose a hike.</p>
+          <isotrail-hike id="hike" aspect="wide" autoplay hidden></isotrail-hike>
+        </div>
+      </section>
+      <div class="after" id="after" hidden>
+        <p class="shown" id="shown"></p>
+        <ul class="notes" id="notes" aria-label="Notes on this scene"></ul>
+        <p class="files">
+          <a id="download">Download the scene file</a>
+          <a id="gpx" hidden>Download the sample's GPX file</a>
+        </p>
+        <p class="note">Drag to turn the diorama. Hold Ctrl and scroll, or pinch, to zoom. Press play to watch the route draw itself.</p>
+      </div>
     </div>
-    <div class="after" id="after" hidden>
-      <p class="shown" id="shown"></p>
-      <ul class="notes" id="notes" aria-label="Notes on this scene"></ul>
-      <p class="files">
-        <a id="download">Download the scene file</a>
-        <a id="gpx" hidden>Download the sample's GPX file</a>
-      </p>
-      <p class="note">Drag to turn the diorama. Hold Ctrl and scroll, or pinch, to zoom. Press play to watch the route draw itself.</p>
-    </div>
-  </section>
 
-  <section class="controls" id="controls" aria-labelledby="controls-title" hidden>
-    <h2 id="controls-title">Change how it looks</h2>
-    <p class="note">Each change shows on the diorama at once. Open a group for more.</p>
-    <div class="first" id="first"></div>
-    <div class="groups" id="groups"></div>
-    <p class="actions"><button type="button" id="reset-all">Reset to the defaults</button></p>
-    <p class="palette-file" id="palette-file">
-      <button type="button" id="palette-choose">Use a palette file</button>
-      <input type="file" id="palette-input" accept=".hex,text/plain" hidden>
-      <span class="hint">A .hex file from Lospec.</span>
-    </p>
-    <button type="button" id="theme-remove" hidden>Remove the theme</button>
-  </section>
+    <section class="controls" id="controls" aria-labelledby="controls-title" hidden>
+      <h2 id="controls-title">Change how it looks</h2>
+      <p class="note">Each change shows on the diorama at once. Open a group for more.</p>
+      <div class="first" id="first"></div>
+      <div class="groups" id="groups"></div>
+      <div class="actions">
+        <button type="button" id="reset-all">Reset to the defaults</button>
+        <p class="remember" id="remember-set">
+          <label class="switch"><input type="checkbox" id="remember" checked aria-describedby="remember-hint"> Remember my settings in this browser</label>
+          <span class="hint" id="remember-hint">They come back on your next visit. Your GPX file and the scene are never kept.</span>
+        </p>
+      </div>
+      <p class="palette-file" id="palette-file">
+        <button type="button" id="palette-choose">Use a palette file</button>
+        <input type="file" id="palette-input" accept=".hex,text/plain" hidden>
+        <span class="hint">A .hex file from Lospec.</span>
+      </p>
+      <button type="button" id="theme-remove" hidden>Remove the theme</button>
+    </section>
+  </div>
 </main>
 <footer>
   <p><span id="cache">This browser keeps what the services answered, so a second build downloads nothing.</span> <button type="button" id="clear">Clear it</button></p>

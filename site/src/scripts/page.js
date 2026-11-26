@@ -5,17 +5,21 @@
 // The browser checks read and drive the page through `window.__scenes`,
 // `window.__scene` and `window.__controls`. They may set `window.__options`
 // to options added to every build, `window.__servers` to their own Overpass
-// servers and `window.__skip` to the names of built-in ones to leave out
+// servers, `window.__skip` to the names of built-in ones to leave out and
+// `window.__recycle` to the worker memory a build may leave behind
 
 import {
-  ADJUST, CAMERA, Control, FIRST, GROUPS, LEFT_OUT, OPTIONS, REBUILD, SHAPES, place, route, serverBoxes,
+  ADJUST, CAMERA, Control, FIRST, GROUPS, LEFT_OUT, OPTIONS, REBUILD, SHAPES, label, place, route, serverBoxes,
 } from './controls.js';
+import { Settings } from './settings.js';
 
 const runtime = document.body.dataset.runtime;
 const { SceneWorker } = await import(/* @vite-ignore */ `${runtime}scene/scene.js`);
 
-const scenes = new SceneWorker();
+let scenes = new SceneWorker();
 const $ = (id) => document.getElementById(id);
+// A reload starts with no hike, so the place it was scrolled to means nothing
+history.scrollRestoration = 'manual';
 const hike = $('hike');
 
 const STEPS = {
@@ -45,6 +49,11 @@ const RETRY = ['busy', 'unreachable', 'network', 'offline', 'other'];
 const WITHOUT_MAP_DATA = 'without lakes, woods and paths';
 // The value of the palette list for a palette file
 const PALETTE_FILE = 'file';
+// Options never kept between visits: the camera follows each hike
+const NOT_KEPT = [...CAMERA, 'theme'];
+// The scene worker's WebAssembly memory never shrinks, so a worker that
+// grew past this for a large route is replaced by a fresh one
+const RECYCLE_BYTES = 96 * 1024 * 1024;
 
 let build;
 let last;
@@ -215,6 +224,7 @@ async function changed(control) {
     setLive(other);
   }
   await apply(name);
+  save();
 }
 
 async function apply(name) {
@@ -262,8 +272,7 @@ hike.addEventListener('isotrail-view', ({ detail }) => {
 // --- Building and changing the scene
 
 function skipped() {
-  const unticked = servers.boxes.filter(({ box }) => !box.checked).map(({ box }) => box.value);
-  return [...(window.__skip ?? []), ...unticked];
+  return [...(window.__skip ?? []), ...unticked()];
 }
 
 function buildKey() {
@@ -355,6 +364,21 @@ function show({ name, download, gpx, notes = [] }) {
   }
   $('after').hidden = false;
   $('controls').hidden = false;
+  $('workspace').classList.add('shown');
+  // On a small screen or with large text, the choices can push it out of view
+  const { top, bottom } = $('frame').getBoundingClientRect();
+  if (Math.min(bottom, innerHeight) - Math.max(top, 0) < (bottom - top) / 2) {
+    const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    $('frame').scrollIntoView({ block: 'nearest', behavior: still ? 'auto' : 'smooth' });
+  }
+}
+
+// The downloads stay in the browser's cache, so a fresh worker loses none
+function recycle() {
+  scenes.terminate();
+  scenes = new SceneWorker();
+  window.__scenes = scenes;
+  window.__scene.recycled = true;
 }
 
 async function buildScene(file, meta) {
@@ -383,6 +407,7 @@ async function buildScene(file, meta) {
     if (build !== controller) return;
     const notes = built.notes.map((note) => sentence(note, file.name));
     window.__scene = { ...window.__scene, ...built, state: 'built' };
+    if (built.memory > (window.__recycle ?? RECYCLE_BYTES)) recycle();
     $('build').hidden = true;
     announce(`Built ${meta.name}.`);
     current = {
@@ -511,6 +536,7 @@ $('retry').addEventListener('click', () => last && queue(() => buildScene(last.f
 $('no-map-data').addEventListener('click', () => {
   if (!last) return;
   controls.get('no-map-data').value = true;
+  save();
   queue(() => buildScene(last.file, last.meta));
 });
 
@@ -577,7 +603,12 @@ $('theme-remove').addEventListener('click', () => {
 
 // --- Map data servers
 
-for (const { box } of servers.boxes) box.addEventListener('change', () => queue(checkServers));
+for (const { box } of servers.boxes) {
+  box.addEventListener('change', () => {
+    save();
+    queue(checkServers);
+  });
+}
 
 // None left that can serve this slab is said at once, before any build
 async function checkServers() {
@@ -607,9 +638,83 @@ async function resetAll() {
   servers.problem.hidden = true;
   for (const [name] of controls) if (['live', 'camera'].includes(route(name))) setLive(name);
   hike.reset();
+  save();
+  $('kept').hidden = true;
   announce('Every option is back to its default.');
   await refresh();
 }
+
+// --- Settings kept between visits
+
+const settings = new Settings();
+
+function unticked() {
+  return servers.boxes.filter(({ box }) => !box.checked).map(({ box }) => box.value);
+}
+
+function save() {
+  const options = {};
+  for (const [name, control] of controls) {
+    const value = control.value;
+    if (value === undefined || NOT_KEPT.includes(name) || (name === 'palette' && value === PALETTE_FILE)) continue;
+    options[name] = value;
+  }
+  settings.save(options, unticked());
+}
+
+// The kept settings back on the controls. A value the controls or the
+// tool's checks no longer take is dropped
+async function restore() {
+  $('remember-set').hidden = !settings.store;
+  const { options, skip } = settings.load();
+  $('remember').checked = settings.remember;
+  let back = [];
+  for (const [name, value] of Object.entries(options)) {
+    const control = controls.get(name);
+    if (!control || NOT_KEPT.includes(name)) continue;
+    control.value = value;
+    if (control.value === value) back.push(name);
+    else control.value = undefined;
+  }
+  if (back.length) {
+    try {
+      await scenes.check('options', valuesOf(back));
+    } catch {
+      const taken = [];
+      for (const name of back) {
+        try {
+          await scenes.check('options', { [name]: valueOf(name) });
+          taken.push(name);
+        } catch (error) {
+          // A worker that failed to start says nothing about the value
+          if (error.reason === 'usage') controls.get(name).value = undefined;
+          else taken.push(name);
+        }
+      }
+      back = taken;
+    }
+  }
+  for (const { box } of servers.boxes) box.checked = !skip.includes(box.value);
+  for (const name of back) if (route(name) === 'live') setLive(name);
+  save();
+  const names = [...controls.keys()].filter((name) => back.includes(name)).map(label);
+  if (unticked().length) names.push('Map data servers');
+  if (names.length) {
+    $('kept-text').textContent = `This browser kept your settings from last time: ${list(names)}.`;
+    $('kept').hidden = false;
+  }
+}
+
+function list(names) {
+  return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+}
+
+$('remember').addEventListener('change', () => {
+  settings.remember = $('remember').checked;
+  save();
+  announce(settings.remember ? 'Your settings are kept in this browser.' : 'Your settings are no longer kept in this browser.');
+});
+$('kept-reset').addEventListener('click', () => queue(resetAll));
 
 // --- The cache
 
@@ -633,6 +738,7 @@ controls.get('theme').input.addEventListener('change', () => {
   if (file) queue(() => chooseTheme(file));
 });
 for (const name of FIRST) if (route(name) === 'live') setLive(name);
+queue(restore);
 
 window.__controls = {
   shown: [...document.querySelectorAll('[data-option]')].map((element) => element.dataset.option),
@@ -646,6 +752,8 @@ window.__controls = {
     return this.settled();
   },
   value: valueOf,
+  // What this browser keeps, as stored
+  kept: () => settings.kept(),
   // The message shown under a control, or under the servers
   problem(name) {
     const shown = name === 'servers' ? servers.problem : controls.get(name).problem;

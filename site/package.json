@@ -16,6 +16,7 @@
     "astro": "7.4.13"
   },
   "devDependencies": {
+    "axe-core": "4.14.1",
     "wrangler": "4.168.0"
   }
 }
