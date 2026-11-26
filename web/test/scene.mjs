@@ -1,9 +1,11 @@
 // Headless browser check of a scene built in the browser from a GPX file
 //
-//   node web/test/scene.mjs [chrome|edge] [--webgl]
+//   node web/test/scene.mjs [chrome|edge] [--webgl] [--site DIR]
 //
 // Needs what check.mjs needs, and the scene worker built into web/scene/pkg
-// (sh web/build-scene.sh). A local server plays the elevation, map and
+// (sh web/build-scene.sh). With --site, the same checks run on the page of a
+// built site (site/dist after sh site/build.sh), served with the headers in
+// its _headers file. A local server plays the elevation, map and
 // weather services from the recordings in fixtures/, and `isotrail bundle`
 // builds each scene from the same server for comparison. The server can also
 // be busy, hold an answer back or stop answering, for the cache, the waits,
@@ -15,7 +17,7 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { extname, join, normalize } from 'node:path';
+import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 
@@ -27,7 +29,9 @@ const FIXTURES = join(ROOT, 'fixtures');
 const GPX = join(FIXTURES, 'gpx', 'snowdon.gpx');
 const args = process.argv.slice(2);
 const WEBGL = args.includes('--webgl');
-const BROWSER = args.find((arg) => !arg.startsWith('--')) ?? 'chrome';
+const siteAt = args.indexOf('--site');
+const SITE = siteAt >= 0 ? resolve(args[siteAt + 1] ?? '') : undefined;
+const BROWSER = args.find((arg, i) => !arg.startsWith('--') && (siteAt < 0 || i !== siteAt + 1)) ?? 'chrome';
 const TIMEOUT_MS = 60000;
 const VIEWPORT = { width: 1000, height: 800, deviceScaleFactor: 1, mobile: false };
 
@@ -36,6 +40,10 @@ for (const [file, build] of [['pkg/isotrail_web_bg.wasm', 'build.sh'], ['scene/p
     console.error(`web/${file} is missing: build it first with sh web/${build}`);
     process.exit(1);
   }
+}
+if (SITE && !existsSync(join(SITE, 'index.html'))) {
+  console.error(`${SITE} holds no built site: build it first with sh site/build.sh`);
+  process.exit(1);
 }
 const built = spawnSync('cargo', ['build', '--quiet', '-p', 'isotrail-cli'], { cwd: ROOT, stdio: 'inherit' });
 if (built.status !== 0) {
@@ -55,10 +63,46 @@ const recorded = (dir, query, body = '') => {
 };
 const TYPES = {
   '.html': 'text/html',
+  '.css': 'text/css',
   '.js': 'text/javascript',
   '.mjs': 'text/javascript',
   '.wasm': 'application/wasm',
 };
+
+// Paths the local server answers as one of the services
+const SERVICE = /^\/(terrain|overpass|weather|busy|empty)\//;
+
+// The site's _headers rules, each a pattern and its headers. connect-src also
+// allows the local servers, as some checks ask one on another port
+const HEADERS = [];
+if (SITE) {
+  const text = await readFile(join(SITE, '_headers'), 'utf8').catch(() => '');
+  for (const line of text.split(/\r?\n/)) {
+    if (/^\S/.test(line)) {
+      HEADERS.push({ pattern: line.trim(), headers: {} });
+    } else if (line.trim() && HEADERS.length) {
+      const colon = line.indexOf(':');
+      const name = line.slice(0, colon).trim().toLowerCase();
+      let value = line.slice(colon + 1).trim();
+      if (name === 'content-security-policy') value = value.replace('connect-src', 'connect-src http://127.0.0.1:*');
+      HEADERS.at(-1).headers[name] = value;
+    }
+  }
+}
+
+// The headers of every rule that matches, joined by commas as Cloudflare does
+function headersFor(path) {
+  const found = {};
+  for (const { pattern, headers } of HEADERS) {
+    const source = pattern
+      .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+      .replace(/:[A-Za-z]\w*/g, '[^/]+')
+      .replace('*', '.*');
+    if (!new RegExp(`^${source}$`).test(path)) continue;
+    for (const [name, value] of Object.entries(headers)) found[name] = found[name] ? `${found[name]}, ${value}` : value;
+  }
+  return found;
+}
 
 const seen = [];
 // `services` false stops every service answering. `overpass` 'busy' answers
@@ -76,7 +120,7 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   const path = decodeURIComponent(url.pathname);
   const query = url.search.slice(1);
-  if (!path.startsWith('/web/')) {
+  if (SERVICE.test(path)) {
     if (!mode.services) {
       req.socket.destroy();
       return;
@@ -104,7 +148,10 @@ const server = createServer(async (req, res) => {
   }
   let file;
   let tile;
-  if (path.startsWith('/web/')) {
+  if (SITE && !SERVICE.test(path)) {
+    file = normalize(join(SITE, path.endsWith('/') ? `${path}index.html` : path));
+    if (!file.startsWith(SITE + sep)) file = undefined;
+  } else if (path.startsWith('/web/')) {
     file = normalize(join(ROOT, path));
     if (!file.startsWith(WEB)) file = undefined;
   } else if ((tile = /^\/terrain\/(\d+)\/(\d+)\/(\d+)\.png$/.exec(path))) {
@@ -122,7 +169,8 @@ const server = createServer(async (req, res) => {
   }
   const bytes = await readFile(file);
   const type = TYPES[extname(file)] ?? 'application/octet-stream';
-  res.writeHead(200, { 'content-type': type, 'content-length': bytes.length }).end(bytes);
+  const headers = SITE && !SERVICE.test(path) ? headersFor(path) : {};
+  res.writeHead(200, { 'content-type': type, ...headers, 'content-length': bytes.length }).end(bytes);
 });
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const ORIGIN = `http://127.0.0.1:${server.address().port}`;
@@ -204,7 +252,7 @@ await cdp.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStar
 await cdp.send('Emulation.setDeviceMetricsOverride', VIEWPORT);
 
 async function page() {
-  await cdp.send('Page.navigate', { url: `${ORIGIN}/web/test/scene.html` });
+  await cdp.send('Page.navigate', { url: SITE ? `${ORIGIN}/` : `${ORIGIN}/web/test/scene.html` });
   await cdp.waitFor("document.readyState === 'complete' && window.__scene?.state === 'idle' && !!window.__scenes");
 }
 
@@ -231,7 +279,7 @@ async function build(file, options, { clear = false, during } = {}) {
     for (let i = 0; scene && i < scene.length; i += 0x8000) text += String.fromCharCode(...scene.subarray(i, i + 0x8000));
     return { ...rest, scene: btoa(text) };
   })()`);
-  const services = seen.filter(({ url }) => !url.startsWith('/web/'));
+  const services = seen.filter(({ url }) => SERVICE.test(new URL(url, ORIGIN).pathname));
   return { ...outcome, scene: Buffer.from(outcome.scene ?? '', 'base64'), wall, services };
 }
 
@@ -396,6 +444,6 @@ console.log('\nscene, bytes, gzipped, passes, worker ms, ms from the file, servi
 for (const r of results) {
   console.log(`${r.name}, ${r.bytes}, ${r.gzipped}, ${r.passes}, ${r.worker_ms}, ${r.wall_ms}, ${r.requests}, ${r.warnings.join(' ') || 'nothing'}`);
 }
-console.log(`\n${passed} passed, ${failures.length} failed (${BROWSER}${WEBGL ? ', WebGL2' : ''})`);
+console.log(`\n${passed} passed, ${failures.length} failed (${BROWSER}${WEBGL ? ', WebGL2' : ''}${SITE ? ', on the site' : ''})`);
 for (const failure of failures) console.log(`  ${failure}`);
 process.exit(failures.length ? 1 : 0);

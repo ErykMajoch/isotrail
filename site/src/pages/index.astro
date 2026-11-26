@@ -1,0 +1,32 @@
+---
+import runtime from '../runtime.json';
+import '../styles/site.css';
+---
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>isotrail</title>
+<script is:inline type="module" src={`${runtime.path}isotrail-embed.js`}></script>
+</head>
+<body data-runtime={runtime.path}>
+<main>
+<h1>isotrail</h1>
+<p>Turn a GPX file into a pixel-art 3D diorama, in your browser. The file never leaves it.</p>
+<p>Choose a GPX file. The scene is built on this page. Only the elevation, map and weather services are asked for data. Their answers are kept in the browser, so a second build downloads nothing.</p>
+<label>Options, as <code>isotrail render</code> flag names
+  <textarea id="options" rows="3" spellcheck="false">{'{}'}</textarea>
+</label>
+<label>GPX file <input type="file" id="file" accept=".gpx"></label>
+<p><button id="cancel" type="button" disabled>Cancel</button></p>
+<p id="status" role="status">No file yet.</p>
+<p><a id="download" hidden>Download the scene file</a></p>
+<p><span id="cache">Cache: counting…</span> <button id="clear" type="button">Clear the cache</button></p>
+<isotrail-hike id="hike" aspect="wide"></isotrail-hike>
+</main>
+<script>
+  import '../scripts/scene.js';
+</script>
+</body>
+</html>

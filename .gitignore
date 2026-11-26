@@ -5,3 +5,8 @@
 /web/scene/pkg/
 /web/demo/*.itb
 /web/demo/*.png
+/site/node_modules/
+/site/dist/
+/site/.astro/
+/site/public/runtime/
+/site/src/runtime.json

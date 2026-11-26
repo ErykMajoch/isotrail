@@ -69,7 +69,8 @@ Please don't add real recordings to the repository. Tests use synthetic routes o
    node web/test/scene.mjs chrome
    ```
 
-5. Open the pull request.
+5. If you changed anything in `site/`, build the web app and run the same check on its page, as [The web app](#the-web-app) explains.
+6. Open the pull request.
 
 ### Notes on the checks
 
@@ -86,6 +87,33 @@ CI fails if `isotrail-embed.js`, `pkg/isotrail_web.js` and `pkg/isotrail_web_bg.
 isotrail asks the GPU for WebGL2's limits on every platform, so the native tests also catch anything the browser fallback couldn't draw.
 
 The toolchain is pinned to one Rust release, so CI and the release builds don't change compiler on their own. To move to a newer one, change `channel` in `rust-toolchain.toml` and run all of the steps above. A new release often brings new lints.
+
+## The web app
+
+The web app in `site/` builds and draws a hike in the browser. It is an [Astro](https://astro.build/) project with plain scripts, and needs Node 24 and [wasm-pack](https://rustwasm.github.io/wasm-pack/). Install its packages once:
+
+```bash
+cd site
+npm ci
+```
+
+Then build it from the repository's root. This builds the web runtime and the scene worker, then the pages, into `site/dist`:
+
+```bash
+sh site/build.sh
+```
+
+The build copies the runtime into `site/public/runtime/`, in a folder named by a hash of its files. Browsers can then keep those files for a year. `site/public/_headers` sets that cache, the type of the `.wasm` files and the Content-Security-Policy. The policy only lets the page reach the elevation, map and weather services.
+
+While working on the pages, run `npm run dev` in `site/`. It serves the pages and reloads them as you edit. `npm run preview` serves the built site instead, and `npm run size` lists its files with their sizes.
+
+The scene check runs on the built site's page too. Its local server sends the headers from `_headers`, so a policy that blocks the page fails the check:
+
+```bash
+node web/test/scene.mjs chrome --site site/dist
+```
+
+CI builds the site, reports its size and runs this check. The site is deployed by hand only. The Site workflow on GitHub builds it and uploads it to Cloudflare Pages, as a preview or as the public site.
 
 ## Rendering in tests
 

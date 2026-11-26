@@ -140,3 +140,40 @@ jobs:
 
       - name: Browser check of a scene built from a GPX file
         run: node web/test/scene.mjs chrome --webgl
+
+  site:
+    name: site
+    runs-on: ubuntu-latest
+    env:
+      ASTRO_TELEMETRY_DISABLED: 1
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: wasm-pack@0.15.0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install the site's packages
+        working-directory: site
+        run: npm ci
+
+      - name: Build
+        run: sh site/build.sh
+
+      # Reported, not limited: the page loads each part only when it needs it
+      - name: Report the site's size
+        run: node site/scripts/size.mjs >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Browser check of a scene built on the site's page
+        run: node web/test/scene.mjs chrome --webgl --site site/dist

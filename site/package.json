@@ -1,0 +1,21 @@
+{
+  "name": "isotrail-site",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "node scripts/runtime.mjs && astro dev",
+    "build": "node scripts/runtime.mjs && astro build",
+    "preview": "astro preview",
+    "size": "node scripts/size.mjs"
+  },
+  "dependencies": {
+    "astro": "7.4.13"
+  },
+  "devDependencies": {
+    "wrangler": "4.168.0"
+  }
+}
