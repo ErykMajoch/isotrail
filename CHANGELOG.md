@@ -8,6 +8,10 @@ All notable changes to `isotrail` are documented here.
 
 - Scene files are built with the same arithmetic on every system, so a GPX file gives the same scene on Windows, Linux and macOS. A new scene file can differ from one made by 1.5.1 in where its trees stand.
 
+### Fixed
+
+- The web embed's credit line sits a little higher, so its links stay clear of the progress line when the credit wraps.
+
 ## [1.5.1] - 2026-11-15
 
 A diorama that turns without jiggling. No new options. The scene file format is unchanged, so scene files made by 1.5.0 still work.

@@ -537,7 +537,9 @@ const CSS = `
   .credit {
     flex: 1;
     min-width: 0;
-    margin: 0 0 calc((var(--hit) - 28px) / 2);
+    /* At least 12px above the middle of the scrubber's line, so a link on a
+       wrapped credit keeps a 24px target clear around it */
+    margin: 0 0 max(2px, calc((var(--hit) - 28px) / 2));
     font: 11px/1.3 system-ui, sans-serif;
     text-align: center;
     color: var(--isotrail-accent);
